@@ -12,6 +12,8 @@ use crate::state::AppState;
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
+    /// Required when at least one user already exists.
+    pub invite_code: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -64,6 +66,18 @@ pub async fn register(
 
     let is_owner = user_count == 0;
 
+    // If users already exist, require a valid invite code
+    if !is_owner {
+        let invite_code = request.invite_code.as_deref().unwrap_or("");
+        if invite_code.is_empty() {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Invite code required", "code": "invite_required"})),
+            ));
+        }
+        // We'll consume the invite after user creation (need user_id)
+    }
+
     // Check username not taken
     let existing: Option<sqlx::sqlite::SqliteRow> =
         sqlx::query("SELECT id FROM users WHERE username = ?")
@@ -92,6 +106,42 @@ pub async fn register(
         .execute(pool)
         .await
         .map_err(|_| server_error("db_error"))?;
+
+    // Consume invite code (if not first user)
+    if !is_owner {
+        let invite_code = request.invite_code.as_deref().unwrap_or("");
+        let consumed = sqlx::query(
+            "UPDATE invites SET used_by = ?, used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
+             WHERE code = ? AND used_by IS NULL",
+        )
+        .bind(&user_id)
+        .bind(invite_code)
+        .execute(pool)
+        .await
+        .map_err(|_| server_error("db_error"))?;
+
+        if consumed.rows_affected() == 0 {
+            // Rollback: delete the user we just created
+            let _ = sqlx::query("DELETE FROM users WHERE id = ?")
+                .bind(&user_id)
+                .execute(pool)
+                .await;
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Invalid or already used invite code", "code": "invalid_invite"})),
+            ));
+        }
+
+        // Grant default permissions (read + download) to non-owner users
+        let _ = sqlx::query("INSERT INTO permissions (user_id, permission) VALUES (?, 'read')")
+            .bind(&user_id)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("INSERT INTO permissions (user_id, permission) VALUES (?, 'download')")
+            .bind(&user_id)
+            .execute(pool)
+            .await;
+    }
 
     // Create session
     let session_id = create_session(pool, &user_id).await

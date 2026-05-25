@@ -1,31 +1,28 @@
 # Rust
-/server/target/
+server/target/
 **/*.rs.bk
-Cargo.lock
 
-# Flutter / Dart
-/app/.dart_tool/
-/app/.flutter-plugins
-/app/.flutter-plugins-dependencies
-/app/build/
-/app/.idea/
-/app/android/
-/app/ios/
-/app/linux/
-/app/macos/
-/app/windows/
-/app/web/
-/app/pubspec.lock
-
-# Ironshelf runtime
+# Ironshelf runtime data
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-config.toml
-.env
+!server/crates/ironshelf-core/src/db/migrations/*.sql
 
-# OS / editor
-.DS_Store
-*.swp
+# Flutter
+app/.dart_tool/
+app/.packages
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/pubspec.lock
+
+# IDE
+.idea/
 .vscode/
+*.iml
+.DS_Store
+
+# Environment
+.env
+.env.*

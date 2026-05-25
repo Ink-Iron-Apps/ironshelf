@@ -1,0 +1,34 @@
+[Unit]
+Description=Ironshelf ebook server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ironshelf
+Group=ironshelf
+WorkingDirectory=/opt/ironshelf
+
+ExecStart=/opt/ironshelf/ironshelf-server
+
+Environment=IRONSHELF_CONFIG=/opt/ironshelf/config.toml
+Environment=RUST_LOG=ironshelf_server=info
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/opt/ironshelf
+
+# Calibre library directories (add your paths here)
+# ReadOnlyPaths=/path/to/calibre/library
+
+[Install]
+WantedBy=multi-user.target
