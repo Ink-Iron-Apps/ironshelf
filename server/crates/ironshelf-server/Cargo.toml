@@ -23,3 +23,5 @@ toml = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 argon2 = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }
