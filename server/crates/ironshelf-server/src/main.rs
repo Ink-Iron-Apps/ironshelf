@@ -5,6 +5,7 @@ mod config;
 mod error;
 mod pagination;
 mod routes;
+mod scheduler;
 mod state;
 mod web;
 
@@ -41,7 +42,11 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
+        smtp_config: config.smtp.clone(),
     };
+
+    // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
+    scheduler::start(app_state.clone());
 
     // Public routes (no auth required)
     let public_routes = Router::new()
@@ -109,6 +114,15 @@ async fn main() -> anyhow::Result<()> {
         // Metadata enrichment
         .route("/api/v1/books/{id}/metadata/search", get(routes::metadata::search_metadata))
         .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata))
+        // Send-to-Kindle
+        .route(
+            "/api/v1/users/me/kindle-email",
+            get(routes::kindle::get_kindle_email).put(routes::kindle::set_kindle_email),
+        )
+        .route(
+            "/api/v1/books/{id}/send-to-kindle",
+            axum::routing::post(routes::kindle::send_to_kindle),
+        )
         // Progress + bookmarks
         .route(
             "/api/v1/books/{id}/progress",
@@ -141,6 +155,36 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/collections/{id}/books/{book_id}",
             axum::routing::delete(routes::collections::remove_book_from_collection),
         )
+        // Import / export (data portability)
+        .route("/api/v1/export/reading-progress", get(routes::import_export::export_reading_progress))
+        .route("/api/v1/export/bookmarks", get(routes::import_export::export_bookmarks))
+        .route("/api/v1/export/collections", get(routes::import_export::export_collections))
+        .route("/api/v1/export/all", get(routes::import_export::export_all))
+        .route("/api/v1/import", axum::routing::post(routes::import_export::import_user_data))
+        // Library config backup (owner only)
+        .route("/api/v1/export/library-config", get(routes::import_export::export_library_config))
+        .route("/api/v1/import/library-config", axum::routing::post(routes::import_export::import_library_config))
+        // Notifications
+        .route(
+            "/api/v1/notifications",
+            get(routes::notifications::list_notifications),
+        )
+        .route(
+            "/api/v1/notifications/count",
+            get(routes::notifications::unread_count),
+        )
+        .route(
+            "/api/v1/notifications/{id}/read",
+            axum::routing::patch(routes::notifications::mark_read),
+        )
+        .route(
+            "/api/v1/notifications/read-all",
+            axum::routing::post(routes::notifications::mark_all_read),
+        )
+        .route(
+            "/api/v1/notifications/{id}",
+            axum::routing::delete(routes::notifications::delete_notification),
+        )
         // Stats + activity
         .route("/api/v1/stats", get(routes::stats::server_stats))
         .route("/api/v1/activity", get(routes::stats::user_activity))
@@ -164,6 +208,50 @@ async fn main() -> anyhow::Result<()> {
             auth::auth_middleware,
         ));
 
+    // Kobo Sync API routes (auth is via path token, no session middleware)
+    let kobo_routes = Router::new()
+        .route(
+            "/kobo/{auth_token}/v1/initialization",
+            get(routes::kobo::initialization),
+        )
+        .route(
+            "/kobo/{auth_token}/v1/library/sync",
+            get(routes::kobo::library_sync),
+        )
+        .route(
+            "/kobo/{auth_token}/v1/library/tags",
+            get(routes::kobo::library_tags),
+        )
+        .route(
+            "/kobo/{auth_token}/v1/books/{book_id}/file/{format}",
+            get(routes::kobo::download_book),
+        )
+        .route(
+            "/kobo/{auth_token}/v1/books/{book_id}/image/{width}/{height}/{quality}/image.jpg",
+            get(routes::kobo::cover_image),
+        )
+        .route(
+            "/kobo/{auth_token}/v1/library/{book_id}/state",
+            axum::routing::put(routes::kobo::update_reading_state),
+        );
+
+    // WebDAV routes for KOReader sync (auth is via path token, no session middleware).
+    // Uses `any()` because WebDAV methods (PROPFIND, MKCOL) are not in axum's MethodFilter.
+    // Method dispatch happens inside the handler.
+    let webdav_routes = Router::new()
+        .route(
+            "/webdav/{auth_token}",
+            axum::routing::any(routes::webdav::webdav_dispatch_root),
+        )
+        .route(
+            "/webdav/{auth_token}/",
+            axum::routing::any(routes::webdav::webdav_dispatch_root),
+        )
+        .route(
+            "/webdav/{auth_token}/{*path}",
+            axum::routing::any(routes::webdav::webdav_dispatch_path),
+        );
+
     // Web UI (embedded static files)
     let web_routes = Router::new()
         .route("/", get(web::serve_index))
@@ -173,6 +261,8 @@ async fn main() -> anyhow::Result<()> {
         .merge(public_routes)
         .merge(protected_routes)
         .merge(opds_routes)
+        .merge(kobo_routes)
+        .merge(webdav_routes)
         .merge(web_routes)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())

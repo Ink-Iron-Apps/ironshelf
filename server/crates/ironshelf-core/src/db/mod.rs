@@ -111,6 +111,16 @@ impl IronshelfDb {
         let migration_005 = include_str!("migrations/005_activity_log.sql");
         sqlx::raw_sql(migration_005).execute(&self.pool).await?;
 
+        let migration_006 = include_str!("migrations/006_notifications.sql");
+        sqlx::raw_sql(migration_006).execute(&self.pool).await?;
+
+        let migration_007 = include_str!("migrations/007_kindle_email.sql");
+        // ALTER TABLE may fail if column already exists — that is fine for idempotent migration.
+        let _ = sqlx::raw_sql(migration_007).execute(&self.pool).await;
+
+        let migration_008 = include_str!("migrations/008_webdav_files.sql");
+        sqlx::raw_sql(migration_008).execute(&self.pool).await?;
+
         Ok(())
     }
 
@@ -776,6 +786,340 @@ impl IronshelfDb {
             .await?;
         Ok(())
     }
+
+    // --- Notifications ---
+
+    /// Create a notification for a user. Returns the generated ID.
+    pub async fn create_notification(
+        &self,
+        user_id: &str,
+        title: &str,
+        message: &str,
+        notification_type: &str,
+        link: Option<&str>,
+    ) -> Result<String, DbError> {
+        let notification_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO notifications (id, user_id, title, message, notification_type, link) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&notification_id)
+        .bind(user_id)
+        .bind(title)
+        .bind(message)
+        .bind(notification_type)
+        .bind(link)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(notification_id)
+    }
+
+    /// Get notifications for a user, optionally filtered to unread only.
+    pub async fn get_notifications(
+        &self,
+        user_id: &str,
+        unread_only: bool,
+        limit: i64,
+    ) -> Result<Vec<StoredNotification>, DbError> {
+        let query_string = if unread_only {
+            "SELECT id, user_id, title, message, notification_type, is_read, link, created_at \
+             FROM notifications \
+             WHERE user_id = ? AND is_read = 0 \
+             ORDER BY created_at DESC \
+             LIMIT ?"
+        } else {
+            "SELECT id, user_id, title, message, notification_type, is_read, link, created_at \
+             FROM notifications \
+             WHERE user_id = ? \
+             ORDER BY created_at DESC \
+             LIMIT ?"
+        };
+
+        let rows = sqlx::query(query_string)
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredNotification {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                title: row.get("title"),
+                message: row.get("message"),
+                notification_type: row.get("notification_type"),
+                is_read: row.get::<i32, _>("is_read") != 0,
+                link: row.get("link"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Mark a single notification as read. Returns error if not found or not owned by user.
+    pub async fn mark_notification_read(
+        &self,
+        notification_id: &str,
+        user_id: &str,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query(
+            "UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+        )
+        .bind(notification_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Mark all notifications as read for a user.
+    pub async fn mark_all_notifications_read(&self, user_id: &str) -> Result<(), DbError> {
+        sqlx::query("UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a notification. Returns error if not found or not owned by user.
+    pub async fn delete_notification(
+        &self,
+        notification_id: &str,
+        user_id: &str,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query(
+            "DELETE FROM notifications WHERE id = ? AND user_id = ?",
+        )
+        .bind(notification_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Get the count of unread notifications for a user.
+    pub async fn get_unread_count(&self, user_id: &str) -> Result<i64, DbError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    /// Get all user IDs (for broadcasting notifications to all users).
+    pub async fn get_all_user_ids(&self) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query("SELECT id FROM users")
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows.iter().map(|row| row.get("id")).collect())
+    }
+
+    /// Delete expired sessions (where expires_at < now).
+    pub async fn delete_expired_sessions(&self) -> Result<u64, DbError> {
+        let result = sqlx::query(
+            "DELETE FROM sessions WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    // --- Kindle email ---
+
+    /// Get the Kindle email address for a user.
+    pub async fn get_kindle_email(&self, user_id: &str) -> Result<Option<String>, DbError> {
+        let row = sqlx::query("SELECT kindle_email FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.and_then(|row| row.get("kindle_email")))
+    }
+
+    /// Set or clear the Kindle email address for a user.
+    pub async fn set_kindle_email(
+        &self,
+        user_id: &str,
+        kindle_email: Option<&str>,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query("UPDATE users SET kindle_email = ? WHERE id = ?")
+            .bind(kindle_email)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    // --- WebDAV virtual file storage ---
+
+    /// Get a WebDAV file by user and path.
+    pub async fn get_webdav_file(
+        &self,
+        user_id: &str,
+        path: &str,
+    ) -> Result<Option<StoredWebdavFile>, DbError> {
+        let row = sqlx::query(
+            "SELECT user_id, path, content, content_type, size, modified_at \
+             FROM webdav_files WHERE user_id = ? AND path = ?",
+        )
+        .bind(user_id)
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredWebdavFile {
+            user_id: row.get("user_id"),
+            path: row.get("path"),
+            content: row.get("content"),
+            content_type: row.get("content_type"),
+            size: row.get("size"),
+            modified_at: row.get("modified_at"),
+        }))
+    }
+
+    /// Upsert a WebDAV file (create or replace).
+    pub async fn upsert_webdav_file(
+        &self,
+        user_id: &str,
+        path: &str,
+        content: &[u8],
+        content_type: &str,
+    ) -> Result<(), DbError> {
+        let size = content.len() as i64;
+        sqlx::query(
+            "INSERT INTO webdav_files (user_id, path, content, content_type, size, modified_at) \
+             VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) \
+             ON CONFLICT(user_id, path) DO UPDATE SET \
+               content = excluded.content, \
+               content_type = excluded.content_type, \
+               size = excluded.size, \
+               modified_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        )
+        .bind(user_id)
+        .bind(path)
+        .bind(content)
+        .bind(content_type)
+        .bind(size)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// List WebDAV files under a given directory prefix for a user.
+    /// Returns files whose path starts with the prefix (non-recursive: direct children only).
+    pub async fn list_webdav_files(
+        &self,
+        user_id: &str,
+        directory_prefix: &str,
+    ) -> Result<Vec<StoredWebdavFile>, DbError> {
+        let prefix_pattern = if directory_prefix.is_empty() || directory_prefix == "/" {
+            "%".to_string()
+        } else {
+            let normalized = directory_prefix.trim_end_matches('/');
+            format!("{normalized}/%")
+        };
+
+        let rows = sqlx::query(
+            "SELECT user_id, path, NULL as content, content_type, size, modified_at \
+             FROM webdav_files WHERE user_id = ? AND path LIKE ? \
+             ORDER BY path",
+        )
+        .bind(user_id)
+        .bind(&prefix_pattern)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredWebdavFile {
+                user_id: row.get("user_id"),
+                path: row.get("path"),
+                content: None, // Don't load content for listings
+                content_type: row.get("content_type"),
+                size: row.get("size"),
+                modified_at: row.get("modified_at"),
+            })
+            .collect())
+    }
+
+    /// Delete a WebDAV file.
+    pub async fn delete_webdav_file(
+        &self,
+        user_id: &str,
+        path: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM webdav_files WHERE user_id = ? AND path = ?")
+            .bind(user_id)
+            .bind(path)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Create a WebDAV directory marker (zero-byte entry with directory content type).
+    pub async fn create_webdav_directory(
+        &self,
+        user_id: &str,
+        path: &str,
+    ) -> Result<(), DbError> {
+        let normalized = path.trim_end_matches('/');
+        let directory_path = format!("{normalized}/");
+        sqlx::query(
+            "INSERT INTO webdav_files (user_id, path, content, content_type, size, modified_at) \
+             VALUES (?, ?, NULL, 'httpd/unix-directory', 0, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) \
+             ON CONFLICT(user_id, path) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(&directory_path)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+}
+
+/// A notification as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredNotification {
+    pub id: String,
+    pub user_id: String,
+    pub title: String,
+    pub message: String,
+    pub notification_type: String,
+    pub is_read: bool,
+    pub link: Option<String>,
+    pub created_at: String,
+}
+
+/// A WebDAV virtual file as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredWebdavFile {
+    pub user_id: String,
+    pub path: String,
+    pub content: Option<Vec<u8>>,
+    pub content_type: String,
+    pub size: i64,
+    pub modified_at: String,
 }
 
 /// A book override as stored in the database.

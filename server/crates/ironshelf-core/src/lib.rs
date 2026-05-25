@@ -2,6 +2,7 @@
 
 pub mod calibre;
 pub mod db;
+pub mod email;
 pub mod model;
 
 pub mod metadata;
