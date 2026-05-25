@@ -30,6 +30,8 @@ cd server && cargo clippy --workspace       # lint
 IRONSHELF_PORT=10810 cargo run -p ironshelf-server  # run locally (default port 10810)
 # Env: RUST_LOG=ironshelf_server=debug,tower_http=debug for verbose tracing
 
+# Web UI — files in server/web/ auto-embedded at compile time via rust-embed. No separate build step.
+
 # Flutter app
 cd app && flutter test                      # unit tests
 cd app && flutter analyze                   # lint
@@ -60,6 +62,14 @@ Flutter app ──HTTP/JSON+OPDS──> Axum server ──read──> Calibre me
 **Browse hierarchy:** Library → Authors → (Series | Standalone) → Books. Series_index orders books within series.
 
 **Auth:** session cookies (web) + API key Bearer (app). CF Access handled by custom headers passthrough (app stores per-server CF-Access-Client-Id/Secret, sent every request, consumed at edge).
+
+## Web UI
+
+Embedded SPA in `server/web/` — vanilla JS + CSS, no framework, no build step. Compiled into binary via `rust-embed` → single binary deploys w/ UI included. Hash-based routing (`#/library`, `#/author/123`, etc).
+
+**Theme:** Ink & Iron brand — dark bg `#0F1115`, teal accent `#095F73`/`#3BB3C9`, EB Garamond display, Inter body.
+
+**Quality bar:** production-quality target. No placeholder lorem ipsum, skeleton loaders during fetch, proper error states (empty, offline, 4xx/5xx), responsive (mobile-first, works desktop).
 
 ## Key decisions (locked)
 

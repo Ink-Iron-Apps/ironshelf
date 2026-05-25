@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::error::AppError;
 use crate::state::{AppState, LibrarySource, LoadedLibrary};
 
 #[derive(Serialize)]
@@ -72,12 +73,12 @@ pub async fn list_libraries(State(state): State<AppState>) -> Json<Vec<LibrarySu
 pub async fn get_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
-) -> Result<Json<LibraryDetail>, StatusCode> {
+) -> Result<Json<LibraryDetail>, AppError> {
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
         .find(|l| l.id == library_id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or(AppError::not_found("library"))?;
 
     let custom_columns = library.source.custom_columns().await;
 
@@ -96,19 +97,29 @@ pub async fn get_library(
 pub async fn create_library(
     State(state): State<AppState>,
     Json(request): Json<CreateLibraryRequest>,
-) -> Result<(StatusCode, Json<CreateLibraryResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<CreateLibraryResponse>), AppError> {
     let options_str = request.options.as_ref().map(|v| v.to_string());
 
-    // Validate path exists and has metadata.db for Calibre sources
+    // Validate path exists on disk
+    let library_path = std::path::Path::new(&request.path);
+    if !library_path.exists() {
+        return Err(AppError::UnprocessableEntity(
+            "specified path does not exist on disk".to_string(),
+        ));
+    }
+
+    if !library_path.is_dir() {
+        return Err(AppError::UnprocessableEntity(
+            "specified path is not a directory".to_string(),
+        ));
+    }
+
+    // Validate metadata.db presence for Calibre sources
     if matches!(request.source_kind, SourceKind::Calibre) {
-        let metadata_path = std::path::Path::new(&request.path).join("metadata.db");
+        let metadata_path = library_path.join("metadata.db");
         if !metadata_path.exists() {
-            return Err((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::json!({
-                    "error": "No metadata.db found at the specified path",
-                    "code": "invalid_path"
-                })),
+            return Err(AppError::UnprocessableEntity(
+                "no metadata.db found at the specified path".to_string(),
             ));
         }
     }
@@ -124,12 +135,7 @@ pub async fn create_library(
             options_str.as_deref(),
         )
         .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to save library", "code": "db_error"})),
-            )
-        })?;
+        .map_err(|error| AppError::Internal(format!("failed to save library: {error}")))?;
 
     // Open the source and add to live state
     let library_type_str = serde_json::to_string(&request.library_type)
@@ -142,18 +148,14 @@ pub async fn create_library(
         .to_string();
 
     let source = match request.source_kind {
-        SourceKind::Calibre => {
-            CalibreSource::open(&request.path)
-                .await
-                .map(LibrarySource::Calibre)
-                .map_err(|e| e.to_string())
-        }
-        SourceKind::Folder => {
-            FolderSource::open(&request.path)
-                .await
-                .map(|s| LibrarySource::Folder(Arc::new(RwLock::new(s))))
-                .map_err(|e| e.to_string())
-        }
+        SourceKind::Calibre => CalibreSource::open(&request.path)
+            .await
+            .map(LibrarySource::Calibre)
+            .map_err(|e| e.to_string()),
+        SourceKind::Folder => FolderSource::open(&request.path)
+            .await
+            .map(|s| LibrarySource::Folder(Arc::new(RwLock::new(s))))
+            .map_err(|e| e.to_string()),
     };
 
     match source {
@@ -187,7 +189,7 @@ pub async fn update_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
     Json(request): Json<UpdateLibraryRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, AppError> {
     let options_str = request.options.as_ref().map(|v| v.to_string());
 
     state
@@ -199,7 +201,7 @@ pub async fn update_library(
             options_str.as_deref(),
         )
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|error| AppError::Internal(format!("failed to update library: {error}")))?;
 
     // Update live state
     if let Some(name) = &request.name {
@@ -216,12 +218,12 @@ pub async fn update_library(
 pub async fn delete_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, AppError> {
     state
         .ironshelf_db
         .delete_library(&library_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|error| AppError::Internal(format!("failed to delete library: {error}")))?;
 
     // Remove from live state
     let mut libraries = state.libraries.write().await;
@@ -234,17 +236,20 @@ pub async fn delete_library(
 pub async fn scan_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, AppError> {
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
         .find(|l| l.id == library_id)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or(AppError::not_found("library"))?;
 
     // Folder source: rescan directory tree. Calibre: no-op (metadata.db is truth).
     if let LibrarySource::Folder(ref folder) = library.source {
         let mut source = folder.write().await;
-        source.scan().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        source
+            .scan()
+            .await
+            .map_err(|error| AppError::Internal(format!("scan failed: {error}")))?;
     }
 
     Ok(StatusCode::ACCEPTED)

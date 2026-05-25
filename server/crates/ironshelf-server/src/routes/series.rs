@@ -1,8 +1,8 @@
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
 
+use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -16,7 +16,7 @@ pub struct SeriesDetail {
 pub async fn get_series(
     State(state): State<AppState>,
     Path(series_id): Path<i64>,
-) -> Result<Json<SeriesDetail>, StatusCode> {
+) -> Result<Json<SeriesDetail>, AppError> {
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
@@ -31,5 +31,5 @@ pub async fn get_series(
         }
     }
 
-    Err(StatusCode::NOT_FOUND)
+    Err(AppError::not_found("series"))
 }
