@@ -1,0 +1,27 @@
+name: ironshelf
+description: Ironshelf — self-hosted ebook reader (Ink & Iron Apps).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+# M0 scaffold: deps are a starting plan; finalize in M4 (see docs/ROADMAP.md).
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.7.0                 # HTTP — supports custom headers (CF Access service tokens)
+  flutter_riverpod: ^2.6.0   # state
+  go_router: ^14.0.0         # nav (Author -> Series -> Book)
+  shared_preferences: ^2.3.0 # server config + prefs
+  cached_network_image: ^3.4.0
+  package_info_plus: ^8.0.0  # version footer / update check
+  # epub reader lib: evaluate in M4 (epub_view / vocsy_epub_viewer / folioreader)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
