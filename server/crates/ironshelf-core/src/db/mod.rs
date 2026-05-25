@@ -16,6 +16,16 @@ pub enum DbError {
     NotFound,
 }
 
+/// A user as stored in the database with their permissions.
+#[derive(Debug, Clone)]
+pub struct StoredUser {
+    pub id: String,
+    pub username: String,
+    pub is_owner: bool,
+    pub created_at: String,
+    pub permissions: Vec<String>,
+}
+
 /// A library as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredLibrary {
@@ -53,8 +63,12 @@ impl IronshelfDb {
 
     /// Run migrations to bring the schema up to date.
     pub async fn migrate(&self) -> Result<(), DbError> {
-        let migration_sql = include_str!("migrations/001_initial.sql");
-        sqlx::raw_sql(migration_sql).execute(&self.pool).await?;
+        let migration_001 = include_str!("migrations/001_initial.sql");
+        sqlx::raw_sql(migration_001).execute(&self.pool).await?;
+
+        let migration_002 = include_str!("migrations/002_invites.sql");
+        sqlx::raw_sql(migration_002).execute(&self.pool).await?;
+
         Ok(())
     }
 
@@ -181,5 +195,113 @@ impl IronshelfDb {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // --- User management ---
+
+    /// List all users with their permissions.
+    pub async fn list_users(&self) -> Result<Vec<StoredUser>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, username, is_owner, created_at FROM users ORDER BY created_at",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut users = Vec::new();
+        for row in &rows {
+            let user_id: String = row.get("id");
+            let permission_rows = sqlx::query("SELECT permission FROM permissions WHERE user_id = ?")
+                .bind(&user_id)
+                .fetch_all(&self.pool)
+                .await?;
+
+            let permissions: Vec<String> = permission_rows
+                .iter()
+                .map(|permission_row| permission_row.get("permission"))
+                .collect();
+
+            users.push(StoredUser {
+                id: user_id,
+                username: row.get("username"),
+                is_owner: row.get::<i32, _>("is_owner") != 0,
+                created_at: row.get("created_at"),
+                permissions,
+            });
+        }
+
+        Ok(users)
+    }
+
+    /// Delete a user by ID. CASCADE handles related rows.
+    pub async fn delete_user(&self, user_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Replace all permissions for a user.
+    pub async fn set_permissions(
+        &self,
+        user_id: &str,
+        permissions: &[String],
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM permissions WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        for permission in permissions {
+            sqlx::query("INSERT INTO permissions (user_id, permission) VALUES (?, ?)")
+                .bind(user_id)
+                .bind(permission)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Get permissions for a user.
+    pub async fn get_permissions(&self, user_id: &str) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query("SELECT permission FROM permissions WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows.iter().map(|row| row.get("permission")).collect())
+    }
+
+    /// Create an invite code. Returns the generated code.
+    pub async fn create_invite(&self, created_by: &str) -> Result<String, DbError> {
+        // Use two UUIDs concatenated and trimmed for a 32-char hex invite code
+        let code = uuid::Uuid::new_v4().to_string().replace('-', "");
+
+        sqlx::query("INSERT INTO invites (code, created_by) VALUES (?, ?)")
+            .bind(&code)
+            .bind(created_by)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(code)
+    }
+
+    /// Consume an invite code. Returns true if the code was valid and unused.
+    pub async fn consume_invite(&self, code: &str, used_by: &str) -> Result<bool, DbError> {
+        let result = sqlx::query(
+            "UPDATE invites SET used_by = ?, used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
+             WHERE code = ? AND used_by IS NULL",
+        )
+        .bind(used_by)
+        .bind(code)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 }

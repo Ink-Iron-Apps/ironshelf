@@ -46,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/health", get(health))
+        .route("/api/v1/server/info", get(routes::server_info::server_info))
         .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login));
 
@@ -61,6 +62,20 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/auth/api-keys/{id}",
             axum::routing::delete(routes::auth::delete_api_key),
+        )
+        // User management (owner / manage_users)
+        .route("/api/v1/users", get(routes::users::list_users))
+        .route(
+            "/api/v1/users/invite",
+            axum::routing::post(routes::users::create_invite),
+        )
+        .route(
+            "/api/v1/users/{id}",
+            axum::routing::delete(routes::users::delete_user),
+        )
+        .route(
+            "/api/v1/users/{id}/permissions",
+            axum::routing::patch(routes::users::set_permissions),
         )
         // Libraries (CRUD via GUI)
         .route(
@@ -82,6 +97,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/authors/{id}/standalone", get(routes::authors::author_standalone))
         // Series
         .route("/api/v1/series/{id}", get(routes::series::get_series))
+        // Search
+        .route("/api/v1/search", get(routes::search::global_search))
+        // Continue reading
+        .route("/api/v1/books/continue", get(routes::continue_reading::continue_reading))
         // Books
         .route("/api/v1/books/{id}", get(routes::books::get_book))
         .route("/api/v1/books/{id}/cover", get(routes::files::get_cover))

@@ -13,6 +13,7 @@ use axum::{
 };
 use sqlx::Row;
 
+use crate::error::AppError;
 use crate::state::AppState;
 
 /// Authenticated user context, extracted by middleware.
@@ -145,4 +146,44 @@ fn extract_session_cookie(cookie_str: &str) -> Option<String> {
         .find(|s| s.starts_with("ironshelf_session="))
         .and_then(|s| s.strip_prefix("ironshelf_session="))
         .map(|s| s.to_string())
+}
+
+// --- Permission checking helpers ---
+
+/// Require that the authenticated user is the instance owner.
+pub fn require_owner(user: &AuthUser) -> Result<(), AppError> {
+    if !user.is_owner {
+        return Err(AppError::Forbidden("Owner access required".to_string()));
+    }
+    Ok(())
+}
+
+/// Require that the authenticated user has a specific permission (or is owner).
+pub async fn require_permission(
+    user: &AuthUser,
+    permission: &str,
+    pool: &sqlx::SqlitePool,
+) -> Result<(), AppError> {
+    // Owner bypasses all permission checks
+    if user.is_owner {
+        return Ok(());
+    }
+
+    let has_permission = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM permissions WHERE user_id = ? AND permission = ?",
+    )
+    .bind(&user.user_id)
+    .bind(permission)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    if has_permission == 0 {
+        return Err(AppError::Forbidden(format!(
+            "Missing required permission: {}",
+            permission
+        )));
+    }
+
+    Ok(())
 }
