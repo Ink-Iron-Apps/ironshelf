@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(routes::libraries::delete_library),
         )
         .route("/api/v1/libraries/{id}/scan", axum::routing::post(routes::libraries::scan_library))
+        .route("/api/v1/libraries/{id}/metadata/scan", axum::routing::post(routes::metadata::bulk_metadata_scan))
         .route("/api/v1/libraries/{id}/authors", get(routes::authors::list_authors))
         .route("/api/v1/libraries/{id}/books", get(routes::books::list_books))
         // Authors
@@ -105,6 +106,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/books/{id}", get(routes::books::get_book))
         .route("/api/v1/books/{id}/cover", get(routes::files::get_cover))
         .route("/api/v1/books/{id}/file", get(routes::files::get_file))
+        // Metadata enrichment
+        .route("/api/v1/books/{id}/metadata/search", get(routes::metadata::search_metadata))
+        .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata))
         // Progress + bookmarks
         .route(
             "/api/v1/books/{id}/progress",
