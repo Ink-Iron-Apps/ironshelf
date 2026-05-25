@@ -42,7 +42,6 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
-        smtp_config: config.smtp.clone(),
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
@@ -114,15 +113,6 @@ async fn main() -> anyhow::Result<()> {
         // Metadata enrichment
         .route("/api/v1/books/{id}/metadata/search", get(routes::metadata::search_metadata))
         .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata))
-        // Send-to-Kindle
-        .route(
-            "/api/v1/users/me/kindle-email",
-            get(routes::kindle::get_kindle_email).put(routes::kindle::set_kindle_email),
-        )
-        .route(
-            "/api/v1/books/{id}/send-to-kindle",
-            axum::routing::post(routes::kindle::send_to_kindle),
-        )
         // Progress + bookmarks
         .route(
             "/api/v1/books/{id}/progress",
