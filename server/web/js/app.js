@@ -46,6 +46,13 @@
     arrowUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
     arrowDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
     star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    barChart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+    activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+    database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+    upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    hardDrive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>',
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -253,6 +260,8 @@
       collection: () => renderCollectionDetail(parsed.params.id),
       settings: renderSettings,
       users: renderUsers,
+      stats: renderStats,
+      activity: renderActivity,
     };
 
     const handler = handlers[parsed.name];
@@ -435,8 +444,11 @@
       { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
     ];
 
+    navItems.push({ id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' });
+
     if (currentUser?.is_owner) {
       navItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
+      navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
     }
 
     const navHtml = navItems.map(item => `
@@ -1239,10 +1251,12 @@
                   </a>
                 `).join('')}
                 ${renderAddToCollectionButton(bookId)}
+                ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
               </div>
             ` : `
               <div class="book-detail-formats">
                 ${renderAddToCollectionButton(bookId)}
+                ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
               </div>
             `}
 
@@ -1292,6 +1306,9 @@
 
       // Bind add-to-collection
       bindAddToCollectionButton(bookId);
+
+      // Bind enrich metadata
+      document.getElementById('enrich-metadata-btn')?.addEventListener('click', () => showMetadataSearchModal(bookId));
     } catch (err) {
       renderShell(renderError('Failed to load book', err.message, () => renderBook(bookId)), 'libraries');
     }
@@ -1343,6 +1360,27 @@
           </div>
 
           <button class="btn btn-primary mt-4" id="create-api-key-btn">${icon('plus', 16)} Create API Key</button>
+        </div>
+
+        <div class="settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Export / Import</h3>
+          <p class="description">Export your reading progress, collections, and preferences as JSON. Import a previously exported file to restore data.</p>
+          <div class="card" style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center">
+            <div style="flex:1;min-width:200px">
+              <h4 style="margin-bottom:var(--space-1)">Export Data</h4>
+              <p class="text-caption">Download all your user data as a JSON file.</p>
+              <button class="btn btn-primary mt-4" id="export-data-btn">${icon('download', 16)} Download Export</button>
+            </div>
+            <div style="width:1px;height:60px;background:var(--color-border-subtle)"></div>
+            <div style="flex:1;min-width:200px">
+              <h4 style="margin-bottom:var(--space-1)">Import Data</h4>
+              <p class="text-caption">Restore from a previous export file.</p>
+              <label class="btn btn-secondary mt-4" style="cursor:pointer" id="import-data-label">
+                ${icon('upload', 16)} Choose File
+                <input type="file" accept=".json,application/json" id="import-data-input" style="display:none">
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -1438,6 +1476,43 @@
             },
           });
         });
+      });
+
+      // Export data
+      document.getElementById('export-data-btn')?.addEventListener('click', async () => {
+        try {
+          const response = await fetch(`${API}/export/all`, { credentials: 'same-origin' });
+          if (!response.ok) throw new Error(`Export failed (${response.status})`);
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = `ironshelf-export-${new Date().toISOString().slice(0, 10)}.json`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          URL.revokeObjectURL(url);
+          toast('Export downloaded', 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+
+      // Import data
+      document.getElementById('import-data-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+          const text = await file.text();
+          const importData = JSON.parse(text);
+          const result = await apiPost('/import', importData);
+          toast(result?.message || 'Data imported successfully', 'success');
+          renderSettings();
+        } catch (err) {
+          toast(err.message || 'Import failed — check file format', 'error');
+        }
+        e.target.value = '';
       });
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
@@ -2099,6 +2174,364 @@
 
     } catch (err) {
       renderShell(renderError('Failed to load collection', err.message, () => renderCollectionDetail(collectionId)), 'collections');
+    }
+  }
+
+  // --- Relative Time ---
+
+  function relativeTime(dateString) {
+    if (!dateString) return '';
+    const now = Date.now();
+    const then = new Date(dateString).getTime();
+    const diffSeconds = Math.floor((now - then) / 1000);
+
+    if (diffSeconds < 60) return 'just now';
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffMonths < 12) return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`;
+    const diffYears = Math.floor(diffMonths / 12);
+    return `${diffYears} year${diffYears !== 1 ? 's' : ''} ago`;
+  }
+
+  function formatStorageBytes(bytes) {
+    if (bytes == null || bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const value = bytes / Math.pow(1024, exponent);
+    return `${value.toFixed(exponent > 0 ? 1 : 0)} ${units[exponent]}`;
+  }
+
+  function activityIcon(actionType) {
+    const actionMap = {
+      open: 'bookOpen',
+      read: 'bookOpen',
+      download: 'download',
+      create_collection: 'collection',
+      add_to_collection: 'collection',
+      remove_from_collection: 'collection',
+      login: 'users',
+      register: 'users',
+      create_library: 'library',
+      delete_library: 'trash',
+      update_progress: 'clock',
+    };
+    return actionMap[actionType] || 'activity';
+  }
+
+  function activityDescription(entry) {
+    const action = entry.action || entry.action_type || '';
+    const target = entry.target_title || entry.target || '';
+    const descriptionMap = {
+      open: `Opened ${target}`,
+      read: `Read ${target}`,
+      download: `Downloaded ${target}`,
+      create_collection: `Created collection ${target}`,
+      add_to_collection: `Added ${target} to collection`,
+      remove_from_collection: `Removed ${target} from collection`,
+      login: 'Signed in',
+      register: 'Account created',
+      create_library: `Added library ${target}`,
+      delete_library: `Removed library ${target}`,
+      update_progress: `Updated progress on ${target}`,
+    };
+    return descriptionMap[action] || `${action} ${target}`.trim() || 'Unknown action';
+  }
+
+  // --- Stats Dashboard (owner only) ---
+
+  async function renderStats() {
+    if (!await checkAuth()) return;
+    if (!currentUser?.is_owner) { navigateTo('/'); return; }
+    setTitle(['Stats']);
+    breadcrumbTrail = [{ label: 'Stats', path: '/stats' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Server Stats</h1></div>
+      <div class="stats-grid">
+        ${Array(8).fill('<div class="skeleton stat-card-skeleton" style="height:100px;border-radius:var(--radius-lg)"></div>').join('')}
+      </div>
+    `, 'stats');
+
+    try {
+      const stats = await apiGet('/stats');
+
+      const statCards = [
+        { label: 'Total Books', value: stats.total_books ?? 0, iconName: 'book', color: 'var(--color-teal-bright)' },
+        { label: 'Authors', value: stats.total_authors ?? 0, iconName: 'author', color: 'var(--color-teal-bright)' },
+        { label: 'Series', value: stats.total_series ?? 0, iconName: 'series', color: 'var(--color-teal-bright)' },
+        { label: 'Users', value: stats.total_users ?? 0, iconName: 'users', color: 'var(--color-info)' },
+        { label: 'Libraries', value: stats.total_libraries ?? 0, iconName: 'library', color: 'var(--color-info)' },
+        { label: 'Books Read', value: stats.books_read ?? 0, iconName: 'check', color: 'var(--color-success)' },
+        { label: 'Active Readers', value: stats.active_readers ?? 0, iconName: 'eye', color: 'var(--color-success)' },
+        { label: 'Storage', value: formatStorageBytes(stats.storage_bytes), iconName: 'hardDrive', color: 'var(--color-warning)' },
+      ];
+
+      let bodyContent = `
+        <div class="page-header"><h1>Server Stats</h1></div>
+        <div class="stats-grid">
+          ${statCards.map(card => `
+            <div class="card stat-card">
+              <div class="stat-card-icon" style="color:${card.color};background:${card.color}15">
+                ${icon(card.iconName, 22)}
+              </div>
+              <div class="stat-card-value">${typeof card.value === 'number' ? card.value.toLocaleString() : escapeHtml(String(card.value))}</div>
+              <div class="stat-card-label">${escapeHtml(card.label)}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+
+      // Popular books
+      const popularBooks = stats.popular_books || [];
+      if (popularBooks.length > 0) {
+        bodyContent += `
+          <div class="dashboard-section mt-6">
+            <div class="dashboard-section-header">
+              <h2>${icon('star', 22)} Popular Books</h2>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:50px">#</th>
+                    <th>Title</th>
+                    <th style="text-align:right">Opens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${popularBooks.map((popularBook, index) => `
+                    <tr>
+                      <td><span class="badge badge-teal">${index + 1}</span></td>
+                      <td>
+                        <a href="#/book/${popularBook.id || ''}" style="font-weight:var(--weight-medium)">${escapeHtml(popularBook.title || 'Unknown')}</a>
+                        ${popularBook.author ? `<div class="text-caption">${escapeHtml(popularBook.author)}</div>` : ''}
+                      </td>
+                      <td style="text-align:right;font-family:var(--font-mono);font-size:var(--text-sm)">${popularBook.opens ?? popularBook.count ?? 0}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+
+      // Recent server activity
+      const recentActivity = stats.recent_activity || [];
+      if (recentActivity.length > 0) {
+        bodyContent += `
+          <div class="dashboard-section mt-6">
+            <div class="dashboard-section-header">
+              <h2>${icon('activity', 22)} Recent Server Activity</h2>
+            </div>
+            <div class="activity-timeline">
+              ${recentActivity.map(entry => `
+                <div class="activity-entry">
+                  <div class="activity-entry-icon" style="background:var(--color-teal-dim);color:var(--color-teal-bright)">
+                    ${icon(activityIcon(entry.action || entry.action_type), 16)}
+                  </div>
+                  <div class="activity-entry-content">
+                    <div class="activity-entry-description">
+                      ${entry.username ? `<strong>${escapeHtml(entry.username)}</strong> ` : ''}${escapeHtml(activityDescription(entry))}
+                    </div>
+                    <div class="activity-entry-time">${relativeTime(entry.timestamp || entry.created_at)}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      renderShell(bodyContent, 'stats');
+    } catch (err) {
+      renderShell(renderError('Failed to load stats', err.message, () => renderStats()), 'stats');
+    }
+  }
+
+  // --- Activity Feed ---
+
+  async function renderActivity() {
+    if (!await checkAuth()) return;
+    setTitle(['Activity']);
+    breadcrumbTrail = [{ label: 'Activity', path: '/activity' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Activity</h1></div>
+      ${skeletonList(8)}
+    `, 'activity');
+
+    try {
+      const activityData = await apiGet('/activity');
+      const entries = Array.isArray(activityData) ? activityData : (activityData?.items || []);
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Your Activity</h1>
+        </div>
+      `;
+
+      if (entries.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.activity}</div>
+            <h3>No activity yet</h3>
+            <p>Your reading history and actions will appear here.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `
+          <div class="activity-timeline">
+            ${entries.map(entry => `
+              <div class="activity-entry">
+                <div class="activity-entry-icon" style="background:var(--color-teal-dim);color:var(--color-teal-bright)">
+                  ${icon(activityIcon(entry.action || entry.action_type), 16)}
+                </div>
+                <div class="activity-entry-content">
+                  <div class="activity-entry-description">${escapeHtml(activityDescription(entry))}</div>
+                  <div class="activity-entry-time">${relativeTime(entry.timestamp || entry.created_at)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      renderShell(bodyContent, 'activity');
+    } catch (err) {
+      renderShell(renderError('Failed to load activity', err.message, () => renderActivity()), 'activity');
+    }
+  }
+
+  // --- Metadata Enrichment Modal ---
+
+  async function showMetadataSearchModal(bookId) {
+    const { overlay, close } = showModal({
+      title: 'Enrich Metadata',
+      description: 'Searching for metadata matches...',
+      content: `
+        <div class="metadata-search-loading">
+          <div class="progress-bar progress-bar-indeterminate" style="margin:var(--space-4) 0">
+            <div class="progress-bar-fill"></div>
+          </div>
+          <p class="text-caption text-center">Querying external providers...</p>
+        </div>
+      `,
+    });
+
+    try {
+      const searchResults = await apiGet(`/books/${bookId}/metadata/search`);
+      const matches = searchResults?.matches || searchResults || [];
+
+      const contentContainer = overlay.querySelector('.modal-content');
+      if (!contentContainer) return;
+
+      if (matches.length === 0) {
+        contentContainer.innerHTML = `
+          <div class="empty-state" style="padding:var(--space-8) 0">
+            <div class="empty-state-icon" style="width:48px;height:48px">${Icons.search}</div>
+            <h3>No matches found</h3>
+            <p>No metadata was found from external providers for this book.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Update description
+      const descriptionElement = overlay.querySelector('.modal-description');
+      if (descriptionElement) descriptionElement.textContent = `Found ${matches.length} match${matches.length !== 1 ? 'es' : ''}. Select one to apply.`;
+
+      let matchesHtml = `
+        <button class="btn btn-primary btn-sm mb-4" id="apply-best-metadata">
+          ${icon('zap', 14)} Apply Best Match
+        </button>
+        <div class="metadata-matches">
+      `;
+
+      for (let i = 0; i < matches.length; i++) {
+        const match = matches[i];
+        const providerName = match.provider || match.source || 'Unknown';
+        const confidence = match.confidence != null ? Math.round(match.confidence * 100) : null;
+        const providerClass = providerName.toLowerCase().includes('google') ? 'badge-info' : 'badge-success';
+
+        matchesHtml += `
+          <div class="metadata-match-card card">
+            <div class="metadata-match-header">
+              <div class="metadata-match-info">
+                <span class="badge ${providerClass}">${escapeHtml(providerName)}</span>
+                ${confidence != null ? `<span class="badge badge-muted">${confidence}% match</span>` : ''}
+              </div>
+              <button class="btn btn-primary btn-sm apply-metadata-btn" data-match-index="${i}">Apply</button>
+            </div>
+            ${match.thumbnail || match.cover_url ? `
+              <div class="metadata-match-cover">
+                <img src="${escapeHtml(match.thumbnail || match.cover_url)}" alt="" loading="lazy">
+              </div>
+            ` : ''}
+            <div class="metadata-match-title">${escapeHtml(match.title || 'No title')}</div>
+            ${match.authors ? `<div class="text-caption">${escapeHtml(Array.isArray(match.authors) ? match.authors.join(', ') : match.authors)}</div>` : ''}
+            ${match.description ? `<div class="metadata-match-description">${escapeHtml(match.description.length > 200 ? match.description.slice(0, 200) + '...' : match.description)}</div>` : ''}
+          </div>
+        `;
+      }
+
+      matchesHtml += `</div>`;
+      contentContainer.innerHTML = matchesHtml;
+
+      // Widen modal for metadata results
+      const modalElement = overlay.querySelector('.modal');
+      if (modalElement) modalElement.style.maxWidth = '600px';
+
+      // Bind apply buttons
+      contentContainer.querySelectorAll('.apply-metadata-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          btn.textContent = 'Applying...';
+          try {
+            await apiPost(`/books/${bookId}/metadata/apply`, { match_index: parseInt(btn.dataset.matchIndex) });
+            toast('Metadata applied successfully', 'success');
+            close();
+            renderBook(bookId);
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Apply';
+          }
+        });
+      });
+
+      // Bind apply best
+      document.getElementById('apply-best-metadata')?.addEventListener('click', async () => {
+        const bestButton = document.getElementById('apply-best-metadata');
+        bestButton.disabled = true;
+        bestButton.textContent = 'Applying...';
+        try {
+          await apiPost(`/books/${bookId}/metadata/apply`, { match_index: 0 });
+          toast('Best metadata applied successfully', 'success');
+          close();
+          renderBook(bookId);
+        } catch (err) {
+          toast(err.message, 'error');
+          bestButton.disabled = false;
+          bestButton.innerHTML = `${icon('zap', 14)} Apply Best Match`;
+        }
+      });
+    } catch (err) {
+      const contentContainer = overlay.querySelector('.modal-content');
+      if (contentContainer) {
+        contentContainer.innerHTML = `
+          <div class="error-state" style="padding:var(--space-6) 0;background:transparent;border:0">
+            <div class="error-state-icon" style="width:40px;height:40px">${Icons.alertCircle}</div>
+            <h3>Search failed</h3>
+            <p>${escapeHtml(err.message)}</p>
+          </div>
+        `;
+      }
     }
   }
 
