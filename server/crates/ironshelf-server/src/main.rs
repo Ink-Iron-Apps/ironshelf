@@ -2,6 +2,8 @@
 
 mod auth;
 mod config;
+mod error;
+mod pagination;
 mod routes;
 mod state;
 mod web;
@@ -102,6 +104,20 @@ async fn main() -> anyhow::Result<()> {
             auth::auth_middleware,
         ));
 
+    // OPDS catalog routes (Bearer auth via same middleware — OPDS readers use Authorization header)
+    let opds_routes = Router::new()
+        .route("/opds", get(routes::opds::root_feed))
+        .route("/opds/authors", get(routes::opds::authors_feed))
+        .route("/opds/authors/{id}", get(routes::opds::author_feed))
+        .route("/opds/series", get(routes::opds::series_list_feed))
+        .route("/opds/series/{id}", get(routes::opds::series_feed))
+        .route("/opds/recent", get(routes::opds::recent_feed))
+        .route("/opds/search", get(routes::opds::search_feed))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth::auth_middleware,
+        ));
+
     // Web UI (embedded static files)
     let web_routes = Router::new()
         .route("/", get(web::serve_index))
@@ -110,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .merge(opds_routes)
         .merge(web_routes)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
