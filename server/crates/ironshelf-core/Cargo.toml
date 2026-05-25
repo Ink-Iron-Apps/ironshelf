@@ -14,3 +14,6 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 zip = { workspace = true }
+reqwest = { workspace = true }
+urlencoding = { workspace = true }
+trait-variant = { workspace = true }

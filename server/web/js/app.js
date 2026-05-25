@@ -39,6 +39,13 @@
     copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
     bookOpen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+    collection: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+    arrowUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+    arrowDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>',
+    star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -215,7 +222,7 @@
 
   function parseRoute(hash) {
     const parts = hash.split('/').filter(Boolean);
-    if (parts.length === 0) return { name: 'libraries', params: {} };
+    if (parts.length === 0) return { name: 'home', params: {} };
 
     const name = parts[0];
     const params = {};
@@ -233,6 +240,7 @@
     closeSidebar();
 
     const handlers = {
+      home: renderHome,
       login: renderLogin,
       register: renderRegister,
       libraries: renderLibraries,
@@ -241,6 +249,8 @@
       series: () => renderSeries(parsed.params.id),
       book: () => renderBook(parsed.params.id),
       read: () => openReader(parsed.params.id),
+      collections: renderCollections,
+      collection: () => renderCollectionDetail(parsed.params.id),
       settings: renderSettings,
       users: renderUsers,
     };
@@ -250,7 +260,7 @@
       currentRoute = parsed.name;
       await handler();
     } else {
-      navigateTo('/libraries');
+      navigateTo('/');
     }
   }
 
@@ -419,7 +429,9 @@
     const app = document.getElementById('app');
 
     const navItems = [
+      { id: 'home', label: 'Home', icon: 'home', path: '/' },
       { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
+      { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
     ];
 
@@ -457,6 +469,11 @@
           <div class="sidebar-brand">
             <span class="text-brand">Iron<em>&</em>shelf</span>
           </div>
+          <button class="sidebar-search-btn" id="sidebar-search-btn" aria-label="Search books, authors, and series">
+            <span class="nav-icon">${Icons.search}</span>
+            <span>Search...</span>
+            <span class="search-slash-hint">/</span>
+          </button>
           <div class="sidebar-section-label">Navigation</div>
           <nav class="sidebar-nav">
             ${navHtml}
@@ -499,6 +516,7 @@
 
     document.getElementById('mobile-menu-btn')?.addEventListener('click', toggleSidebar);
     document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+    document.getElementById('sidebar-search-btn')?.addEventListener('click', openGlobalSearch);
   }
 
   function toggleSidebar() {
@@ -519,6 +537,27 @@
     setTitle(['Sign In']);
     breadcrumbTrail = [];
 
+    // Fetch server info for registration status
+    let serverInfo = null;
+    try {
+      serverInfo = await fetch(`${API}/server/info`).then(r => r.ok ? r.json() : null).catch(() => null);
+    } catch { /* ignore */ }
+
+    const isRegistrationOpen = serverInfo?.registration_open !== false;
+    const isInviteRequired = serverInfo?.invite_required === true;
+
+    let serverInfoHtml = '';
+    if (serverInfo?.server_name) {
+      serverInfoHtml = `<div class="login-server-info">${escapeHtml(serverInfo.server_name)}</div>`;
+    }
+
+    let registerLinkHtml = '';
+    if (isRegistrationOpen) {
+      registerLinkHtml = `<div class="login-footer">No account? <a href="#/register">Create one</a></div>`;
+    } else {
+      registerLinkHtml = `<div class="login-footer" style="color:var(--color-muted)">Registration is closed on this server.</div>`;
+    }
+
     document.getElementById('app').innerHTML = `
       <div class="login-page">
         <div class="login-card">
@@ -526,6 +565,7 @@
             <h1 class="text-brand">Iron<em>&</em>shelf</h1>
             <p>Your self-hosted library</p>
           </div>
+          ${serverInfoHtml}
           <form id="login-form" novalidate>
             <div class="form-group">
               <label class="form-label" for="login-username">Username</label>
@@ -537,12 +577,13 @@
             </div>
             <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
           </form>
-          <div class="login-footer">
-            No account? <a href="#/register">Create one</a>
-          </div>
+          ${registerLinkHtml}
         </div>
       </div>
     `;
+
+    // Store invite info for register page
+    window._ironshelfServerInfo = serverInfo;
 
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -556,7 +597,7 @@
           password: document.getElementById('login-password').value,
         });
         await checkAuth();
-        navigateTo('/libraries');
+        navigateTo('/');
       } catch (err) {
         toast(err.message, 'error');
         submitBtn.disabled = false;
@@ -571,6 +612,9 @@
     setTitle(['Create Account']);
     breadcrumbTrail = [];
 
+    const serverInfo = window._ironshelfServerInfo || null;
+    const isInviteRequired = serverInfo?.invite_required === true;
+
     document.getElementById('app').innerHTML = `
       <div class="login-page">
         <div class="login-card">
@@ -578,10 +622,17 @@
             <h1 class="text-brand">Iron<em>&</em>shelf</h1>
             <p>Create your account</p>
           </div>
+          ${isInviteRequired ? `<div class="login-server-info"><span class="badge badge-warning">${icon('lock', 12)} Invite required</span></div>` : ''}
           <form id="register-form" novalidate>
+            ${isInviteRequired ? `
+              <div class="form-group invite-code-group">
+                <label class="form-label" for="reg-invite-code">Invite Code</label>
+                <input type="text" class="form-input" id="reg-invite-code" name="invite_code" required placeholder="Enter your invite code" autocomplete="off">
+              </div>
+            ` : ''}
             <div class="form-group">
               <label class="form-label" for="reg-username">Username</label>
-              <input type="text" class="form-input" id="reg-username" name="username" required autocomplete="username" autofocus>
+              <input type="text" class="form-input" id="reg-username" name="username" required autocomplete="username" ${isInviteRequired ? '' : 'autofocus'}>
             </div>
             <div class="form-group">
               <label class="form-label" for="reg-password">Password</label>
@@ -604,13 +655,18 @@
       submitBtn.textContent = 'Creating...';
 
       try {
-        await apiPost('/auth/register', {
+        const registerPayload = {
           username: document.getElementById('reg-username').value,
           password: document.getElementById('reg-password').value,
-        });
+        };
+        const inviteCodeInput = document.getElementById('reg-invite-code');
+        if (inviteCodeInput) {
+          registerPayload.invite_code = inviteCodeInput.value.trim();
+        }
+        await apiPost('/auth/register', registerPayload);
         toast('Account created successfully!', 'success');
         await checkAuth();
-        navigateTo('/libraries');
+        navigateTo('/');
       } catch (err) {
         toast(err.message, 'error');
         submitBtn.disabled = false;
@@ -1182,8 +1238,13 @@
                     ${icon('download', 16)} ${escapeHtml(f.kind.toUpperCase())}
                   </a>
                 `).join('')}
+                ${renderAddToCollectionButton(bookId)}
               </div>
-            ` : ''}
+            ` : `
+              <div class="book-detail-formats">
+                ${renderAddToCollectionButton(bookId)}
+              </div>
+            `}
 
             ${Object.keys(customFields).length > 0 ? `
               <div class="book-detail-custom">
@@ -1228,6 +1289,9 @@
         coverTrigger.addEventListener('click', openZoom);
         coverTrigger.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(); } });
       }
+
+      // Bind add-to-collection
+      bindAddToCollectionButton(bookId);
     } catch (err) {
       renderShell(renderError('Failed to load book', err.message, () => renderBook(bookId)), 'libraries');
     }
@@ -1505,6 +1569,638 @@
     });
   }
 
+  // --- Home / Dashboard ---
+
+  async function renderHome() {
+    if (!await checkAuth()) return;
+    setTitle(['Home']);
+    breadcrumbTrail = [{ label: 'Home', path: '/' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Home</h1></div>
+      <div class="dashboard-section">
+        <div class="skeleton" style="height:200px;border-radius:var(--radius-lg)"></div>
+      </div>
+      ${skeletonCards(4)}
+    `, 'home');
+
+    try {
+      const [continueReading, collections, libraries] = await Promise.all([
+        apiGet('/books/continue').catch(() => []),
+        apiGet('/collections').catch(() => []),
+        apiGet('/libraries').catch(() => []),
+      ]);
+
+      const continueBooks = Array.isArray(continueReading) ? continueReading : (continueReading?.items || []);
+      const collectionsList = Array.isArray(collections) ? collections : (collections?.items || []);
+      const hasDashboardContent = continueBooks.length > 0 || collectionsList.length > 0;
+
+      if (!hasDashboardContent) {
+        // Fall back to libraries view
+        renderLibraries();
+        return;
+      }
+
+      let bodyContent = `<div class="page-header"><h1>Home</h1></div>`;
+
+      // Continue Reading section
+      if (continueBooks.length > 0) {
+        bodyContent += `
+          <div class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>${icon('clock', 22)} Continue Reading</h2>
+            </div>
+            <div class="continue-reading-row">
+        `;
+        for (const book of continueBooks) {
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          const progressPercent = Math.round((book.progress || 0) * 100);
+          bodyContent += `
+            <div class="continue-reading-card" data-read-book-id="${book.id}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
+              ${coverUrl
+                ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy"><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
+                : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
+              }
+              <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
+              <div class="book-meta">${book.authors ? escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors) : ''}</div>
+            </div>
+          `;
+        }
+        bodyContent += `</div></div>`;
+      }
+
+      // Your Collections section
+      if (collectionsList.length > 0) {
+        bodyContent += `
+          <div class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>${icon('collection', 22)} Your Collections</h2>
+              <a href="#/collections" class="section-link">View all ${icon('chevronRight', 14)}</a>
+            </div>
+            <div class="grid grid-collections">
+        `;
+        for (const collection of collectionsList.slice(0, 6)) {
+          bodyContent += renderCollectionCard(collection);
+        }
+        bodyContent += `</div></div>`;
+      }
+
+      // Recently Added section
+      let recentBooks = [];
+      if (libraries && libraries.length > 0) {
+        try {
+          const recentResponse = await apiGet(`/libraries/${libraries[0].id}/books?sort=added&direction=desc&per_page=12`).catch(() => null);
+          recentBooks = Array.isArray(recentResponse) ? recentResponse : (recentResponse?.items || recentResponse?.data || []);
+        } catch { /* ignore */ }
+      }
+
+      if (recentBooks.length > 0) {
+        bodyContent += `
+          <div class="dashboard-section">
+            <div class="dashboard-section-header">
+              <h2>${icon('star', 22)} Recently Added</h2>
+            </div>
+            <div class="grid grid-books">
+        `;
+        for (const book of recentBooks) {
+          bodyContent += renderBookCard(book);
+        }
+        bodyContent += `</div></div>`;
+      }
+
+      renderShell(bodyContent, 'home');
+
+      // Bind continue reading cards
+      document.querySelectorAll('[data-read-book-id]').forEach(card => {
+        const handler = () => navigateTo(`/read/${card.dataset.readBookId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind collection cards
+      document.querySelectorAll('[data-collection-id]').forEach(card => {
+        const handler = () => navigateTo(`/collection/${card.dataset.collectionId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind book cards
+      document.querySelectorAll('[data-book-id]').forEach(card => {
+        const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load dashboard', err.message, () => renderHome()), 'home');
+    }
+  }
+
+  // --- Global Search ---
+
+  let globalSearchOpen = false;
+
+  function openGlobalSearch() {
+    if (globalSearchOpen) return;
+    globalSearchOpen = true;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'search-overlay';
+    overlay.id = 'global-search-overlay';
+    overlay.innerHTML = `
+      <div class="search-overlay-container" role="dialog" aria-modal="true" aria-label="Search">
+        <div class="search-overlay-input-wrap">
+          <span class="search-icon">${Icons.search}</span>
+          <input type="search" id="global-search-input" placeholder="Search books, authors, series..." autocomplete="off" autofocus>
+          <span class="search-shortcut-hint">Esc</span>
+        </div>
+        <div class="search-overlay-results" id="global-search-results"></div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const input = document.getElementById('global-search-input');
+    const resultsContainer = document.getElementById('global-search-results');
+
+    // Focus input
+    requestAnimationFrame(() => input?.focus());
+
+    const closeSearch = () => {
+      globalSearchOpen = false;
+      overlay.remove();
+    };
+
+    // Click backdrop to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeSearch();
+    });
+
+    // Keyboard handling
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeSearch();
+      }
+    });
+
+    let highlightIndex = -1;
+
+    const navigateToResult = (resultElement) => {
+      const path = resultElement?.dataset?.resultPath;
+      if (path) {
+        closeSearch();
+        navigateTo(path);
+      }
+    };
+
+    const updateHighlight = () => {
+      const items = resultsContainer.querySelectorAll('.search-result-item');
+      items.forEach((item, index) => {
+        item.classList.toggle('highlighted', index === highlightIndex);
+      });
+      if (highlightIndex >= 0 && items[highlightIndex]) {
+        items[highlightIndex].scrollIntoView({ block: 'nearest' });
+      }
+    };
+
+    input.addEventListener('keydown', (e) => {
+      const items = resultsContainer.querySelectorAll('.search-result-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        highlightIndex = Math.min(highlightIndex + 1, items.length - 1);
+        updateHighlight();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        highlightIndex = Math.max(highlightIndex - 1, 0);
+        updateHighlight();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (highlightIndex >= 0 && items[highlightIndex]) {
+          navigateToResult(items[highlightIndex]);
+        }
+      }
+    });
+
+    // Debounced search
+    const performSearch = debounce(async (query) => {
+      if (!query || query.length < 2) {
+        resultsContainer.innerHTML = '';
+        highlightIndex = -1;
+        return;
+      }
+
+      try {
+        const searchResults = await apiGet(`/search?q=${encodeURIComponent(query)}`);
+
+        const authors = searchResults?.authors || [];
+        const series = searchResults?.series || [];
+        const books = searchResults?.books || [];
+
+        if (authors.length === 0 && series.length === 0 && books.length === 0) {
+          resultsContainer.innerHTML = `<div class="search-no-results">No results for "${escapeHtml(query)}"</div>`;
+          highlightIndex = -1;
+          return;
+        }
+
+        let html = '';
+
+        if (authors.length > 0) {
+          html += `<div class="search-results-group"><div class="search-results-group-label">Authors</div>`;
+          for (const author of authors) {
+            html += `
+              <div class="search-result-item" data-result-path="/author/${author.id}" role="option">
+                <div class="result-icon">${Icons.author}</div>
+                <div class="result-text">
+                  <div class="result-name">${escapeHtml(author.name)}</div>
+                  ${author.book_count ? `<div class="result-subtitle">${author.book_count} book${author.book_count !== 1 ? 's' : ''}</div>` : ''}
+                </div>
+              </div>
+            `;
+          }
+          html += `</div>`;
+        }
+
+        if (series.length > 0) {
+          html += `<div class="search-results-group"><div class="search-results-group-label">Series</div>`;
+          for (const s of series) {
+            html += `
+              <div class="search-result-item" data-result-path="/series/${s.id}" role="option">
+                <div class="result-icon">${Icons.series}</div>
+                <div class="result-text">
+                  <div class="result-name">${escapeHtml(s.name)}</div>
+                  ${s.book_count ? `<div class="result-subtitle">${s.book_count} book${s.book_count !== 1 ? 's' : ''}</div>` : ''}
+                </div>
+              </div>
+            `;
+          }
+          html += `</div>`;
+        }
+
+        if (books.length > 0) {
+          html += `<div class="search-results-group"><div class="search-results-group-label">Books</div>`;
+          for (const book of books) {
+            html += `
+              <div class="search-result-item" data-result-path="/book/${book.id}" role="option">
+                <div class="result-icon">${Icons.book}</div>
+                <div class="result-text">
+                  <div class="result-name">${escapeHtml(book.title)}</div>
+                  ${book.authors ? `<div class="result-subtitle">${escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors)}</div>` : ''}
+                </div>
+              </div>
+            `;
+          }
+          html += `</div>`;
+        }
+
+        resultsContainer.innerHTML = html;
+        highlightIndex = -1;
+
+        // Bind click on results
+        resultsContainer.querySelectorAll('.search-result-item').forEach(item => {
+          item.addEventListener('click', () => navigateToResult(item));
+        });
+
+      } catch (err) {
+        resultsContainer.innerHTML = `<div class="search-no-results">Search failed: ${escapeHtml(err.message)}</div>`;
+      }
+    }, 300);
+
+    input.addEventListener('input', () => performSearch(input.value.trim()));
+  }
+
+  // --- Collections ---
+
+  async function renderCollections() {
+    if (!await checkAuth()) return;
+    setTitle(['Collections']);
+    breadcrumbTrail = [{ label: 'Collections', path: '/collections' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Collections</h1></div>
+      ${skeletonList(3)}
+    `, 'collections');
+
+    try {
+      const collections = await apiGet('/collections');
+      const collectionsList = Array.isArray(collections) ? collections : (collections?.items || []);
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Collections</h1>
+          <div class="actions">
+            <button class="btn btn-primary" id="create-collection-btn">${icon('plus', 16)} New Collection</button>
+          </div>
+        </div>
+      `;
+
+      if (collectionsList.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.collection}</div>
+            <h3>No collections yet</h3>
+            <p>Create a collection to organize books your way.</p>
+            <button class="btn btn-primary btn-lg" id="create-collection-empty-btn">${icon('plus', 16)} Create Your First Collection</button>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div class="grid grid-collections">`;
+        for (const collection of collectionsList) {
+          bodyContent += renderCollectionCard(collection);
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'collections');
+
+      // Bind
+      document.querySelectorAll('[data-collection-id]').forEach(card => {
+        const handler = () => navigateTo(`/collection/${card.dataset.collectionId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      document.getElementById('create-collection-btn')?.addEventListener('click', () => showCreateCollectionModal());
+      document.getElementById('create-collection-empty-btn')?.addEventListener('click', () => showCreateCollectionModal());
+
+    } catch (err) {
+      renderShell(renderError('Failed to load collections', err.message, () => renderCollections()), 'collections');
+    }
+  }
+
+  function renderCollectionCard(collection) {
+    const bookCount = collection.book_count || 0;
+    return `
+      <div class="card card-interactive collection-card" data-collection-id="${collection.id}" role="link" tabindex="0" aria-label="${escapeHtml(collection.name)} collection">
+        <div class="collection-card-header">
+          <div class="collection-card-icon">${Icons.collection}</div>
+          ${collection.is_public ? `<span class="badge badge-teal">${icon('globe', 10)} Public</span>` : `<span class="badge badge-muted">${icon('lock', 10)} Private</span>`}
+        </div>
+        <div class="collection-card-name">${escapeHtml(collection.name)}</div>
+        ${collection.description ? `<div class="collection-card-description">${escapeHtml(collection.description)}</div>` : ''}
+        <div class="collection-card-footer">
+          <span>${bookCount} book${bookCount !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function showCreateCollectionModal() {
+    const { close } = showModal({
+      title: 'Create Collection',
+      description: 'Organize books into a custom collection.',
+      content: `
+        <form id="collection-form" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="collection-name">Name</label>
+            <input type="text" class="form-input" id="collection-name" name="name" required placeholder="Reading List" autofocus>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="collection-description">Description</label>
+            <input type="text" class="form-input" id="collection-description" name="description" placeholder="Optional description">
+          </div>
+          <div class="form-group">
+            <label class="form-toggle">
+              <input type="checkbox" id="collection-public" name="is_public">
+              <span>Make this collection public</span>
+            </label>
+            <p class="form-hint">Public collections are visible to all users on this server.</p>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      `,
+    });
+
+    const form = document.getElementById('collection-form');
+    form.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+
+      try {
+        const payload = {
+          name: document.getElementById('collection-name').value.trim(),
+          description: document.getElementById('collection-description').value.trim() || null,
+          is_public: document.getElementById('collection-public').checked,
+        };
+        await apiPost('/collections', payload);
+        toast('Collection created!', 'success');
+        close();
+        renderCollections();
+      } catch (err) {
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  // --- Collection Detail ---
+
+  async function renderCollectionDetail(collectionId) {
+    if (!await checkAuth()) return;
+
+    breadcrumbTrail = [
+      { label: 'Collections', path: '/collections' },
+      { label: '...', path: `/collection/${collectionId}` },
+    ];
+
+    renderShell(`
+      <div class="page-header"><h1>Loading...</h1></div>
+      ${skeletonCards(6)}
+    `, 'collections');
+
+    try {
+      const collection = await apiGet(`/collections/${collectionId}`);
+      const books = collection.books || [];
+
+      setTitle([collection.name]);
+      breadcrumbTrail[1].label = collection.name;
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>${escapeHtml(collection.name)}</h1>
+          <div class="actions">
+            ${collection.is_public ? `<span class="badge badge-teal">${icon('globe', 10)} Public</span>` : `<span class="badge badge-muted">${icon('lock', 10)} Private</span>`}
+            <span class="badge badge-teal">${books.length} book${books.length !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        ${collection.description ? `<p class="text-caption mb-6">${escapeHtml(collection.description)}</p>` : ''}
+      `;
+
+      if (books.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.bookOpen}</div>
+            <h3>No books in this collection</h3>
+            <p>Add books from book detail pages to build this collection.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div class="grid grid-books">`;
+        for (const book of books) {
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          bodyContent += `
+            <div class="book-card collection-book-card" data-book-id="${book.id}" role="link" tabindex="0" aria-label="${escapeHtml(book.title)}">
+              <button class="remove-from-collection" data-remove-book-id="${book.id}" aria-label="Remove ${escapeHtml(book.title)} from collection" title="Remove from collection">
+                ${Icons.x}
+              </button>
+              ${book.series_index ? `<span class="series-badge">#${book.series_index}</span>` : ''}
+              ${coverUrl
+                ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy"></div>`
+                : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>`
+              }
+              <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
+              <div class="book-meta">${book.authors ? escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors) : ''}</div>
+            </div>
+          `;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'collections');
+
+      // Bind book navigation
+      document.querySelectorAll('[data-book-id]').forEach(card => {
+        const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
+        card.addEventListener('click', (e) => {
+          // Don't navigate if clicking the remove button
+          if (e.target.closest('.remove-from-collection')) return;
+          handler();
+        });
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind remove buttons
+      document.querySelectorAll('.remove-from-collection').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const bookId = btn.dataset.removeBookId;
+          showConfirmModal({
+            title: 'Remove from Collection',
+            message: 'Remove this book from the collection?',
+            confirmText: 'Remove',
+            onConfirm: async () => {
+              try {
+                await apiDelete(`/collections/${collectionId}/books/${bookId}`);
+                toast('Book removed from collection', 'success');
+                renderCollectionDetail(collectionId);
+              } catch (err) {
+                toast(err.message, 'error');
+              }
+            },
+          });
+        });
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load collection', err.message, () => renderCollectionDetail(collectionId)), 'collections');
+    }
+  }
+
+  // --- Add to Collection (on book detail) ---
+
+  function renderAddToCollectionButton(bookId) {
+    return `
+      <div class="add-to-collection-wrap" id="add-to-collection-wrap">
+        <button class="btn btn-secondary" id="add-to-collection-btn" aria-haspopup="true" aria-expanded="false">
+          ${icon('collection', 16)} Add to Collection
+        </button>
+      </div>
+    `;
+  }
+
+  async function bindAddToCollectionButton(bookId) {
+    const wrap = document.getElementById('add-to-collection-wrap');
+    const btn = document.getElementById('add-to-collection-btn');
+    if (!wrap || !btn) return;
+
+    let dropdownOpen = false;
+
+    const closeDropdown = () => {
+      const existing = wrap.querySelector('.add-to-collection-dropdown');
+      if (existing) existing.remove();
+      btn.setAttribute('aria-expanded', 'false');
+      dropdownOpen = false;
+    };
+
+    btn.addEventListener('click', async () => {
+      if (dropdownOpen) {
+        closeDropdown();
+        return;
+      }
+
+      dropdownOpen = true;
+      btn.setAttribute('aria-expanded', 'true');
+
+      // Fetch user's collections
+      let collections = [];
+      try {
+        const response = await apiGet('/collections');
+        collections = Array.isArray(response) ? response : (response?.items || []);
+      } catch { /* ignore */ }
+
+      const dropdown = document.createElement('div');
+      dropdown.className = 'add-to-collection-dropdown';
+      dropdown.setAttribute('role', 'listbox');
+
+      let dropdownHtml = '';
+      if (collections.length > 0) {
+        for (const collection of collections) {
+          dropdownHtml += `
+            <button class="dropdown-item" data-add-collection-id="${collection.id}" role="option">
+              <span class="nav-icon" style="width:16px;height:16px">${Icons.collection}</span>
+              ${escapeHtml(collection.name)}
+            </button>
+          `;
+        }
+        dropdownHtml += `<div class="dropdown-divider"></div>`;
+      }
+      dropdownHtml += `
+        <button class="dropdown-item" id="dropdown-new-collection" role="option">
+          <span class="nav-icon" style="width:16px;height:16px">${Icons.plus}</span>
+          New Collection...
+        </button>
+      `;
+
+      dropdown.innerHTML = dropdownHtml;
+      wrap.appendChild(dropdown);
+
+      // Bind add-to-collection items
+      dropdown.querySelectorAll('[data-add-collection-id]').forEach(item => {
+        item.addEventListener('click', async () => {
+          const collectionId = item.dataset.addCollectionId;
+          try {
+            await apiPost(`/collections/${collectionId}/books`, { book_id: bookId });
+            toast('Book added to collection', 'success');
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+          closeDropdown();
+        });
+      });
+
+      // Bind new collection
+      dropdown.querySelector('#dropdown-new-collection')?.addEventListener('click', () => {
+        closeDropdown();
+        showCreateCollectionModal();
+      });
+
+      // Close on outside click
+      const outsideClickHandler = (e) => {
+        if (!wrap.contains(e.target)) {
+          closeDropdown();
+          document.removeEventListener('click', outsideClickHandler);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', outsideClickHandler), 0);
+    });
+  }
+
   // --- Helpers ---
 
   function renderBookCard(book, showSeriesIndex = false) {
@@ -1536,8 +2232,14 @@
   // --- Keyboard Shortcuts ---
 
   document.addEventListener('keydown', (e) => {
-    // Escape closes modals
+    // Escape closes search overlay, modals, zoom
     if (e.key === 'Escape') {
+      const searchOverlay = document.getElementById('global-search-overlay');
+      if (searchOverlay) {
+        globalSearchOpen = false;
+        searchOverlay.remove();
+        return;
+      }
       const modal = document.querySelector('.modal-overlay');
       if (modal) {
         modal.remove();
@@ -1552,6 +2254,15 @@
         closeSidebar();
       }
     }
+
+    // `/` opens global search (only when not typing in an input)
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      if (activeTag !== 'input' && activeTag !== 'textarea' && activeTag !== 'select') {
+        e.preventDefault();
+        openGlobalSearch();
+      }
+    }
   });
 
   // --- Init ---
@@ -1560,8 +2271,8 @@
 
   window.addEventListener('DOMContentLoaded', async () => {
     if (await checkAuth()) {
-      if (!getHashPath() || getHashPath() === '/' || getHashPath() === '/login') {
-        navigateTo('/libraries');
+      if (!getHashPath() || getHashPath() === '/login') {
+        navigateTo('/');
       } else {
         route();
       }
