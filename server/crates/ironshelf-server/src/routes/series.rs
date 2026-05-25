@@ -12,12 +12,14 @@ pub struct SeriesDetail {
     pub books: Vec<ironshelf_core::model::Book>,
 }
 
-/// GET /api/v1/series/:id — series with books ordered by series_index
+/// GET /api/v1/series/:id
 pub async fn get_series(
     State(state): State<AppState>,
     Path(series_id): Path<i64>,
 ) -> Result<Json<SeriesDetail>, StatusCode> {
-    for library in &state.libraries {
+    let libraries = state.libraries.read().await;
+
+    for library in libraries.iter() {
         if let Ok(Some(series)) = library.source.series(series_id).await {
             let books = library
                 .source

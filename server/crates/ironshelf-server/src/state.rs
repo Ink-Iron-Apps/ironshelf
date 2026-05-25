@@ -3,6 +3,7 @@
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::db::IronshelfDb;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// A loaded library with its source connection.
 #[derive(Clone)]
@@ -15,8 +16,9 @@ pub struct LoadedLibrary {
 }
 
 /// Application state shared across all handlers.
+/// Libraries behind RwLock — can be added/removed/rescanned at runtime via API.
 #[derive(Clone)]
 pub struct AppState {
-    pub libraries: Arc<Vec<LoadedLibrary>>,
+    pub libraries: Arc<RwLock<Vec<LoadedLibrary>>>,
     pub ironshelf_db: IronshelfDb,
 }

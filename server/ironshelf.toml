@@ -1,9 +1,6 @@
+# Ironshelf server bootstrap config.
+# Libraries are managed through the GUI/API, not here.
+
 port = 10810
 host = "0.0.0.0"
 database_path = "ironshelf.db"
-
-[[libraries]]
-name = "eBooks"
-path = "/mnt/s/calibre/ebooks"
-library_type = "book"
-source_kind = "calibre"

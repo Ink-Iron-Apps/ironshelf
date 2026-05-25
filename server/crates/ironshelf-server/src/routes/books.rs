@@ -4,12 +4,14 @@ use axum::Json;
 
 use crate::state::AppState;
 
-/// GET /api/v1/books/:id — full book detail
+/// GET /api/v1/books/:id
 pub async fn get_book(
     State(state): State<AppState>,
     Path(book_id): Path<i64>,
 ) -> Result<Json<ironshelf_core::model::Book>, StatusCode> {
-    for library in &state.libraries {
+    let libraries = state.libraries.read().await;
+
+    for library in libraries.iter() {
         if let Ok(Some(book)) = library.source.book(book_id).await {
             return Ok(Json(book));
         }
@@ -18,13 +20,13 @@ pub async fn get_book(
     Err(StatusCode::NOT_FOUND)
 }
 
-/// GET /api/v1/libraries/:id/books — flat book list for a library
+/// GET /api/v1/libraries/:id/books
 pub async fn list_books(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
 ) -> Result<Json<Vec<ironshelf_core::model::Book>>, StatusCode> {
-    let library = state
-        .libraries
+    let libraries = state.libraries.read().await;
+    let library = libraries
         .iter()
         .find(|l| l.id == library_id)
         .ok_or(StatusCode::NOT_FOUND)?;

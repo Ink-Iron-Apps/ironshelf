@@ -18,8 +18,8 @@ pub async fn list_authors(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
 ) -> Result<Json<Vec<ironshelf_core::model::Author>>, StatusCode> {
-    let library = state
-        .libraries
+    let libraries = state.libraries.read().await;
+    let library = libraries
         .iter()
         .find(|l| l.id == library_id)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -33,18 +33,15 @@ pub async fn list_authors(
     Ok(Json(authors))
 }
 
-/// GET /api/v1/authors/:id — author detail with series list
+/// GET /api/v1/authors/:id
 pub async fn get_author(
     State(state): State<AppState>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<AuthorDetail>, StatusCode> {
-    // Search across all libraries for this author
-    for library in &state.libraries {
-        let authors = library
-            .source
-            .authors()
-            .await
-            .unwrap_or_default();
+    let libraries = state.libraries.read().await;
+
+    for library in libraries.iter() {
+        let authors = library.source.authors().await.unwrap_or_default();
 
         if let Some(author) = authors.into_iter().find(|a| a.id == author_id) {
             let series = library
@@ -75,7 +72,9 @@ pub async fn author_series(
     State(state): State<AppState>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<Vec<ironshelf_core::model::Series>>, StatusCode> {
-    for library in &state.libraries {
+    let libraries = state.libraries.read().await;
+
+    for library in libraries.iter() {
         let series = library
             .source
             .series_by_author(author_id)
@@ -87,7 +86,6 @@ pub async fn author_series(
         }
     }
 
-    // Author may exist but have no series
     Ok(Json(vec![]))
 }
 
@@ -96,7 +94,9 @@ pub async fn author_standalone(
     State(state): State<AppState>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<Vec<ironshelf_core::model::Book>>, StatusCode> {
-    for library in &state.libraries {
+    let libraries = state.libraries.read().await;
+
+    for library in libraries.iter() {
         let books = library
             .source
             .standalone_books(author_id)

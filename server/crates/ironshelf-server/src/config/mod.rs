@@ -1,9 +1,10 @@
-//! Configuration loading from TOML file + environment variable overrides.
+//! Server bootstrap configuration (TOML/env).
+//! Only server-level settings here. Libraries are managed via API + stored in DB.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// Top-level server configuration.
+/// Server bootstrap config. Libraries NOT here — they live in the DB.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(default = "default_port")]
@@ -15,23 +16,6 @@ pub struct Config {
     /// Path to the Ironshelf own database (created if missing).
     #[serde(default = "default_ironshelf_db")]
     pub database_path: PathBuf,
-
-    /// Configured Calibre libraries.
-    #[serde(default)]
-    pub libraries: Vec<LibraryConfig>,
-}
-
-/// A single library source configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryConfig {
-    pub name: String,
-    pub path: PathBuf,
-
-    #[serde(default = "default_library_type")]
-    pub library_type: String,
-
-    #[serde(default = "default_source_kind")]
-    pub source_kind: String,
 }
 
 fn default_port() -> u16 {
@@ -46,17 +30,9 @@ fn default_ironshelf_db() -> PathBuf {
     PathBuf::from("ironshelf.db")
 }
 
-fn default_library_type() -> String {
-    "book".to_string()
-}
-
-fn default_source_kind() -> String {
-    "calibre".to_string()
-}
-
 impl Config {
-    /// Load config from a TOML file, with env var overrides.
-    /// Looks for config at: $IRONSHELF_CONFIG, ./ironshelf.toml, /etc/ironshelf/config.toml
+    /// Load config from TOML file + env var overrides.
+    /// Search: $IRONSHELF_CONFIG → ./ironshelf.toml → /etc/ironshelf/config.toml
     pub fn load() -> anyhow::Result<Self> {
         let config_path = std::env::var("IRONSHELF_CONFIG")
             .map(PathBuf::from)
@@ -82,12 +58,10 @@ impl Config {
             let content = std::fs::read_to_string(&path)?;
             toml::from_str(&content)?
         } else {
-            // No config file — use defaults
             Config {
                 port: default_port(),
                 host: default_host(),
                 database_path: default_ironshelf_db(),
-                libraries: vec![],
             }
         };
 
