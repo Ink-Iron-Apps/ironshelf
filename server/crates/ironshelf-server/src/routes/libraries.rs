@@ -3,9 +3,12 @@ use axum::http::StatusCode;
 use axum::Json;
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::model::{LibraryType, SourceKind};
+use ironshelf_core::scan::FolderSource;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use crate::state::{AppState, LoadedLibrary};
+use crate::state::{AppState, LibrarySource, LoadedLibrary};
 
 #[derive(Serialize)]
 pub struct LibrarySummary {
@@ -76,7 +79,7 @@ pub async fn get_library(
         .find(|l| l.id == library_id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let custom_columns = library.source.custom_columns().await.unwrap_or_default();
+    let custom_columns = library.source.custom_columns().await;
 
     Ok(Json(LibraryDetail {
         summary: LibrarySummary {
@@ -138,7 +141,22 @@ pub async fn create_library(
         .trim_matches('"')
         .to_string();
 
-    match CalibreSource::open(&request.path).await {
+    let source = match request.source_kind {
+        SourceKind::Calibre => {
+            CalibreSource::open(&request.path)
+                .await
+                .map(LibrarySource::Calibre)
+                .map_err(|e| e.to_string())
+        }
+        SourceKind::Folder => {
+            FolderSource::open(&request.path)
+                .await
+                .map(|s| LibrarySource::Folder(Arc::new(RwLock::new(s))))
+                .map_err(|e| e.to_string())
+        }
+    };
+
+    match source {
         Ok(source) => {
             let mut libraries = state.libraries.write().await;
             libraries.push(LoadedLibrary {
@@ -218,11 +236,16 @@ pub async fn scan_library(
     Path(library_id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let libraries = state.libraries.read().await;
-    let _library = libraries
+    let library = libraries
         .iter()
         .find(|l| l.id == library_id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // TODO(M3): trigger rescan for FolderSource. Calibre re-reads on query (metadata.db is truth).
+    // Folder source: rescan directory tree. Calibre: no-op (metadata.db is truth).
+    if let LibrarySource::Folder(ref folder) = library.source {
+        let mut source = folder.write().await;
+        source.scan().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
     Ok(StatusCode::ACCEPTED)
 }

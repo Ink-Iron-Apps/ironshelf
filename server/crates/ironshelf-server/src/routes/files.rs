@@ -24,7 +24,11 @@ pub async fn get_cover(
                 return Err(StatusCode::NOT_FOUND);
             }
 
-            let cover_path = library.source.cover_path(&book.path);
+            let cover_path = library
+                .source
+                .cover_path(&book.path)
+                .ok_or(StatusCode::NOT_FOUND)?;
+
             let bytes = fs::read(&cover_path)
                 .await
                 .map_err(|_| StatusCode::NOT_FOUND)?;
@@ -44,7 +48,7 @@ pub async fn get_cover(
     Err(StatusCode::NOT_FOUND)
 }
 
-/// GET /api/v1/books/:id/file?format=EPUB — serve book file (supports Range)
+/// GET /api/v1/books/:id/file?format=EPUB — serve book file
 pub async fn get_file(
     State(state): State<AppState>,
     Path(book_id): Path<i64>,

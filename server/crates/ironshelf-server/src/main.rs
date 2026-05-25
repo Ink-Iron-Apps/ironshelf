@@ -9,8 +9,9 @@ use axum::middleware;
 use axum::{routing::get, Json, Router};
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::db::IronshelfDb;
+use ironshelf_core::scan::FolderSource;
 use serde_json::json;
-use state::{AppState, LoadedLibrary};
+use state::{AppState, LibrarySource, LoadedLibrary};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
@@ -119,24 +120,40 @@ pub async fn load_libraries_from_db(ironshelf_db: &IronshelfDb) -> Vec<LoadedLib
     let mut libraries = Vec::new();
 
     for stored_lib in stored {
-        match CalibreSource::open(&stored_lib.path).await {
-            Ok(source) => {
-                tracing::info!("opened library '{}' at {}", stored_lib.name, stored_lib.path);
-                libraries.push(LoadedLibrary {
-                    id: stored_lib.id,
-                    name: stored_lib.name,
-                    library_type: stored_lib.library_type,
-                    source_kind: stored_lib.source_kind,
-                    source,
-                });
+        let source = match stored_lib.source_kind.as_str() {
+            "calibre" => {
+                match CalibreSource::open(&stored_lib.path).await {
+                    Ok(s) => Some(LibrarySource::Calibre(s)),
+                    Err(e) => {
+                        tracing::error!("failed to open calibre library '{}': {e}", stored_lib.name);
+                        None
+                    }
+                }
             }
-            Err(error) => {
-                tracing::error!(
-                    "failed to open library '{}' at {}: {error}",
-                    stored_lib.name,
-                    stored_lib.path
-                );
+            "folder" => {
+                match FolderSource::open(&stored_lib.path).await {
+                    Ok(s) => Some(LibrarySource::Folder(Arc::new(RwLock::new(s)))),
+                    Err(e) => {
+                        tracing::error!("failed to open folder library '{}': {e}", stored_lib.name);
+                        None
+                    }
+                }
             }
+            other => {
+                tracing::error!("unknown source_kind '{}' for library '{}'", other, stored_lib.name);
+                None
+            }
+        };
+
+        if let Some(source) = source {
+            tracing::info!("opened library '{}' ({}) at {}", stored_lib.name, stored_lib.source_kind, stored_lib.path);
+            libraries.push(LoadedLibrary {
+                id: stored_lib.id,
+                name: stored_lib.name,
+                library_type: stored_lib.library_type,
+                source_kind: stored_lib.source_kind,
+                source,
+            });
         }
     }
 
