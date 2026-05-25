@@ -240,6 +240,7 @@
       author: () => renderAuthor(parsed.params.id),
       series: () => renderSeries(parsed.params.id),
       book: () => renderBook(parsed.params.id),
+      read: () => openReader(parsed.params.id),
       settings: renderSettings,
       users: renderUsers,
     };
@@ -250,6 +251,36 @@
       await handler();
     } else {
       navigateTo('/libraries');
+    }
+  }
+
+  // --- Reader Integration ---
+
+  let readerScriptLoaded = false;
+
+  function loadReaderScript() {
+    if (readerScriptLoaded) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/js/reader.js';
+      script.onload = () => { readerScriptLoaded = true; resolve(); };
+      script.onerror = () => reject(new Error('Failed to load reader module'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function openReader(bookId) {
+    try {
+      await loadReaderScript();
+      if (window.IronshelfReader) {
+        window.IronshelfReader.open(bookId);
+      } else {
+        toast('Reader module failed to initialize', 'error');
+        navigateTo(`/book/${bookId}`);
+      }
+    } catch (err) {
+      toast(err.message || 'Failed to open reader', 'error');
+      navigateTo(`/book/${bookId}`);
     }
   }
 
@@ -1141,6 +1172,11 @@
 
             ${formats.length > 0 ? `
               <div class="book-detail-formats">
+                ${formats.some(f => f.kind.toLowerCase() === 'epub') ? `
+                  <a href="#/read/${bookId}" class="btn btn-read" aria-label="Read this book">
+                    ${icon('bookOpen', 16)} Read
+                  </a>
+                ` : ''}
                 ${formats.map(f => `
                   <a href="${API}/books/${bookId}/file?format=${f.kind}" class="btn btn-primary" download aria-label="Download ${f.kind} format">
                     ${icon('download', 16)} ${escapeHtml(f.kind.toUpperCase())}
