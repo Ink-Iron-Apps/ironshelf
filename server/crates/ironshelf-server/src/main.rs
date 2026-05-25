@@ -118,6 +118,29 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/books/{id}/bookmarks/{bookmark_id}",
             axum::routing::delete(routes::progress::delete_bookmark),
         )
+        // Collections (reading lists)
+        .route(
+            "/api/v1/collections",
+            get(routes::collections::list_collections).post(routes::collections::create_collection),
+        )
+        .route(
+            "/api/v1/collections/{id}",
+            get(routes::collections::get_collection)
+                .patch(routes::collections::update_collection)
+                .delete(routes::collections::delete_collection),
+        )
+        .route(
+            "/api/v1/collections/{id}/books",
+            axum::routing::post(routes::collections::add_book_to_collection),
+        )
+        .route(
+            "/api/v1/collections/{id}/books/{book_id}",
+            axum::routing::delete(routes::collections::remove_book_from_collection),
+        )
+        // Stats + activity
+        .route("/api/v1/stats", get(routes::stats::server_stats))
+        .route("/api/v1/activity", get(routes::stats::user_activity))
+        .route("/api/v1/activity/all", get(routes::stats::server_activity))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,

@@ -26,6 +26,39 @@ pub struct StoredUser {
     pub permissions: Vec<String>,
 }
 
+/// A collection (reading list) as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredCollection {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_public: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A book entry within a collection, with its position.
+#[derive(Debug, Clone)]
+pub struct StoredCollectionBook {
+    pub collection_id: String,
+    pub book_id: String,
+    pub position: i64,
+    pub added_at: String,
+}
+
+/// An activity log entry as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredActivityLog {
+    pub id: i64,
+    pub user_id: String,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub details_json: Option<String>,
+    pub created_at: String,
+}
+
 /// A library as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredLibrary {
@@ -68,6 +101,15 @@ impl IronshelfDb {
 
         let migration_002 = include_str!("migrations/002_invites.sql");
         sqlx::raw_sql(migration_002).execute(&self.pool).await?;
+
+        let migration_003 = include_str!("migrations/003_collections.sql");
+        sqlx::raw_sql(migration_003).execute(&self.pool).await?;
+
+        let migration_004 = include_str!("migrations/004_metadata_cache.sql");
+        sqlx::raw_sql(migration_004).execute(&self.pool).await?;
+
+        let migration_005 = include_str!("migrations/005_activity_log.sql");
+        sqlx::raw_sql(migration_005).execute(&self.pool).await?;
 
         Ok(())
     }
@@ -304,4 +346,445 @@ impl IronshelfDb {
 
         Ok(result.rows_affected() > 0)
     }
+
+    // --- Collections (reading lists) ---
+
+    /// List collections visible to a user: their own collections + all public collections.
+    pub async fn list_collections(&self, user_id: &str) -> Result<Vec<StoredCollection>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, name, description, is_public, created_at, updated_at \
+             FROM collections \
+             WHERE user_id = ? OR is_public = 1 \
+             ORDER BY updated_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredCollection {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                name: row.get("name"),
+                description: row.get("description"),
+                is_public: row.get::<i32, _>("is_public") != 0,
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// Get a single collection by ID.
+    pub async fn get_collection(&self, collection_id: &str) -> Result<StoredCollection, DbError> {
+        let row = sqlx::query(
+            "SELECT id, user_id, name, description, is_public, created_at, updated_at \
+             FROM collections WHERE id = ?",
+        )
+        .bind(collection_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| StoredCollection {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            name: row.get("name"),
+            description: row.get("description"),
+            is_public: row.get::<i32, _>("is_public") != 0,
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+        .ok_or(DbError::NotFound)
+    }
+
+    /// Create a new collection. Returns the generated ID.
+    pub async fn create_collection(
+        &self,
+        user_id: &str,
+        name: &str,
+        description: Option<&str>,
+        is_public: bool,
+    ) -> Result<String, DbError> {
+        let collection_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO collections (id, user_id, name, description, is_public) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&collection_id)
+        .bind(user_id)
+        .bind(name)
+        .bind(description)
+        .bind(is_public as i32)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(collection_id)
+    }
+
+    /// Update a collection's mutable fields.
+    pub async fn update_collection(
+        &self,
+        collection_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        is_public: Option<bool>,
+    ) -> Result<(), DbError> {
+        if let Some(name) = name {
+            sqlx::query("UPDATE collections SET name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+                .bind(name)
+                .bind(collection_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(description) = description {
+            sqlx::query("UPDATE collections SET description = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+                .bind(description)
+                .bind(collection_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(is_public) = is_public {
+            sqlx::query("UPDATE collections SET is_public = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+                .bind(is_public as i32)
+                .bind(collection_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a collection. CASCADE removes associated book entries.
+    pub async fn delete_collection(&self, collection_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM collections WHERE id = ?")
+            .bind(collection_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Add a book to a collection at a given position.
+    pub async fn add_book_to_collection(
+        &self,
+        collection_id: &str,
+        book_id: &str,
+        position: i64,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO collection_books (collection_id, book_id, position) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(collection_id, book_id) DO UPDATE SET position = excluded.position",
+        )
+        .bind(collection_id)
+        .bind(book_id)
+        .bind(position)
+        .execute(&self.pool)
+        .await?;
+
+        // Touch the parent collection's updated_at
+        sqlx::query("UPDATE collections SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+            .bind(collection_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Remove a book from a collection.
+    pub async fn remove_book_from_collection(
+        &self,
+        collection_id: &str,
+        book_id: &str,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query(
+            "DELETE FROM collection_books WHERE collection_id = ? AND book_id = ?",
+        )
+        .bind(collection_id)
+        .bind(book_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+
+        // Touch the parent collection's updated_at
+        sqlx::query("UPDATE collections SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+            .bind(collection_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get all books in a collection, ordered by position.
+    pub async fn get_collection_books(
+        &self,
+        collection_id: &str,
+    ) -> Result<Vec<StoredCollectionBook>, DbError> {
+        let rows = sqlx::query(
+            "SELECT collection_id, book_id, position, added_at \
+             FROM collection_books \
+             WHERE collection_id = ? \
+             ORDER BY position ASC, added_at ASC",
+        )
+        .bind(collection_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredCollectionBook {
+                collection_id: row.get("collection_id"),
+                book_id: row.get("book_id"),
+                position: row.get("position"),
+                added_at: row.get("added_at"),
+            })
+            .collect())
+    }
+
+    // --- Activity logging ---
+
+    /// Record a user action in the activity log.
+    pub async fn log_activity(
+        &self,
+        user_id: &str,
+        action: &str,
+        target_type: Option<&str>,
+        target_id: Option<&str>,
+        details_json: Option<&str>,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO activity_log (user_id, action, target_type, target_id, details_json) \
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(user_id)
+        .bind(action)
+        .bind(target_type)
+        .bind(target_id)
+        .bind(details_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Fetch recent activity for a specific user, ordered newest first.
+    pub async fn get_recent_activity(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<StoredActivityLog>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, action, target_type, target_id, details_json, created_at \
+             FROM activity_log \
+             WHERE user_id = ? \
+             ORDER BY created_at DESC \
+             LIMIT ?",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredActivityLog {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                action: row.get("action"),
+                target_type: row.get("target_type"),
+                target_id: row.get("target_id"),
+                details_json: row.get("details_json"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Fetch server-wide recent activity (all users), ordered newest first.
+    pub async fn get_server_activity(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<StoredActivityLog>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, action, target_type, target_id, details_json, created_at \
+             FROM activity_log \
+             ORDER BY created_at DESC \
+             LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredActivityLog {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                action: row.get("action"),
+                target_type: row.get("target_type"),
+                target_id: row.get("target_id"),
+                details_json: row.get("details_json"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    // --- Metadata cache ---
+
+    /// Upsert a cached metadata result from an external provider.
+    pub async fn upsert_metadata_cache(
+        &self,
+        book_id: &str,
+        provider: &str,
+        external_id: Option<&str>,
+        metadata_json: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO metadata_cache (book_id, provider, external_id, metadata_json) \
+             VALUES (?, ?, ?, ?) \
+             ON CONFLICT(book_id, provider) DO UPDATE SET \
+               external_id = excluded.external_id, \
+               metadata_json = excluded.metadata_json, \
+               fetched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        )
+        .bind(book_id)
+        .bind(provider)
+        .bind(external_id)
+        .bind(metadata_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get cached metadata for a book from a specific provider.
+    pub async fn get_metadata_cache(
+        &self,
+        book_id: &str,
+        provider: &str,
+    ) -> Result<Option<String>, DbError> {
+        let row = sqlx::query(
+            "SELECT metadata_json FROM metadata_cache WHERE book_id = ? AND provider = ?",
+        )
+        .bind(book_id)
+        .bind(provider)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| row.get("metadata_json")))
+    }
+
+    /// Get all cached metadata entries for a book (all providers).
+    pub async fn get_all_metadata_cache(
+        &self,
+        book_id: &str,
+    ) -> Result<Vec<(String, String, String)>, DbError> {
+        let rows = sqlx::query(
+            "SELECT provider, metadata_json, fetched_at \
+             FROM metadata_cache WHERE book_id = ? ORDER BY fetched_at DESC",
+        )
+        .bind(book_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("provider"),
+                    row.get::<String, _>("metadata_json"),
+                    row.get::<String, _>("fetched_at"),
+                )
+            })
+            .collect())
+    }
+
+    /// Delete cached metadata for a book (all providers).
+    pub async fn delete_metadata_cache(&self, book_id: &str) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM metadata_cache WHERE book_id = ?")
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // --- Book overrides (enriched metadata applied by user) ---
+
+    /// Apply (upsert) a metadata override for a book.
+    pub async fn upsert_book_override(
+        &self,
+        book_id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        cover_url: Option<&str>,
+        tags_json: Option<&str>,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO book_overrides (book_id, title, description, cover_url, tags_json) \
+             VALUES (?, ?, ?, ?, ?) \
+             ON CONFLICT(book_id) DO UPDATE SET \
+               title = COALESCE(excluded.title, book_overrides.title), \
+               description = COALESCE(excluded.description, book_overrides.description), \
+               cover_url = COALESCE(excluded.cover_url, book_overrides.cover_url), \
+               tags_json = COALESCE(excluded.tags_json, book_overrides.tags_json), \
+               applied_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+        )
+        .bind(book_id)
+        .bind(title)
+        .bind(description)
+        .bind(cover_url)
+        .bind(tags_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get the override for a book, if any.
+    pub async fn get_book_override(
+        &self,
+        book_id: &str,
+    ) -> Result<Option<StoredBookOverride>, DbError> {
+        let row = sqlx::query(
+            "SELECT book_id, title, description, cover_url, tags_json, applied_at \
+             FROM book_overrides WHERE book_id = ?",
+        )
+        .bind(book_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredBookOverride {
+            book_id: row.get("book_id"),
+            title: row.get("title"),
+            description: row.get("description"),
+            cover_url: row.get("cover_url"),
+            tags_json: row.get("tags_json"),
+            applied_at: row.get("applied_at"),
+        }))
+    }
+
+    /// Delete the override for a book.
+    pub async fn delete_book_override(&self, book_id: &str) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM book_overrides WHERE book_id = ?")
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// A book override as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredBookOverride {
+    pub book_id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub cover_url: Option<String>,
+    pub tags_json: Option<String>,
+    pub applied_at: String,
 }
