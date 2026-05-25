@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.inknironapps.ironshelf</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/ironshelf-server</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>IRONSHELF_CONFIG</key>
+        <string>${HOME}/.config/ironshelf/config.toml</string>
+        <key>RUST_LOG</key>
+        <string>ironshelf_server=info</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>${HOME}/Library/Logs/ironshelf.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>${HOME}/Library/Logs/ironshelf.log</string>
+</dict>
+</plist>
