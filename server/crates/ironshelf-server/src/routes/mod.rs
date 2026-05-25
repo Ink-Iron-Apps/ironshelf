@@ -5,5 +5,6 @@ pub mod authors;
 pub mod books;
 pub mod files;
 pub mod libraries;
+pub mod opds;
 pub mod progress;
 pub mod series;
