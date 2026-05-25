@@ -1,0 +1,148 @@
+//! Authentication: session cookies + Bearer API key.
+//! First user to register becomes owner.
+
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
+use axum::{
+    extract::{Request, State},
+    http::{header, StatusCode},
+    middleware::Next,
+    response::Response,
+};
+use sqlx::Row;
+
+use crate::state::AppState;
+
+/// Authenticated user context, extracted by middleware.
+#[derive(Debug, Clone)]
+pub struct AuthUser {
+    pub user_id: String,
+    pub username: String,
+    pub is_owner: bool,
+}
+
+/// Hash a password with argon2.
+pub fn hash_password(password: &str) -> Result<String, StatusCode> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Verify password against hash.
+pub fn verify_password(password: &str, hash: &str) -> bool {
+    let parsed = match PasswordHash::new(hash) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok()
+}
+
+/// Auth middleware — checks session cookie OR Bearer token.
+/// Injects AuthUser into request extensions.
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_user = extract_auth_user(&state, &request).await?;
+    request.extensions_mut().insert(auth_user);
+    Ok(next.run(request).await)
+}
+
+/// Extract authenticated user from request headers.
+async fn extract_auth_user(state: &AppState, request: &Request) -> Result<AuthUser, StatusCode> {
+    let pool = state.ironshelf_db.pool();
+
+    // Try Bearer token first (API key: "Bearer irs_<prefix>.<secret>")
+    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
+        let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
+        if let Some(token) = auth_str.strip_prefix("Bearer ") {
+            return validate_api_key(pool, token).await;
+        }
+    }
+
+    // Try session cookie
+    if let Some(cookie_header) = request.headers().get(header::COOKIE) {
+        let cookie_str = cookie_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
+        if let Some(session_id) = extract_session_cookie(cookie_str) {
+            return validate_session(pool, &session_id).await;
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+/// Validate an API key (format: "irs_<prefix>.<secret>").
+async fn validate_api_key(pool: &sqlx::SqlitePool, token: &str) -> Result<AuthUser, StatusCode> {
+    // Split into prefix + secret
+    let token = token.strip_prefix("irs_").ok_or(StatusCode::UNAUTHORIZED)?;
+    let (prefix, secret) = token.split_once('.').ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Look up key by prefix
+    let row = sqlx::query(
+        "SELECT ak.key_hash, ak.user_id, u.username, u.is_owner \
+         FROM api_keys ak JOIN users u ON u.id = ak.user_id \
+         WHERE ak.prefix = ?",
+    )
+    .bind(prefix)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let key_hash: String = row.get("key_hash");
+    if !verify_password(secret, &key_hash) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(AuthUser {
+        user_id: row.get("user_id"),
+        username: row.get("username"),
+        is_owner: row.get::<i32, _>("is_owner") != 0,
+    })
+}
+
+/// Validate a session ID.
+async fn validate_session(pool: &sqlx::SqlitePool, session_id: &str) -> Result<AuthUser, StatusCode> {
+    let row = sqlx::query(
+        "SELECT s.user_id, u.username, u.is_owner, s.expires_at \
+         FROM sessions s JOIN users u ON u.id = s.user_id \
+         WHERE s.id = ?",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Check expiry
+    let expires_at: String = row.get("expires_at");
+    let expires = chrono::DateTime::parse_from_rfc3339(&expires_at)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if expires < chrono::Utc::now() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(AuthUser {
+        user_id: row.get("user_id"),
+        username: row.get("username"),
+        is_owner: row.get::<i32, _>("is_owner") != 0,
+    })
+}
+
+/// Extract session ID from cookie header.
+fn extract_session_cookie(cookie_str: &str) -> Option<String> {
+    cookie_str
+        .split(';')
+        .map(|s| s.trim())
+        .find(|s| s.starts_with("ironshelf_session="))
+        .and_then(|s| s.strip_prefix("ironshelf_session="))
+        .map(|s| s.to_string())
+}

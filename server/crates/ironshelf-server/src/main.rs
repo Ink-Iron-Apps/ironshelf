@@ -1,13 +1,11 @@
 //! ironshelf-server — Axum HTTP server for the Ironshelf ebook platform.
-//!
-//! Like Plex for books: serves libraries with Author → Series → Book hierarchy.
-//! Libraries are managed via API (add/remove/configure through GUI).
-//! Reads Calibre metadata.db (RO) as source. Flutter app is the reader client.
 
+mod auth;
 mod config;
 mod routes;
 mod state;
 
+use axum::middleware;
 use axum::{routing::get, Json, Router};
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::db::IronshelfDb;
@@ -29,12 +27,10 @@ async fn main() -> anyhow::Result<()> {
 
     let config = config::Config::load()?;
 
-    // Open Ironshelf's own database (libraries stored here, not in config)
     let ironshelf_db = IronshelfDb::open(&config.database_path).await?;
     ironshelf_db.migrate().await?;
     tracing::info!("ironshelf db ready at {}", config.database_path.display());
 
-    // Load libraries from DB
     let libraries = load_libraries_from_db(&ironshelf_db).await;
     tracing::info!("{} libraries loaded from database", libraries.len());
 
@@ -43,10 +39,26 @@ async fn main() -> anyhow::Result<()> {
         ironshelf_db,
     };
 
-    let app = Router::new()
-        // Health
+    // Public routes (no auth required)
+    let public_routes = Router::new()
         .route("/health", get(health))
-        // Libraries (CRUD — managed via GUI)
+        .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
+        .route("/api/v1/auth/login", axum::routing::post(routes::auth::login));
+
+    // Protected routes (auth required)
+    let protected_routes = Router::new()
+        // Auth management
+        .route("/api/v1/auth/me", get(routes::auth::me))
+        .route("/api/v1/auth/logout", axum::routing::post(routes::auth::logout))
+        .route(
+            "/api/v1/auth/api-keys",
+            get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
+        )
+        .route(
+            "/api/v1/auth/api-keys/{id}",
+            axum::routing::delete(routes::auth::delete_api_key),
+        )
+        // Libraries (CRUD via GUI)
         .route(
             "/api/v1/libraries",
             get(routes::libraries::list_libraries).post(routes::libraries::create_library),
@@ -68,6 +80,29 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/series/{id}", get(routes::series::get_series))
         // Books
         .route("/api/v1/books/{id}", get(routes::books::get_book))
+        .route("/api/v1/books/{id}/cover", get(routes::files::get_cover))
+        .route("/api/v1/books/{id}/file", get(routes::files::get_file))
+        // Progress + bookmarks
+        .route(
+            "/api/v1/books/{id}/progress",
+            get(routes::progress::get_progress).put(routes::progress::update_progress),
+        )
+        .route(
+            "/api/v1/books/{id}/bookmarks",
+            get(routes::progress::list_bookmarks).post(routes::progress::create_bookmark),
+        )
+        .route(
+            "/api/v1/books/{id}/bookmarks/{bookmark_id}",
+            axum::routing::delete(routes::progress::delete_bookmark),
+        )
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth::auth_middleware,
+        ));
+
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
@@ -78,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Load all libraries from the database and open their sources.
+/// Load all libraries from DB and open their sources.
 pub async fn load_libraries_from_db(ironshelf_db: &IronshelfDb) -> Vec<LoadedLibrary> {
     let stored = ironshelf_db.list_libraries().await.unwrap_or_default();
     let mut libraries = Vec::new();
