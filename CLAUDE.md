@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Ironshelf — Project Rules
 
 Inherits global + `/mnt/s/coding/CLAUDE.md`. Below = project-specific. Internal `.md` = caveman ultra (this file too). Public `.md` (README, store listings) = normal prose.
@@ -8,9 +12,30 @@ Self-host ebook server + reader. Killer feature: **Author → Series → Book** 
 
 ## Layout
 
-- `server/` — Rust workspace. `ironshelf-server` (axum bin), `ironshelf-core` (domain: calibre reader, scanner, epub parse, models).
-- `app/` — Flutter.
+- `server/` — Rust workspace (resolver 2). Crates under `server/crates/`:
+  - `ironshelf-core` — domain + IO: calibre reader, scanner, epub parse, models, own DB.
+  - `ironshelf-server` — axum bin: routes, middleware, aggregation.
+- `app/` — Flutter (SDK >=3.4). Riverpod state, go_router nav, dio HTTP.
 - `docs/` — design. START-HERE = kickoff. ARCHITECTURE, DATA-MODEL, API, CALIBRE-INTEGRATION, ROADMAP.
+
+## Commands
+
+```bash
+# Server
+cd server && cargo build                    # debug build
+cd server && cargo build --release          # release build
+cd server && cargo test                     # all tests (workspace)
+cd server && cargo test -p ironshelf-core   # single crate tests
+cd server && cargo clippy --workspace       # lint
+IRONSHELF_PORT=10810 cargo run -p ironshelf-server  # run locally (default port 10810)
+# Env: RUST_LOG=ironshelf_server=debug,tower_http=debug for verbose tracing
+
+# Flutter app
+cd app && flutter test                      # unit tests
+cd app && flutter analyze                   # lint
+cd app && flutter build apk --release       # release APK
+cd app && flutter build appbundle --release # release AAB
+```
 
 ## Hard rules
 
@@ -21,16 +46,32 @@ Self-host ebook server + reader. Killer feature: **Author → Series → Book** 
 - Var naming: full words, bool prefixes, no vague `data/result/temp` (global standard).
 - Git: work `claude/dev`, never direct `main`. Conventional commits.
 
-## Build (when CI set up)
+## Architecture
 
-- Server: `cd server && cargo build --release` → JDK n/a. Bin `ironshelf-server`.
-- App: `cd app && flutter build apk --release` / `appbundle`.
+```
+Flutter app ──HTTP/JSON+OPDS──> Axum server ──read──> Calibre metadata.db (SQLite, RO)
+                                      │      ──read──> book files (epub/pdf/cbz)
+                                      │      ──scan──> plain folders + embedded epub OPF
+                                      └──read/write──> Ironshelf DB (SQLite: users/progress/prefs)
+```
+
+**Core abstraction:** `trait LibrarySource` — impls: `CalibreSource` (metadata.db), `FolderSource` (scan+embedded). Library picks one source. Multiple libraries = hybrid.
+
+**Browse hierarchy:** Library → Authors → (Series | Standalone) → Books. Series_index orders books within series.
+
+**Auth:** session cookies (web) + API key Bearer (app). CF Access handled by custom headers passthrough (app stores per-server CF-Access-Client-Id/Secret, sent every request, consumed at edge).
 
 ## Key decisions (locked)
 
 - Backend Rust/Axum. App Flutter. Data = hybrid (Calibre + scan + embedded) + Calibre custom columns.
 - API = REST + JSON + OPDS (revisit GraphQL only if hierarchy queries demand).
 - Auth = sessions (web) + API key Bearer (app). App MUST support custom request headers (Cloudflare Access service tokens).
+- Deps: sqlx (SQLite, runtime-tokio), argon2, tower-http (trace/cors/fs), chrono, uuid.
+- Flutter deps: dio, flutter_riverpod, go_router, shared_preferences, cached_network_image, package_info_plus.
+
+## Current state
+
+**M0 (scaffold) complete.** Next = M1 (Calibre read + hierarchy API). See `docs/ROADMAP.md` for full milestone plan.
 
 ## Settings screens (global app rules apply)
 

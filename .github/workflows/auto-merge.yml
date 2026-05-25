@@ -1,0 +1,54 @@
+name: Auto-merge claude/dev → main
+
+on:
+  push:
+    branches: [claude/dev]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and merge PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if there are differences between claude/dev and main
+          if git diff --quiet origin/main...origin/claude/dev 2>/dev/null; then
+            echo "No changes to merge"
+            exit 0
+          fi
+
+          # Create PR
+          PR_URL=$(gh pr create \
+            --base main \
+            --head claude/dev \
+            --title "Auto-merge claude/dev → main" \
+            --body "Automated merge from claude/dev branch." \
+            2>/dev/null || echo "exists")
+
+          if [ "$PR_URL" = "exists" ]; then
+            PR_URL=$(gh pr list --head claude/dev --base main --json url --jq '.[0].url')
+          fi
+
+          # Merge with admin privileges
+          gh pr merge "$PR_URL" --admin --merge --delete-branch=false
+
+      - name: Dispatch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release.yml --ref main 2>/dev/null || true
