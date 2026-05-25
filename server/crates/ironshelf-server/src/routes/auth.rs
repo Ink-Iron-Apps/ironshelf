@@ -1,0 +1,310 @@
+use axum::extract::State;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::{Deserialize, Serialize};
+use sqlx::Row;
+
+use crate::auth::{hash_password, verify_password, AuthUser};
+use crate::state::AppState;
+
+#[derive(Deserialize)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthResponse {
+    pub user_id: String,
+    pub username: String,
+    pub is_owner: bool,
+    pub session_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateApiKeyRequest {
+    pub label: String,
+}
+
+#[derive(Serialize)]
+pub struct ApiKeyResponse {
+    /// Full key shown once: "irs_<prefix>.<secret>"
+    pub key: String,
+    pub prefix: String,
+    pub label: String,
+}
+
+#[derive(Serialize)]
+pub struct ApiKeySummary {
+    pub id: String,
+    pub prefix: String,
+    pub label: String,
+    pub created_at: String,
+}
+
+/// POST /api/v1/auth/register — first user becomes owner
+pub async fn register(
+    State(state): State<AppState>,
+    Json(request): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let pool = state.ironshelf_db.pool();
+
+    // Check if any users exist (first = owner)
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await
+        .map_err(|_| server_error("db_error"))?;
+
+    let is_owner = user_count == 0;
+
+    // Check username not taken
+    let existing: Option<sqlx::sqlite::SqliteRow> =
+        sqlx::query("SELECT id FROM users WHERE username = ?")
+            .bind(&request.username)
+            .fetch_optional(pool)
+            .await
+            .map_err(|_| server_error("db_error"))?;
+
+    if existing.is_some() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Username already taken", "code": "username_taken"})),
+        ));
+    }
+
+    let password_hash = hash_password(&request.password)
+        .map_err(|_| server_error("hash_error"))?;
+
+    let user_id = uuid::Uuid::new_v4().to_string();
+
+    sqlx::query("INSERT INTO users (id, username, password_hash, is_owner) VALUES (?, ?, ?, ?)")
+        .bind(&user_id)
+        .bind(&request.username)
+        .bind(&password_hash)
+        .bind(is_owner as i32)
+        .execute(pool)
+        .await
+        .map_err(|_| server_error("db_error"))?;
+
+    // Create session
+    let session_id = create_session(pool, &user_id).await
+        .map_err(|_| server_error("session_error"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthResponse {
+            user_id,
+            username: request.username,
+            is_owner,
+            session_id,
+        }),
+    ))
+}
+
+/// POST /api/v1/auth/login
+pub async fn login(
+    State(state): State<AppState>,
+    Json(request): Json<LoginRequest>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let pool = state.ironshelf_db.pool();
+
+    let row = sqlx::query("SELECT id, username, password_hash, is_owner FROM users WHERE username = ?")
+        .bind(&request.username)
+        .fetch_optional(pool)
+        .await
+        .map_err(|_| server_error("db_error"))?
+        .ok_or_else(|| (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid credentials", "code": "invalid_credentials"})),
+        ))?;
+
+    let password_hash: String = row.get("password_hash");
+    if !verify_password(&request.password, &password_hash) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid credentials", "code": "invalid_credentials"})),
+        ));
+    }
+
+    let user_id: String = row.get("id");
+    let username: String = row.get("username");
+    let is_owner: bool = row.get::<i32, _>("is_owner") != 0;
+
+    let session_id = create_session(pool, &user_id).await
+        .map_err(|_| server_error("session_error"))?;
+
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "username": username,
+        "is_owner": is_owner,
+        "session_id": session_id,
+    });
+
+    // Set session cookie
+    let cookie = format!(
+        "ironshelf_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
+        session_id
+    );
+
+    let response = (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(body),
+    )
+        .into_response();
+
+    Ok(response)
+}
+
+/// POST /api/v1/auth/logout
+pub async fn logout(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> StatusCode {
+    let pool = state.ironshelf_db.pool();
+    let _ = sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+        .bind(&user.user_id)
+        .execute(pool)
+        .await;
+    StatusCode::NO_CONTENT
+}
+
+/// GET /api/v1/auth/me
+pub async fn me(
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "user_id": user.user_id,
+        "username": user.username,
+        "is_owner": user.is_owner,
+    }))
+}
+
+/// POST /api/v1/auth/api-keys — create new API key
+pub async fn create_api_key(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+    Json(request): Json<CreateApiKeyRequest>,
+) -> Result<(StatusCode, Json<ApiKeyResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let pool = state.ironshelf_db.pool();
+
+    // Generate prefix (8 chars) + secret (32 chars)
+    let prefix = generate_random_string(8);
+    let secret = generate_random_string(32);
+    let full_key = format!("irs_{prefix}.{secret}");
+
+    let secret_hash = hash_password(&secret)
+        .map_err(|_| server_error("hash_error"))?;
+
+    let key_id = uuid::Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO api_keys (id, user_id, prefix, key_hash, label) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&key_id)
+    .bind(&user.user_id)
+    .bind(&prefix)
+    .bind(&secret_hash)
+    .bind(&request.label)
+    .execute(pool)
+    .await
+    .map_err(|_| server_error("db_error"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ApiKeyResponse {
+            key: full_key,
+            prefix,
+            label: request.label,
+        }),
+    ))
+}
+
+/// GET /api/v1/auth/api-keys — list user's API keys
+pub async fn list_api_keys(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Result<Json<Vec<ApiKeySummary>>, StatusCode> {
+    let pool = state.ironshelf_db.pool();
+
+    let rows = sqlx::query(
+        "SELECT id, prefix, label, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&user.user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let keys = rows
+        .iter()
+        .map(|row| ApiKeySummary {
+            id: row.get("id"),
+            prefix: row.get("prefix"),
+            label: row.get("label"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(keys))
+}
+
+/// DELETE /api/v1/auth/api-keys/:id
+pub async fn delete_api_key(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+    axum::extract::Path(key_id): axum::extract::Path<String>,
+) -> StatusCode {
+    let pool = state.ironshelf_db.pool();
+    let _ = sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
+        .bind(&key_id)
+        .bind(&user.user_id)
+        .execute(pool)
+        .await;
+    StatusCode::NO_CONTENT
+}
+
+// --- helpers ---
+
+async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String, sqlx::Error> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let expires_at = (chrono::Utc::now() + chrono::Duration::days(7))
+        .to_rfc3339();
+
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
+        .bind(&session_id)
+        .bind(user_id)
+        .bind(&expires_at)
+        .execute(pool)
+        .await?;
+
+    Ok(session_id)
+}
+
+fn generate_random_string(len: usize) -> String {
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::rand_core::RngCore;
+
+    let mut bytes = vec![0u8; len];
+    OsRng.fill_bytes(&mut bytes);
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
+        .chars()
+        .take(len)
+        .collect()
+}
+
+fn server_error(code: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({"error": "Internal server error", "code": code})),
+    )
+}
