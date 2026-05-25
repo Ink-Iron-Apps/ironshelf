@@ -11,4 +11,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-# epub parsing TBD: evaluate `rbook` or `epub` crate in M1/M3
+tokio = { workspace = true }
