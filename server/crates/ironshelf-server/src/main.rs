@@ -4,6 +4,7 @@ mod auth;
 mod config;
 mod routes;
 mod state;
+mod web;
 
 use axum::middleware;
 use axum::{routing::get, Json, Router};
@@ -101,9 +102,15 @@ async fn main() -> anyhow::Result<()> {
             auth::auth_middleware,
         ));
 
+    // Web UI (embedded static files)
+    let web_routes = Router::new()
+        .route("/", get(web::serve_index))
+        .route("/{*path}", get(web::serve_web));
+
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .merge(web_routes)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
