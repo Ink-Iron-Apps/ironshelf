@@ -4,6 +4,7 @@ pub mod calibre;
 pub mod db;
 pub mod model;
 
+pub mod metadata;
 pub mod scan;
 
 /// EPUB open/read for the reader (cover, chapters, locator).
