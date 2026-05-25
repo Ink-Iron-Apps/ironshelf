@@ -81,7 +81,8 @@ async fn extract_auth_user(state: &AppState, request: &Request) -> Result<AuthUs
 }
 
 /// Validate an API key (format: "irs_<prefix>.<secret>").
-async fn validate_api_key(pool: &sqlx::SqlitePool, token: &str) -> Result<AuthUser, StatusCode> {
+/// Public within the crate so Kobo sync routes can authenticate via path token.
+pub(crate) async fn validate_api_key(pool: &sqlx::SqlitePool, token: &str) -> Result<AuthUser, StatusCode> {
     // Split into prefix + secret
     let token = token.strip_prefix("irs_").ok_or(StatusCode::UNAUTHORIZED)?;
     let (prefix, secret) = token.split_once('.').ok_or(StatusCode::UNAUTHORIZED)?;

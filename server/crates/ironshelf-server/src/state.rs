@@ -120,4 +120,5 @@ pub struct LoadedLibrary {
 pub struct AppState {
     pub libraries: Arc<RwLock<Vec<LoadedLibrary>>>,
     pub ironshelf_db: IronshelfDb,
+    pub smtp_config: Option<crate::config::SmtpConfig>,
 }

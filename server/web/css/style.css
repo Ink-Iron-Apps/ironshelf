@@ -2517,3 +2517,209 @@ tbody td {
     flex: 0 0 110px;
   }
 }
+
+/* --- Stats Dashboard --- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-1);
+}
+
+.stat-card-value {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-bright);
+  line-height: 1.1;
+  font-family: var(--font-mono);
+}
+
+.stat-card-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.stat-card-skeleton {
+  border-radius: var(--radius-lg);
+}
+
+/* --- Activity Timeline --- */
+.activity-timeline {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+}
+
+.activity-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background var(--transition-fast);
+}
+
+.activity-entry:last-child {
+  border-bottom: none;
+}
+
+.activity-entry:hover {
+  background: var(--color-surface-hover);
+}
+
+.activity-entry-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.activity-entry-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-entry-description {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  font-weight: var(--weight-regular);
+}
+
+.activity-entry-description strong {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-bright);
+}
+
+.activity-entry-time {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  margin-top: 2px;
+}
+
+/* --- Metadata Match Cards --- */
+.metadata-matches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.metadata-match-card {
+  padding: var(--space-4);
+}
+
+.metadata-match-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.metadata-match-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.metadata-match-cover {
+  float: right;
+  width: 64px;
+  margin: 0 0 var(--space-3) var(--space-3);
+}
+
+.metadata-match-cover img {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.metadata-match-title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  color: var(--color-text-bright);
+  margin-bottom: var(--space-1);
+}
+
+.metadata-match-description {
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  line-height: var(--leading-relaxed);
+  margin-top: var(--space-2);
+  clear: both;
+}
+
+.badge-info {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--color-info);
+}
+
+/* --- Import/Export Section --- */
+.settings-section .card h4 {
+  font-size: var(--text-base);
+  color: var(--color-text-bright);
+}
+
+/* --- Stats + Activity Responsive --- */
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+  }
+
+  .stat-card {
+    padding: var(--space-4);
+  }
+
+  .stat-card-value {
+    font-size: var(--text-xl);
+  }
+
+  .stat-card-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .activity-entry {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .metadata-match-cover {
+    width: 48px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
