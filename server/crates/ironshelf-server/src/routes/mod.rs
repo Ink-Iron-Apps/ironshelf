@@ -7,7 +7,6 @@ pub mod collections;
 pub mod continue_reading;
 pub mod files;
 pub mod import_export;
-pub mod kindle;
 pub mod kobo;
 pub mod libraries;
 pub mod metadata;

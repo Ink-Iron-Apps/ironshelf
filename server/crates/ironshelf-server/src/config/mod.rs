@@ -4,21 +4,6 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// SMTP configuration for outbound email (Send-to-Kindle, etc).
-#[derive(Debug, Clone, Deserialize)]
-pub struct SmtpConfig {
-    pub host: String,
-    #[serde(default = "default_smtp_port")]
-    pub port: u16,
-    pub user: String,
-    pub password: String,
-    pub from_address: String,
-}
-
-fn default_smtp_port() -> u16 {
-    587
-}
-
 /// Server bootstrap config. Libraries NOT here — they live in the DB.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -31,10 +16,6 @@ pub struct Config {
     /// Path to the Ironshelf own database (created if missing).
     #[serde(default = "default_ironshelf_db")]
     pub database_path: PathBuf,
-
-    /// Optional SMTP configuration for email features (Send-to-Kindle).
-    #[serde(default)]
-    pub smtp: Option<SmtpConfig>,
 }
 
 fn default_port() -> u16 {
@@ -81,7 +62,6 @@ impl Config {
                 port: default_port(),
                 host: default_host(),
                 database_path: default_ironshelf_db(),
-                smtp: None,
             }
         };
 
@@ -96,33 +76,6 @@ impl Config {
         }
         if let Ok(db_path) = std::env::var("IRONSHELF_DB") {
             config.database_path = PathBuf::from(db_path);
-        }
-
-        // SMTP env overrides — if IRONSHELF_SMTP_HOST is set, build or override SmtpConfig
-        if let Ok(smtp_host) = std::env::var("IRONSHELF_SMTP_HOST") {
-            let smtp = config.smtp.get_or_insert(SmtpConfig {
-                host: smtp_host.clone(),
-                port: default_smtp_port(),
-                user: String::new(),
-                password: String::new(),
-                from_address: String::new(),
-            });
-            smtp.host = smtp_host;
-
-            if let Ok(smtp_port) = std::env::var("IRONSHELF_SMTP_PORT") {
-                if let Ok(parsed_port) = smtp_port.parse() {
-                    smtp.port = parsed_port;
-                }
-            }
-            if let Ok(smtp_user) = std::env::var("IRONSHELF_SMTP_USER") {
-                smtp.user = smtp_user;
-            }
-            if let Ok(smtp_password) = std::env::var("IRONSHELF_SMTP_PASSWORD") {
-                smtp.password = smtp_password;
-            }
-            if let Ok(smtp_from) = std::env::var("IRONSHELF_SMTP_FROM") {
-                smtp.from_address = smtp_from;
-            }
         }
 
         Ok(config)

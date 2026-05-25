@@ -114,10 +114,6 @@ impl IronshelfDb {
         let migration_006 = include_str!("migrations/006_notifications.sql");
         sqlx::raw_sql(migration_006).execute(&self.pool).await?;
 
-        let migration_007 = include_str!("migrations/007_kindle_email.sql");
-        // ALTER TABLE may fail if column already exists — that is fine for idempotent migration.
-        let _ = sqlx::raw_sql(migration_007).execute(&self.pool).await;
-
         let migration_008 = include_str!("migrations/008_webdav_files.sql");
         sqlx::raw_sql(migration_008).execute(&self.pool).await?;
 
@@ -940,34 +936,6 @@ impl IronshelfDb {
     }
 
     // --- Kindle email ---
-
-    /// Get the Kindle email address for a user.
-    pub async fn get_kindle_email(&self, user_id: &str) -> Result<Option<String>, DbError> {
-        let row = sqlx::query("SELECT kindle_email FROM users WHERE id = ?")
-            .bind(user_id)
-            .fetch_optional(&self.pool)
-            .await?;
-
-        Ok(row.and_then(|row| row.get("kindle_email")))
-    }
-
-    /// Set or clear the Kindle email address for a user.
-    pub async fn set_kindle_email(
-        &self,
-        user_id: &str,
-        kindle_email: Option<&str>,
-    ) -> Result<(), DbError> {
-        let result = sqlx::query("UPDATE users SET kindle_email = ? WHERE id = ?")
-            .bind(kindle_email)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(DbError::NotFound);
-        }
-        Ok(())
-    }
 
     // --- WebDAV virtual file storage ---
 

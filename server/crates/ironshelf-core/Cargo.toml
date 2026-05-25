@@ -17,4 +17,3 @@ zip = { workspace = true }
 reqwest = { workspace = true }
 urlencoding = { workspace = true }
 trait-variant = { workspace = true }
-lettre = { workspace = true }
