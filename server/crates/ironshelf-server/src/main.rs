@@ -3,20 +3,24 @@
 mod auth;
 mod config;
 mod error;
+mod middleware;
 mod pagination;
 mod routes;
 mod scheduler;
 mod state;
 mod web;
 
-use axum::middleware;
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::{routing::get, Json, Router};
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::db::IronshelfDb;
 use ironshelf_core::scan::FolderSource;
+use ironshelf_core::search_index::SearchIndex;
 use serde_json::json;
 use state::{AppState, LibrarySource, LoadedLibrary};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -39,20 +43,55 @@ async fn main() -> anyhow::Result<()> {
     let libraries = load_libraries_from_db(&ironshelf_db).await;
     tracing::info!("{} libraries loaded from database", libraries.len());
 
+    // Initialize tantivy full-text search index.
+    let search_index = match SearchIndex::open(&config.search_index_path) {
+        Ok(index) => {
+            tracing::info!(
+                "search index ready at {}",
+                config.search_index_path.display()
+            );
+            Some(Arc::new(RwLock::new(index)))
+        }
+        Err(index_error) => {
+            tracing::error!(
+                "failed to open search index at {}: {index_error} — full-text search disabled",
+                config.search_index_path.display()
+            );
+            None
+        }
+    };
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
+        started_at: Instant::now(),
+        search_index,
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
     scheduler::start(app_state.clone());
 
+    // Initialize rate limiters and spawn background cleanup tasks.
+    let api_rate_limiter = middleware::rate_limit::RateLimiter::api_tier();
+    api_rate_limiter.spawn_cleanup_task();
+    let auth_rate_limiter = middleware::rate_limit::RateLimiter::auth_tier();
+    auth_rate_limiter.spawn_cleanup_task();
+
+    // Auth routes with strict rate limiting (10 req/min per IP).
+    let auth_routes = Router::new()
+        .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
+        .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
+        .layer(axum::middleware::from_fn_with_state(
+            auth_rate_limiter,
+            middleware::rate_limit::rate_limit_auth,
+        ));
+
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/health", get(health))
-        .route("/api/v1/server/info", get(routes::server_info::server_info))
-        .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
-        .route("/api/v1/auth/login", axum::routing::post(routes::auth::login));
+        .route("/ready", get(readiness))
+        .route("/alive", get(liveness))
+        .route("/api/v1/server/info", get(routes::server_info::server_info));
 
     // Protected routes (auth required)
     let protected_routes = Router::new()
@@ -104,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/series/{id}", get(routes::series::get_series))
         // Search
         .route("/api/v1/search", get(routes::search::global_search))
+        .route("/api/v1/search/rebuild", axum::routing::post(routes::search::rebuild_search_index))
         // Continue reading
         .route("/api/v1/books/continue", get(routes::continue_reading::continue_reading))
         // Books
@@ -179,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/stats", get(routes::stats::server_stats))
         .route("/api/v1/activity", get(routes::stats::user_activity))
         .route("/api/v1/activity/all", get(routes::stats::server_activity))
-        .layer(middleware::from_fn_with_state(
+        .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
         ));
@@ -193,7 +233,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/opds/series/{id}", get(routes::opds::series_feed))
         .route("/opds/recent", get(routes::opds::recent_feed))
         .route("/opds/search", get(routes::opds::search_feed))
-        .layer(middleware::from_fn_with_state(
+        .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
         ));
@@ -249,18 +289,39 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .merge(public_routes)
+        .merge(auth_routes)
         .merge(protected_routes)
         .merge(opds_routes)
         .merge(kobo_routes)
         .merge(webdav_routes)
         .merge(web_routes)
+        // Rate limit: 100 req/min per IP across all routes (auth routes have
+        // their own stricter limiter layered above this one).
+        .layer(axum::middleware::from_fn_with_state(
+            api_rate_limiter,
+            middleware::rate_limit::rate_limit_api,
+        ))
+        // Request ID: UUID per request for log correlation + X-Request-Id header.
+        .layer(axum::middleware::from_fn(
+            middleware::request_id::request_id,
+        ))
+        // Security headers: CSP, X-Frame-Options, etc. on every response.
+        .layer(axum::middleware::from_fn(
+            middleware::security_headers::security_headers,
+        ))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!("ironshelf-server listening on {}:{}", config.host, config.port);
-    axum::serve(listener, app).await?;
+
+    let shutdown_signal = shutdown_signal();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await?;
+
+    tracing::info!("server shut down gracefully");
     Ok(())
 }
 
@@ -310,10 +371,73 @@ pub async fn load_libraries_from_db(ironshelf_db: &IronshelfDb) -> Vec<LoadedLib
     libraries
 }
 
-async fn health() -> Json<serde_json::Value> {
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl+c");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to listen for SIGTERM")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("shutdown signal received, draining connections...");
+}
+
+async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let uptime_seconds = state.started_at.elapsed().as_secs();
+    let libraries_loaded = state.libraries.read().await.len();
+
+    let database_status = match state.ironshelf_db.health_check().await {
+        Ok(_) => "connected",
+        Err(_) => "disconnected",
+    };
+
     Json(json!({
-        "status": "ok",
-        "service": "ironshelf-server",
-        "version": env!("CARGO_PKG_VERSION")
+        "status": "healthy",
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": uptime_seconds,
+        "libraries_loaded": libraries_loaded,
+        "database": database_status,
     }))
+}
+
+async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    let database_ok = state.ironshelf_db.health_check().await.is_ok();
+    let libraries_loaded = state.libraries.read().await.len();
+    let is_ready = database_ok && libraries_loaded > 0;
+
+    let status_code = if is_ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        status_code,
+        Json(json!({
+            "ready": is_ready,
+            "database": if database_ok { "connected" } else { "disconnected" },
+            "libraries_loaded": libraries_loaded,
+        })),
+    )
+}
+
+async fn liveness() -> Json<serde_json::Value> {
+    Json(json!({ "alive": true }))
 }
