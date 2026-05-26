@@ -9,6 +9,13 @@
   let currentUser = null;
   let sidebarOpen = false;
 
+  // --- Notification State ---
+  let notificationUnreadCount = 0;
+  let notificationPollTimer = null;
+  let notificationPanelOpen = false;
+  let activeScanLibraryId = null;
+  let scanPollTimer = null;
+
   // --- SVG Icons ---
   const Icons = {
     library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
@@ -53,6 +60,9 @@
     zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
     hardDrive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>',
     eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    bellOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
+    scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -134,6 +144,361 @@
 
     el.querySelector('.toast-dismiss').addEventListener('click', dismiss);
     setTimeout(dismiss, duration);
+  }
+
+  // --- Notification System ---
+
+  const NotificationTypeConfig = {
+    new_book:           { icon: 'book',     accentClass: 'notif-accent-teal',    label: 'New Book' },
+    metadata_enriched:  { icon: 'database', accentClass: 'notif-accent-green',   label: 'Metadata Updated' },
+    collection_shared:  { icon: 'users',    accentClass: 'notif-accent-blue',    label: 'Collection Shared' },
+    system:             { icon: 'info',     accentClass: 'notif-accent-yellow',  label: 'System' },
+  };
+
+  function getNotificationPreferences() {
+    try {
+      const stored = localStorage.getItem('ironshelf_notification_prefs');
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return { new_book: true, metadata_enriched: true, collection_shared: true, system: true };
+  }
+
+  function setNotificationPreferences(prefs) {
+    localStorage.setItem('ironshelf_notification_prefs', JSON.stringify(prefs));
+  }
+
+  function formatRelativeTime(dateString) {
+    if (!dateString) return '';
+    const now = Date.now();
+    const then = new Date(dateString).getTime();
+    const diffSeconds = Math.floor((now - then) / 1000);
+    if (diffSeconds < 60) return 'just now';
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return new Date(dateString).toLocaleDateString();
+  }
+
+  async function fetchNotificationCount() {
+    if (!currentUser) return;
+    try {
+      const result = await apiGet('/notifications/count');
+      notificationUnreadCount = result?.unread || 0;
+      updateNotificationBadge();
+    } catch { /* silent fail on poll */ }
+  }
+
+  function updateNotificationBadge() {
+    const badgeElements = document.querySelectorAll('.notif-badge-count');
+    badgeElements.forEach(badge => {
+      if (notificationUnreadCount > 0) {
+        badge.textContent = notificationUnreadCount > 99 ? '99+' : notificationUnreadCount;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    });
+  }
+
+  function startNotificationPolling() {
+    stopNotificationPolling();
+    fetchNotificationCount();
+    notificationPollTimer = setInterval(fetchNotificationCount, 30000);
+  }
+
+  function stopNotificationPolling() {
+    if (notificationPollTimer) {
+      clearInterval(notificationPollTimer);
+      notificationPollTimer = null;
+    }
+  }
+
+  async function openNotificationPanel() {
+    if (notificationPanelOpen) {
+      closeNotificationPanel();
+      return;
+    }
+
+    notificationPanelOpen = true;
+    const bellButton = document.getElementById('notification-bell');
+    if (!bellButton) return;
+
+    // Remove existing panel
+    document.getElementById('notification-panel')?.remove();
+
+    const panel = document.createElement('div');
+    panel.id = 'notification-panel';
+    panel.className = 'notification-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Notifications');
+
+    panel.innerHTML = `
+      <div class="notification-panel-header">
+        <h3>Notifications</h3>
+        <button class="btn btn-ghost btn-sm" id="notif-mark-all-read" aria-label="Mark all as read">
+          ${icon('check', 14)} Mark all read
+        </button>
+      </div>
+      <div class="notification-panel-body" id="notification-panel-body">
+        <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading...</div>
+      </div>
+    `;
+
+    // Position panel below bell
+    bellButton.parentElement.appendChild(panel);
+
+    // Load notifications
+    await loadNotificationItems();
+
+    // Bind mark all read
+    document.getElementById('notif-mark-all-read')?.addEventListener('click', async () => {
+      try {
+        await apiPost('/notifications/read-all', {});
+        notificationUnreadCount = 0;
+        updateNotificationBadge();
+        await loadNotificationItems();
+        toast('All notifications marked as read', 'info');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    // Close on outside click (next tick)
+    requestAnimationFrame(() => {
+      document.addEventListener('click', handleNotificationOutsideClick);
+    });
+  }
+
+  function handleNotificationOutsideClick(event) {
+    const panel = document.getElementById('notification-panel');
+    const bell = document.getElementById('notification-bell');
+    if (panel && !panel.contains(event.target) && bell && !bell.contains(event.target)) {
+      closeNotificationPanel();
+    }
+  }
+
+  function closeNotificationPanel() {
+    notificationPanelOpen = false;
+    document.getElementById('notification-panel')?.remove();
+    document.removeEventListener('click', handleNotificationOutsideClick);
+  }
+
+  async function loadNotificationItems() {
+    const body = document.getElementById('notification-panel-body');
+    if (!body) return;
+
+    try {
+      const notifications = await apiGet('/notifications?unread=true&limit=50') || [];
+      const prefs = getNotificationPreferences();
+
+      // Filter by user preferences
+      const filteredNotifications = notifications.filter(n => {
+        const notificationType = n.notification_type || n.type || 'system';
+        return prefs[notificationType] !== false;
+      });
+
+      if (filteredNotifications.length === 0) {
+        body.innerHTML = `
+          <div class="notification-empty">
+            ${Icons.bell}
+            <p>No unread notifications</p>
+          </div>
+        `;
+        return;
+      }
+
+      body.innerHTML = filteredNotifications.map(notification => {
+        const notificationType = notification.notification_type || notification.type || 'system';
+        const typeConfig = NotificationTypeConfig[notificationType] || NotificationTypeConfig.system;
+        const isUnread = !notification.read_at;
+        const timeAgo = formatRelativeTime(notification.created_at);
+
+        return `
+          <div class="notification-item ${typeConfig.accentClass} ${isUnread ? 'notification-unread' : ''}"
+               data-notification-id="${notification.id}"
+               ${notification.link ? `data-notification-link="${escapeHtml(notification.link)}"` : ''}
+               role="button" tabindex="0">
+            <div class="notification-item-icon">
+              ${Icons[typeConfig.icon] || Icons.info}
+            </div>
+            <div class="notification-item-content">
+              <div class="notification-item-title">${escapeHtml(notification.title || typeConfig.label)}</div>
+              ${notification.message ? `<div class="notification-item-message">${escapeHtml(notification.message)}</div>` : ''}
+              <div class="notification-item-time">${timeAgo}</div>
+            </div>
+            <div class="notification-item-actions">
+              ${isUnread ? '<span class="notification-unread-dot" aria-label="Unread"></span>' : ''}
+              <button class="notification-dismiss-btn" data-dismiss-id="${notification.id}" aria-label="Dismiss notification" title="Dismiss">
+                ${Icons.x}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Bind click on notification items
+      body.querySelectorAll('.notification-item').forEach(item => {
+        item.addEventListener('click', async (event) => {
+          if (event.target.closest('.notification-dismiss-btn')) return;
+          const notificationId = item.dataset.notificationId;
+          const notificationLink = item.dataset.notificationLink;
+
+          // Mark as read
+          try {
+            await apiPatch(`/notifications/${notificationId}/read`, {});
+            item.classList.remove('notification-unread');
+            item.querySelector('.notification-unread-dot')?.remove();
+            notificationUnreadCount = Math.max(0, notificationUnreadCount - 1);
+            updateNotificationBadge();
+          } catch { /* ignore */ }
+
+          // Navigate if link present
+          if (notificationLink) {
+            closeNotificationPanel();
+            navigateTo(notificationLink);
+          }
+        });
+
+        item.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            item.click();
+          }
+        });
+      });
+
+      // Bind dismiss buttons
+      body.querySelectorAll('.notification-dismiss-btn').forEach(btn => {
+        btn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          const dismissId = btn.dataset.dismissId;
+          const item = btn.closest('.notification-item');
+
+          try {
+            await apiDelete(`/notifications/${dismissId}`);
+            if (item?.classList.contains('notification-unread')) {
+              notificationUnreadCount = Math.max(0, notificationUnreadCount - 1);
+              updateNotificationBadge();
+            }
+            item?.remove();
+
+            // Check if empty
+            if (!body.querySelector('.notification-item')) {
+              body.innerHTML = `
+                <div class="notification-empty">
+                  ${Icons.bell}
+                  <p>No unread notifications</p>
+                </div>
+              `;
+            }
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        });
+      });
+    } catch (err) {
+      body.innerHTML = `
+        <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">
+          Failed to load notifications
+        </div>
+      `;
+    }
+  }
+
+  // --- Library Scan Progress ---
+
+  async function startLibraryScan(libraryId) {
+    if (activeScanLibraryId) return;
+    activeScanLibraryId = libraryId;
+
+    const scanButton = document.getElementById('scan-library-btn');
+    const scanStatusContainer = document.getElementById('scan-status');
+
+    if (scanButton) {
+      scanButton.disabled = true;
+      scanButton.innerHTML = `${icon('scan', 16)} Scanning...`;
+    }
+
+    if (scanStatusContainer) {
+      scanStatusContainer.classList.remove('hidden');
+      scanStatusContainer.innerHTML = `
+        <div class="scan-progress-wrap">
+          <div class="progress-bar progress-bar-indeterminate">
+            <div class="progress-bar-fill"></div>
+          </div>
+          <span class="scan-status-text">Scanning library...</span>
+        </div>
+      `;
+    }
+
+    // Get initial book count
+    let initialBookCount = 0;
+    try {
+      const library = await apiGet(`/libraries/${libraryId}`);
+      initialBookCount = library?.book_count || 0;
+    } catch { /* ignore */ }
+
+    // Trigger scan
+    try {
+      await api(`/libraries/${libraryId}/scan`, { method: 'POST' });
+    } catch (err) {
+      toast(err.message || 'Failed to start scan', 'error');
+      resetScanState();
+      return;
+    }
+
+    // Poll for completion
+    let pollCount = 0;
+    const maxPolls = 150; // 5 minutes at 2-second intervals
+
+    scanPollTimer = setInterval(async () => {
+      pollCount++;
+
+      try {
+        const library = await apiGet(`/libraries/${libraryId}`);
+        const currentBookCount = library?.book_count || 0;
+        const isScanDone = library?.scanning === false || library?.scan_status === 'idle' || library?.scan_status === 'complete';
+
+        if (isScanDone || pollCount >= maxPolls) {
+          clearInterval(scanPollTimer);
+          scanPollTimer = null;
+          activeScanLibraryId = null;
+
+          const newBooksFound = Math.max(0, currentBookCount - initialBookCount);
+          toast(`Scan complete: ${newBooksFound} new book${newBooksFound !== 1 ? 's' : ''} found`, 'success');
+          resetScanState();
+
+          // Refresh the library view
+          renderLibrary(libraryId);
+        }
+      } catch {
+        // Network hiccup — keep polling
+      }
+    }, 2000);
+  }
+
+  function resetScanState() {
+    const scanButton = document.getElementById('scan-library-btn');
+    const scanStatusContainer = document.getElementById('scan-status');
+
+    if (scanButton) {
+      scanButton.disabled = false;
+      scanButton.innerHTML = `${icon('scan', 16)} Scan`;
+    }
+
+    if (scanStatusContainer) {
+      scanStatusContainer.classList.add('hidden');
+      scanStatusContainer.innerHTML = '';
+    }
+
+    if (scanPollTimer) {
+      clearInterval(scanPollTimer);
+      scanPollTimer = null;
+    }
+    activeScanLibraryId = null;
   }
 
   // --- Modal System ---
@@ -255,7 +620,7 @@
       author: () => renderAuthor(parsed.params.id),
       series: () => renderSeries(parsed.params.id),
       book: () => renderBook(parsed.params.id),
-      read: () => openReader(parsed.params.id),
+      read: () => openReader(parsed.params.id, detectReaderFormat(parsed.params.sub) || 'epub'),
       collections: renderCollections,
       collection: () => renderCollectionDetail(parsed.params.id),
       settings: renderSettings,
@@ -275,24 +640,47 @@
 
   // --- Reader Integration ---
 
-  let readerScriptLoaded = false;
+  const readerScripts = {
+    epub: { loaded: false, src: '/js/reader.js', global: 'IronshelfReader' },
+    pdf: { loaded: false, src: '/js/pdf-reader.js', global: 'IronshelfPdfReader' },
+    cbz: { loaded: false, src: '/js/cbz-reader.js', global: 'IronshelfCbzReader' },
+  };
 
-  function loadReaderScript() {
-    if (readerScriptLoaded) return Promise.resolve();
+  function loadReaderScript(format) {
+    const entry = readerScripts[format || 'epub'];
+    if (!entry) return Promise.reject(new Error(`Unknown reader format: ${format}`));
+    if (entry.loaded && window[entry.global]) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = '/js/reader.js';
-      script.onload = () => { readerScriptLoaded = true; resolve(); };
-      script.onerror = () => reject(new Error('Failed to load reader module'));
+      script.src = entry.src;
+      script.onload = () => { entry.loaded = true; resolve(); };
+      script.onerror = () => reject(new Error(`Failed to load ${format} reader module`));
       document.head.appendChild(script);
     });
   }
 
-  async function openReader(bookId) {
+  function detectReaderFormat(formatString) {
+    const lower = (formatString || '').toLowerCase();
+    if (lower === 'epub') return 'epub';
+    if (lower === 'pdf') return 'pdf';
+    if (lower === 'cbz' || lower === 'cbr' || lower === 'cb7') return 'cbz';
+    return null;
+  }
+
+  async function openReader(bookId, format) {
+    const readerFormat = format || 'epub';
+    const entry = readerScripts[readerFormat];
+    if (!entry) {
+      toast(`No reader available for ${readerFormat.toUpperCase()} format`, 'error');
+      navigateTo(`/book/${bookId}`);
+      return;
+    }
+
     try {
-      await loadReaderScript();
-      if (window.IronshelfReader) {
-        window.IronshelfReader.open(bookId);
+      await loadReaderScript(readerFormat);
+      const reader = window[entry.global];
+      if (reader) {
+        reader.open(bookId);
       } else {
         toast('Reader module failed to initialize', 'error');
         navigateTo(`/book/${bookId}`);
@@ -481,6 +869,12 @@
           <div class="sidebar-brand">
             <span class="text-brand">Iron<em>&</em>shelf</span>
           </div>
+          <div class="sidebar-notification-wrap" id="notification-bell-wrap">
+            <button class="notification-bell-btn" id="notification-bell" aria-label="Notifications" title="Notifications">
+              <span class="nav-icon">${Icons.bell}</span>
+              <span class="notif-badge-count hidden" aria-live="polite">0</span>
+            </button>
+          </div>
           <button class="sidebar-search-btn" id="sidebar-search-btn" aria-label="Search books, authors, and series">
             <span class="nav-icon">${Icons.search}</span>
             <span>Search...</span>
@@ -523,12 +917,21 @@
     document.getElementById('logout-btn')?.addEventListener('click', async () => {
       await apiPost('/auth/logout', {}).catch(() => {});
       currentUser = null;
+      stopNotificationPolling();
+      closeNotificationPanel();
       navigateTo('/login');
     });
 
     document.getElementById('mobile-menu-btn')?.addEventListener('click', toggleSidebar);
     document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
     document.getElementById('sidebar-search-btn')?.addEventListener('click', openGlobalSearch);
+    document.getElementById('notification-bell')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openNotificationPanel();
+    });
+
+    // Update notification badge on shell render
+    updateNotificationBadge();
   }
 
   function toggleSidebar() {
@@ -899,12 +1302,27 @@
       // Build alpha jump
       const letters = [...new Set(authors.map(a => (a.name || '')[0]?.toUpperCase()).filter(Boolean))].sort();
 
+      const isScanningThisLibrary = activeScanLibraryId === libraryId;
+
       let bodyContent = `
         <div class="page-header">
           <h1>${escapeHtml(library.name)}</h1>
           <div class="actions">
+            <button class="btn btn-secondary" id="scan-library-btn" ${isScanningThisLibrary ? 'disabled' : ''} aria-label="Scan library for new books">
+              ${icon('scan', 16)} ${isScanningThisLibrary ? 'Scanning...' : 'Scan'}
+            </button>
             ${currentUser?.is_owner ? `<button class="btn btn-ghost" id="edit-library-btn" aria-label="Edit library">${icon('edit', 16)} Edit</button>` : ''}
           </div>
+        </div>
+        <div id="scan-status" class="${isScanningThisLibrary ? '' : 'hidden'}" aria-live="polite">
+          ${isScanningThisLibrary ? `
+            <div class="scan-progress-wrap">
+              <div class="progress-bar progress-bar-indeterminate">
+                <div class="progress-bar-fill"></div>
+              </div>
+              <span class="scan-status-text">Scanning library...</span>
+            </div>
+          ` : ''}
         </div>
         ${renderToolbar({
           searchPlaceholder: 'Search authors...',
@@ -996,6 +1414,10 @@
 
       document.getElementById('edit-library-btn')?.addEventListener('click', () => {
         showAddLibraryModal(library);
+      });
+
+      document.getElementById('scan-library-btn')?.addEventListener('click', () => {
+        startLibraryScan(libraryId);
       });
     } catch (err) {
       renderShell(renderError('Failed to load library', err.message, () => renderLibrary(libraryId)), 'libraries');
@@ -1240,11 +1662,19 @@
 
             ${formats.length > 0 ? `
               <div class="book-detail-formats">
-                ${formats.some(f => f.kind.toLowerCase() === 'epub') ? `
-                  <a href="#/read/${bookId}" class="btn btn-read" aria-label="Read this book">
-                    ${icon('bookOpen', 16)} Read
-                  </a>
-                ` : ''}
+                ${(() => {
+                  const readableFormats = formats
+                    .map(f => f.kind.toLowerCase())
+                    .filter(k => k === 'epub' || k === 'pdf' || k === 'cbz' || k === 'cbr');
+                  if (readableFormats.length === 0) return '';
+                  // Pick best format to read: epub > pdf > cbz
+                  const preferredOrder = ['epub', 'pdf', 'cbz', 'cbr'];
+                  const bestFormat = preferredOrder.find(pf => readableFormats.includes(pf)) || readableFormats[0];
+                  const formatLabel = bestFormat === 'epub' ? 'Read' : `Read ${bestFormat.toUpperCase()}`;
+                  return `<a href="#/read/${bookId}/${bestFormat}" class="btn btn-read" aria-label="${formatLabel}">
+                    ${icon('bookOpen', 16)} ${formatLabel}
+                  </a>`;
+                })()}
                 ${formats.map(f => `
                   <a href="${API}/books/${bookId}/file?format=${f.kind}" class="btn btn-primary" download aria-label="Download ${f.kind} format">
                     ${icon('download', 16)} ${escapeHtml(f.kind.toUpperCase())}
@@ -1384,6 +1814,36 @@
         </div>
 
         <div class="settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('bell', 20)} Notification Preferences</h3>
+          <p class="description">Control which notification types appear in your notification panel. Preferences are stored locally in this browser.</p>
+
+          <div class="list-group" id="notification-prefs-list">
+            ${Object.entries(NotificationTypeConfig).map(([typeKey, typeConfig]) => {
+              const prefs = getNotificationPreferences();
+              const isEnabled = prefs[typeKey] !== false;
+              return `
+                <div class="list-item" style="cursor:default">
+                  <div class="list-item-content">
+                    <div class="list-item-icon notif-pref-icon ${typeConfig.accentClass}">${Icons[typeConfig.icon]}</div>
+                    <div class="list-item-text">
+                      <div class="list-item-name">${escapeHtml(typeConfig.label)}</div>
+                      <div class="list-item-subtitle">${escapeHtml(typeKey.replace(/_/g, ' '))}</div>
+                    </div>
+                  </div>
+                  <div class="list-item-meta">
+                    <label class="form-toggle">
+                      <input type="checkbox" data-notif-type="${typeKey}" ${isEnabled ? 'checked' : ''}>
+                    </label>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <button class="btn btn-danger mt-4" id="clear-all-notifications-btn">${icon('trash', 16)} Clear All Notifications</button>
+        </div>
+
+        <div class="settings-section">
           <h3>Account</h3>
           <div class="card">
             <dl class="book-detail-metadata" style="margin:0;padding:0;background:transparent;border:0">
@@ -1513,6 +1973,35 @@
           toast(err.message || 'Import failed — check file format', 'error');
         }
         e.target.value = '';
+      });
+
+      // Notification preference toggles
+      document.querySelectorAll('[data-notif-type]').forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+          const prefs = getNotificationPreferences();
+          prefs[checkbox.dataset.notifType] = checkbox.checked;
+          setNotificationPreferences(prefs);
+        });
+      });
+
+      // Clear all notifications
+      document.getElementById('clear-all-notifications-btn')?.addEventListener('click', () => {
+        showConfirmModal({
+          title: 'Clear All Notifications',
+          message: 'This will permanently delete all your notifications. This action cannot be undone.',
+          confirmText: 'Clear All',
+          onConfirm: async () => {
+            try {
+              // Mark all read first, then we rely on the panel showing empty
+              await apiPost('/notifications/read-all', {});
+              notificationUnreadCount = 0;
+              updateNotificationBadge();
+              toast('All notifications cleared', 'success');
+            } catch (err) {
+              toast(err.message, 'error');
+            }
+          },
+        });
       });
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
@@ -1691,7 +2180,7 @@
           const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
           const progressPercent = Math.round((book.progress || 0) * 100);
           bodyContent += `
-            <div class="continue-reading-card" data-read-book-id="${book.id}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
+            <div class="continue-reading-card" data-read-book-id="${book.id}" data-read-format="${book.format || 'epub'}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
               ${coverUrl
                 ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy"><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
                 : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
@@ -1747,7 +2236,8 @@
 
       // Bind continue reading cards
       document.querySelectorAll('[data-read-book-id]').forEach(card => {
-        const handler = () => navigateTo(`/read/${card.dataset.readBookId}`);
+        const format = card.dataset.readFormat || 'epub';
+        const handler = () => navigateTo(`/read/${card.dataset.readBookId}/${format}`);
         card.addEventListener('click', handler);
         card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
       });
@@ -2667,6 +3157,10 @@
   document.addEventListener('keydown', (e) => {
     // Escape closes search overlay, modals, zoom
     if (e.key === 'Escape') {
+      if (notificationPanelOpen) {
+        closeNotificationPanel();
+        return;
+      }
       const searchOverlay = document.getElementById('global-search-overlay');
       if (searchOverlay) {
         globalSearchOpen = false;
@@ -2704,12 +3198,14 @@
 
   window.addEventListener('DOMContentLoaded', async () => {
     if (await checkAuth()) {
+      startNotificationPolling();
       if (!getHashPath() || getHashPath() === '/login') {
         navigateTo('/');
       } else {
         route();
       }
     } else {
+      stopNotificationPolling();
       navigateTo('/login');
     }
   });
