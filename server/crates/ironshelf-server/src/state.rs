@@ -4,6 +4,7 @@ use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::db::IronshelfDb;
 use ironshelf_core::model::{Author, Book, CustomColumn, Series};
 use ironshelf_core::scan::FolderSource;
+use ironshelf_core::search_index::SearchIndex;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -120,4 +121,7 @@ pub struct LoadedLibrary {
 pub struct AppState {
     pub libraries: Arc<RwLock<Vec<LoadedLibrary>>>,
     pub ironshelf_db: IronshelfDb,
+    pub started_at: std::time::Instant,
+    /// Full-text search index (tantivy). `None` if index failed to initialize.
+    pub search_index: Option<Arc<RwLock<SearchIndex>>>,
 }

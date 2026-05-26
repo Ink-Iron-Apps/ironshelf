@@ -1,12 +1,19 @@
 //! Global search endpoint — searches across all libraries for authors, series, and books.
+//!
+//! When the tantivy search index is available, book search uses full-text ranking
+//! for much faster and more relevant results. Falls back to in-memory substring
+//! matching if the index is not built or unavailable.
 
 use axum::extract::{Query, State};
+use axum::Extension;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::AppState;
 use ironshelf_core::model::{Author, Book, Series};
+use ironshelf_core::search_index::BookIndexEntry;
 
 /// Query parameters for the global search endpoint.
 #[derive(Debug, Deserialize)]
@@ -56,6 +63,9 @@ pub struct BookResult {
     pub has_cover: bool,
     pub tags: Vec<String>,
     pub library_id: String,
+    /// Relevance score from the search index (if tantivy was used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
 }
 
 /// Grouped search results by content type.
@@ -72,9 +82,11 @@ pub struct SearchResponse {
     pub query: String,
     pub results: SearchResults,
     pub total: usize,
+    /// Whether the full-text index was used for book results.
+    pub indexed: bool,
 }
 
-/// Relevance ranking for sorting results.
+/// Relevance ranking for in-memory fallback sorting.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum RelevanceRank {
     /// Exact case-insensitive match.
@@ -124,10 +136,11 @@ pub async fn global_search(
 
     let mut author_results: Vec<(RelevanceRank, AuthorResult)> = Vec::new();
     let mut series_results: Vec<(RelevanceRank, SeriesResult)> = Vec::new();
-    let mut book_results: Vec<(RelevanceRank, BookResult)> = Vec::new();
+    let mut book_results: Vec<BookResult> = Vec::new();
+    let mut used_index = false;
 
+    // Authors and series always use in-memory search (small datasets, no index needed).
     for library in libraries.iter() {
-        // Search authors
         if include_authors {
             let authors: Vec<Author> = library.source.authors().await.unwrap_or_default();
             for author in authors {
@@ -148,11 +161,10 @@ pub async fn global_search(
             }
         }
 
-        // Search series
         if include_series {
-            // Get all authors to iterate their series
             let authors: Vec<Author> = library.source.authors().await.unwrap_or_default();
-            let mut seen_series_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            let mut seen_series_ids: std::collections::HashSet<i64> =
+                std::collections::HashSet::new();
             for author in &authors {
                 let series_list: Vec<Series> = library
                     .source
@@ -180,46 +192,87 @@ pub async fn global_search(
                 }
             }
         }
+    }
 
-        // Search books (match title OR tags)
-        if include_books {
-            let all_books: Vec<Book> = library.source.all_books().await.unwrap_or_default();
-            for book in all_books {
-                let title_matches = matches_query(&book.title, &query);
-                let tag_matches = book.tags.iter().any(|tag| matches_query(tag, &query));
+    // Book search: prefer tantivy index, fall back to in-memory.
+    if include_books {
+        if let Some(ref search_index) = state.search_index {
+            let index_guard = search_index.read().await;
+            let offset = ((page - 1) * per_page) as usize;
+            let limit = per_page as usize;
 
-                if title_matches || tag_matches {
-                    let relevance = if title_matches {
-                        compute_relevance(&book.title, &query)
-                    } else {
-                        // Tag matches are always ranked as "contains"
-                        RelevanceRank::Contains
-                    };
-                    book_results.push((
-                        relevance,
-                        BookResult {
-                            id: book.id,
-                            title: book.title,
-                            sort_title: book.sort_title,
-                            has_cover: book.has_cover,
-                            tags: book.tags,
-                            library_id: library.id.clone(),
-                        },
-                    ));
+            match index_guard.search(&query, limit, offset) {
+                Ok(index_results) => {
+                    used_index = true;
+                    for result in index_results {
+                        book_results.push(BookResult {
+                            id: result.book_id,
+                            title: result.title,
+                            sort_title: String::new(), // Not stored in index.
+                            has_cover: false,          // Not stored in index.
+                            tags: vec![],              // Not stored in index.
+                            library_id: result.library_id,
+                            score: Some(result.score),
+                        });
+                    }
+                }
+                Err(search_error) => {
+                    tracing::warn!(
+                        "tantivy search failed, falling back to in-memory: {search_error}"
+                    );
+                    // Fall through to in-memory search below.
                 }
             }
         }
+
+        // In-memory fallback if index not available or search failed.
+        if !used_index {
+            let mut ranked_books: Vec<(RelevanceRank, BookResult)> = Vec::new();
+            for library in libraries.iter() {
+                let all_books: Vec<Book> = library.source.all_books().await.unwrap_or_default();
+                for book in all_books {
+                    let title_matches = matches_query(&book.title, &query);
+                    let tag_matches = book.tags.iter().any(|tag| matches_query(tag, &query));
+
+                    if title_matches || tag_matches {
+                        let relevance = if title_matches {
+                            compute_relevance(&book.title, &query)
+                        } else {
+                            RelevanceRank::Contains
+                        };
+                        ranked_books.push((
+                            relevance,
+                            BookResult {
+                                id: book.id,
+                                title: book.title,
+                                sort_title: book.sort_title,
+                                has_cover: book.has_cover,
+                                tags: book.tags,
+                                library_id: library.id.clone(),
+                                score: None,
+                            },
+                        ));
+                    }
+                }
+            }
+
+            ranked_books.sort_by(|a, b| a.0.cmp(&b.0));
+            let offset = ((page - 1) * per_page) as usize;
+            book_results = ranked_books
+                .into_iter()
+                .map(|(_, result)| result)
+                .skip(offset)
+                .take(per_page as usize)
+                .collect();
+        }
     }
 
-    // Sort each result set by relevance (exact first, then starts-with, then contains)
+    // Sort author and series results by relevance and paginate.
     author_results.sort_by(|a, b| a.0.cmp(&b.0));
     series_results.sort_by(|a, b| a.0.cmp(&b.0));
-    book_results.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let total_count =
-        author_results.len() + series_results.len() + book_results.len();
+    let total_count = author_results.len() + series_results.len() + book_results.len();
 
-    // Paginate each result set independently
     let offset = ((page - 1) * per_page) as usize;
 
     let authors_page: Vec<AuthorResult> = author_results
@@ -236,20 +289,83 @@ pub async fn global_search(
         .take(per_page as usize)
         .collect();
 
-    let books_page: Vec<BookResult> = book_results
-        .into_iter()
-        .map(|(_, result)| result)
-        .skip(offset)
-        .take(per_page as usize)
-        .collect();
-
     Ok(Json(SearchResponse {
         query,
         results: SearchResults {
             authors: authors_page,
             series: series_page,
-            books: books_page,
+            books: book_results,
         },
         total: total_count,
+        indexed: used_index,
+    }))
+}
+
+/// Response from the rebuild endpoint.
+#[derive(Debug, Serialize)]
+pub struct RebuildResponse {
+    pub message: String,
+    pub books_indexed: usize,
+}
+
+/// POST /api/v1/search/rebuild — triggers full reindex of all books (owner only).
+pub async fn rebuild_search_index(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<RebuildResponse>, AppError> {
+    if !auth_user.is_owner {
+        return Err(AppError::Forbidden(
+            "only the server owner can rebuild the search index".to_string(),
+        ));
+    }
+
+    let search_index = state.search_index.as_ref().ok_or_else(|| {
+        AppError::Internal("search index is not initialized".to_string())
+    })?;
+
+    // Collect all books from all libraries.
+    let libraries = state.libraries.read().await;
+    let mut entries: Vec<BookIndexEntry> = Vec::new();
+
+    for library in libraries.iter() {
+        let all_books = library.source.all_books().await.unwrap_or_default();
+        let authors = library.source.authors().await.unwrap_or_default();
+
+        // Build a quick lookup of author ID -> name.
+        let author_name_map: std::collections::HashMap<i64, String> = authors
+            .into_iter()
+            .map(|author| (author.id, author.name))
+            .collect();
+
+        for book in all_books {
+            let author_names: Vec<String> = book
+                .author_ids
+                .iter()
+                .filter_map(|author_id| author_name_map.get(author_id).cloned())
+                .collect();
+
+            entries.push(BookIndexEntry {
+                book_id: book.id,
+                title: book.title,
+                author_names: author_names.join(", "),
+                series_name: None, // Would need series lookup — omit for now.
+                tags: book.tags.join(", "),
+                description: book.description,
+                library_id: library.id.clone(),
+            });
+        }
+    }
+    drop(libraries);
+
+    let index_guard = search_index.read().await;
+    let books_indexed = index_guard.rebuild(entries).map_err(|index_error| {
+        AppError::Internal(format!("failed to rebuild search index: {index_error}"))
+    })?;
+
+    tracing::info!("search index rebuilt with {books_indexed} book(s)");
+
+    Ok(Json(RebuildResponse {
+        message: format!("search index rebuilt successfully with {books_indexed} book(s)"),
+        books_indexed,
     }))
 }
