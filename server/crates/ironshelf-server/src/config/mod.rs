@@ -16,6 +16,10 @@ pub struct Config {
     /// Path to the Ironshelf own database (created if missing).
     #[serde(default = "default_ironshelf_db")]
     pub database_path: PathBuf,
+
+    /// Path to the tantivy full-text search index directory.
+    #[serde(default = "default_search_index_path")]
+    pub search_index_path: PathBuf,
 }
 
 fn default_port() -> u16 {
@@ -28,6 +32,10 @@ fn default_host() -> String {
 
 fn default_ironshelf_db() -> PathBuf {
     PathBuf::from("ironshelf.db")
+}
+
+fn default_search_index_path() -> PathBuf {
+    PathBuf::from("./ironshelf-search-index/")
 }
 
 impl Config {
@@ -62,6 +70,7 @@ impl Config {
                 port: default_port(),
                 host: default_host(),
                 database_path: default_ironshelf_db(),
+                search_index_path: default_search_index_path(),
             }
         };
 
@@ -76,6 +85,9 @@ impl Config {
         }
         if let Ok(db_path) = std::env::var("IRONSHELF_DB") {
             config.database_path = PathBuf::from(db_path);
+        }
+        if let Ok(search_index_path) = std::env::var("IRONSHELF_SEARCH_INDEX") {
+            config.search_index_path = PathBuf::from(search_index_path);
         }
 
         Ok(config)

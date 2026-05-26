@@ -120,6 +120,12 @@ impl IronshelfDb {
         Ok(())
     }
 
+    /// Quick connectivity check — runs `SELECT 1` against the pool.
+    pub async fn health_check(&self) -> Result<(), DbError> {
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Get a reference to the underlying pool.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool

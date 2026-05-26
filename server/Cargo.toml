@@ -33,3 +33,4 @@ mime_guess = "2"
 reqwest = { version = "0.12", features = ["json"] }
 urlencoding = "2"
 trait-variant = "0.1"
+tantivy = "0.22"

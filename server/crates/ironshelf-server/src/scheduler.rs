@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use crate::state::{AppState, LibrarySource};
+use ironshelf_core::search_index::BookIndexEntry;
 
 /// Start all background scheduled tasks. Call once after server setup.
 pub fn start(application_state: AppState) {
@@ -70,6 +71,53 @@ async fn library_rescan_task(application_state: AppState) {
             }
         }
         drop(libraries);
+
+        // If new books were found, re-index them in the search index.
+        if total_new_books > 0 {
+            if let Some(ref search_index) = application_state.search_index {
+                tracing::info!("scheduler: updating search index after rescan");
+                let libraries = application_state.libraries.read().await;
+                let mut entries: Vec<BookIndexEntry> = Vec::new();
+
+                for library in libraries.iter() {
+                    let all_books = library.source.all_books().await.unwrap_or_default();
+                    let authors = library.source.authors().await.unwrap_or_default();
+                    let author_name_map: std::collections::HashMap<i64, String> = authors
+                        .into_iter()
+                        .map(|author| (author.id, author.name))
+                        .collect();
+
+                    for book in all_books {
+                        let author_names: Vec<String> = book
+                            .author_ids
+                            .iter()
+                            .filter_map(|author_id| author_name_map.get(author_id).cloned())
+                            .collect();
+
+                        entries.push(BookIndexEntry {
+                            book_id: book.id,
+                            title: book.title,
+                            author_names: author_names.join(", "),
+                            series_name: None,
+                            tags: book.tags.join(", "),
+                            description: book.description,
+                            library_id: library.id.clone(),
+                        });
+                    }
+                }
+                drop(libraries);
+
+                let index_guard = search_index.read().await;
+                match index_guard.rebuild(entries) {
+                    Ok(count) => {
+                        tracing::info!("scheduler: search index rebuilt with {count} book(s)");
+                    }
+                    Err(index_error) => {
+                        tracing::error!("scheduler: failed to rebuild search index: {index_error}");
+                    }
+                }
+            }
+        }
 
         // If new books were found, notify all users.
         if total_new_books > 0 {
