@@ -1,9 +1,9 @@
--- Migration 013: OIDC user fields + conversion jobs table + duplicate flags.
-
--- OIDC subject/issuer on users table for SSO login.
-ALTER TABLE users ADD COLUMN oidc_subject TEXT;
-ALTER TABLE users ADD COLUMN oidc_issuer TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc ON users(oidc_issuer, oidc_subject);
+-- Migration 015: OIDC user fields + conversion jobs table + duplicate flags.
+--
+-- NOTE: The ALTER TABLE statements for adding oidc_subject and oidc_issuer
+-- columns to the users table are executed separately in IronshelfDb::migrate()
+-- with error handling, because SQLite does not support
+-- ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
 
 -- On-demand format conversion jobs.
 CREATE TABLE IF NOT EXISTS conversion_jobs (

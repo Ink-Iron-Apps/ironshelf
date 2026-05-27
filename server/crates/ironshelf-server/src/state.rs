@@ -118,28 +118,25 @@ impl LibrarySource {
         }
     }
 
-    pub fn format_path(&self, book_path: &str, file_name: &str, format: &str) -> PathBuf {
+    pub async fn format_path(&self, book_path: &str, file_name: &str, format: &str) -> PathBuf {
         match self {
             Self::Calibre(source) => source.format_path(book_path, file_name, format),
             Self::Folder(source) => {
-                // For folder source, rel_path IS the file path
-                // We need to block to get the path, but format_path is sync
-                // The FolderSource stores library_path, and file_name is rel_path
-                // This is a bit awkward — file_name contains the full relative path for folder
-                PathBuf::from(file_name)
+                // For folder source, file_name is the relative path from scan.
+                // FolderSource::format_path joins it with the library root.
+                source.read().await.format_path(file_name)
             }
         }
     }
 
     /// Check whether a file path is safely within the library root.
     /// Returns false if the path escapes via `..` or symlinks.
-    pub fn is_path_safe(&self, path: &std::path::Path) -> bool {
+    pub async fn is_path_safe(&self, path: &std::path::Path) -> bool {
         match self {
             Self::Calibre(source) => source.is_path_within_library(path),
-            Self::Folder(_) => {
-                // TODO(security): FolderSource should also validate paths against library_path.
-                // For now, the rel_path comes from the scan itself (trusted), not user input.
-                true
+            Self::Folder(source) => {
+                let folder = source.read().await;
+                folder.is_path_within_library(path)
             }
         }
     }

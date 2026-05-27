@@ -29,7 +29,6 @@ reqwest = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
-jsonwebtoken = { workspace = true }
 sqlx = { workspace = true }
 image = { workspace = true }
 urlencoding = { workspace = true }

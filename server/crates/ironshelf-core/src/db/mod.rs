@@ -231,6 +231,52 @@ impl IronshelfDb {
         let migration_015 = include_str!("migrations/015_oidc_and_conversions.sql");
         sqlx::raw_sql(migration_015).execute(&self.pool).await?;
 
+        // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
+        // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
+        // "duplicate column" errors to make migrate() safe to call on every startup.
+        self.add_column_if_missing("users", "oidc_subject", "TEXT")
+            .await?;
+        self.add_column_if_missing("users", "oidc_issuer", "TEXT")
+            .await?;
+
+        // Unique index for OIDC lookups — safe to re-run due to IF NOT EXISTS.
+        sqlx::raw_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc ON users(oidc_issuer, oidc_subject)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Add a column to a table if it does not already exist.
+    /// SQLite does not support `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`,
+    /// so we check `PRAGMA table_info` first.
+    async fn add_column_if_missing(
+        &self,
+        table: &str,
+        column: &str,
+        column_type: &str,
+    ) -> Result<(), DbError> {
+        // PRAGMA table_info returns one row per column; check if ours is present.
+        let pragma_query = format!("PRAGMA table_info({})", table);
+        let rows = sqlx::query(&pragma_query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let column_exists = rows.iter().any(|row| {
+            let name: String = row.get("name");
+            name == column
+        });
+
+        if !column_exists {
+            let alter_query = format!(
+                "ALTER TABLE {} ADD COLUMN {} {}",
+                table, column, column_type
+            );
+            sqlx::raw_sql(&alter_query).execute(&self.pool).await?;
+        }
+
         Ok(())
     }
 
@@ -1054,8 +1100,6 @@ impl IronshelfDb {
 
         Ok(result.rows_affected())
     }
-
-    // --- Kindle email ---
 
     // --- WebDAV virtual file storage ---
 

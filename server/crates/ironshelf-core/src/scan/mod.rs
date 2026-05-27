@@ -347,6 +347,15 @@ impl FolderSource {
         self.library_path.join(rel_path)
     }
 
+    /// Check whether a resolved path is contained within the library root.
+    /// Call this before serving any file to prevent path traversal attacks.
+    pub fn is_path_within_library(&self, path: &Path) -> bool {
+        match (self.library_path.canonicalize(), path.canonicalize()) {
+            (Ok(library_root), Ok(resolved)) => resolved.starts_with(&library_root),
+            _ => false,
+        }
+    }
+
     fn scanned_to_book(&self, scanned: &ScannedBook, index: i64) -> Book {
         Book {
             id: index,

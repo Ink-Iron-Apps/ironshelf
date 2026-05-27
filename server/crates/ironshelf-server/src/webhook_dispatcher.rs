@@ -9,6 +9,57 @@ use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Dispatch an event directly to a single specific webhook (used by test endpoint).
+///
+/// Spawns a background task so the caller is never blocked.
+pub async fn dispatch_to_webhook(
+    ironshelf_db: &IronshelfDb,
+    webhook: &ironshelf_core::db::StoredWebhook,
+    event: &str,
+    payload: &serde_json::Value,
+) {
+    let payload_string = serde_json::to_string(payload).unwrap_or_default();
+    let database = ironshelf_db.clone();
+    let event_name = event.to_string();
+    let body = payload_string;
+    let webhook_url = webhook.url.clone();
+    let webhook_secret = webhook.secret.clone();
+    let webhook_id = webhook.id.clone();
+
+    tokio::spawn(async move {
+        let signature = compute_signature(&body, webhook_secret.as_deref());
+        let delivery_result = send_webhook_request(&webhook_url, &body, &signature).await;
+
+        match delivery_result {
+            Ok((status_code, response_body)) => {
+                let is_success = (200..300).contains(&status_code);
+                let _ = database
+                    .log_webhook_delivery(
+                        &webhook_id,
+                        &event_name,
+                        &body,
+                        Some(status_code),
+                        Some(&response_body),
+                        is_success,
+                    )
+                    .await;
+            }
+            Err(error_message) => {
+                let _ = database
+                    .log_webhook_delivery(
+                        &webhook_id,
+                        &event_name,
+                        &body,
+                        None,
+                        Some(&error_message),
+                        false,
+                    )
+                    .await;
+            }
+        }
+    });
+}
+
 /// Dispatch an event to all subscribed webhooks.
 ///
 /// Spawns a background task per webhook so the caller is never blocked.
