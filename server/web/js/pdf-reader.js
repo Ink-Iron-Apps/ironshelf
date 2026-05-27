@@ -814,3 +814,8 @@ const IronshelfPdfReader = (() => {
     close,
   };
 })();
+
+// Attach to window for use by app.js
+if (typeof window !== 'undefined') {
+  window.IronshelfPdfReader = IronshelfPdfReader;
+}

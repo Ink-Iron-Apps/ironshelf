@@ -10,6 +10,7 @@ mod scheduler;
 mod state;
 pub mod thumbnail;
 mod web;
+mod webhook_dispatcher;
 
 use axum::extract::State;
 use axum::http::StatusCode;

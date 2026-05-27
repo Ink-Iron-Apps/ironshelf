@@ -70,6 +70,99 @@ pub struct StoredLibrary {
     pub options_json: Option<String>,
 }
 
+/// A notification as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredNotification {
+    pub id: String,
+    pub user_id: String,
+    pub title: String,
+    pub message: String,
+    pub notification_type: String,
+    pub is_read: bool,
+    pub link: Option<String>,
+    pub created_at: String,
+}
+
+/// A WebDAV virtual file as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredWebdavFile {
+    pub user_id: String,
+    pub path: String,
+    pub content: Option<Vec<u8>>,
+    pub content_type: String,
+    pub size: i64,
+    pub modified_at: String,
+}
+
+/// A book override as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredBookOverride {
+    pub book_id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub cover_url: Option<String>,
+    pub tags_json: Option<String>,
+    pub applied_at: String,
+}
+
+/// A highlight/annotation as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredHighlight {
+    pub id: String,
+    pub user_id: String,
+    pub book_id: String,
+    pub format: String,
+    pub cfi_range: String,
+    pub text_content: Option<String>,
+    pub color: String,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A webhook as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredWebhook {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub url: String,
+    pub secret: Option<String>,
+    pub events: Vec<String>,
+    pub is_active: bool,
+    pub created_at: String,
+}
+
+/// A webhook delivery log entry.
+#[derive(Debug, Clone)]
+pub struct StoredWebhookDelivery {
+    pub id: String,
+    pub webhook_id: String,
+    pub event: String,
+    pub payload_json: String,
+    pub response_status: Option<i32>,
+    pub response_body: Option<String>,
+    pub delivered_at: String,
+    pub is_success: bool,
+}
+
+/// A reading goal as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredReadingGoal {
+    pub user_id: String,
+    pub year: i32,
+    pub target_books: i32,
+    pub created_at: String,
+}
+
+/// A completed book entry as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredCompletedBook {
+    pub user_id: String,
+    pub book_id: String,
+    pub completed_at: String,
+}
+
 /// Ironshelf's own database connection.
 #[derive(Clone)]
 pub struct IronshelfDb {
@@ -1561,7 +1654,6 @@ impl IronshelfDb {
             .await?;
         Ok(())
     }
-}
 
     // --- Reading goals ---
 
@@ -1755,99 +1847,4 @@ impl IronshelfDb {
             .map(|row| (row.get::<i32, _>("month_number"), row.get::<i64, _>("book_count")))
             .collect())
     }
-
-
-}
-/// A reading goal as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredReadingGoal {
-    pub user_id: String,
-    pub year: i32,
-    pub target_books: i32,
-    pub created_at: String,
-}
-
-/// A completed book entry as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredCompletedBook {
-    pub user_id: String,
-    pub book_id: String,
-    pub completed_at: String,
-}
-
-
-/// A notification as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredNotification {
-    pub id: String,
-    pub user_id: String,
-    pub title: String,
-    pub message: String,
-    pub notification_type: String,
-    pub is_read: bool,
-    pub link: Option<String>,
-    pub created_at: String,
-}
-
-/// A WebDAV virtual file as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredWebdavFile {
-    pub user_id: String,
-    pub path: String,
-    pub content: Option<Vec<u8>>,
-    pub content_type: String,
-    pub size: i64,
-    pub modified_at: String,
-}
-
-/// A book override as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredBookOverride {
-    pub book_id: String,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub cover_url: Option<String>,
-    pub tags_json: Option<String>,
-    pub applied_at: String,
-}
-
-/// A highlight/annotation as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredHighlight {
-    pub id: String,
-    pub user_id: String,
-    pub book_id: String,
-    pub format: String,
-    pub cfi_range: String,
-    pub text_content: Option<String>,
-    pub color: String,
-    pub note: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// A webhook as stored in the database.
-#[derive(Debug, Clone)]
-pub struct StoredWebhook {
-    pub id: String,
-    pub user_id: String,
-    pub name: String,
-    pub url: String,
-    pub secret: Option<String>,
-    pub events: Vec<String>,
-    pub is_active: bool,
-    pub created_at: String,
-}
-
-/// A webhook delivery log entry.
-#[derive(Debug, Clone)]
-pub struct StoredWebhookDelivery {
-    pub id: String,
-    pub webhook_id: String,
-    pub event: String,
-    pub payload_json: String,
-    pub response_status: Option<i32>,
-    pub response_body: Option<String>,
-    pub delivered_at: String,
-    pub is_success: bool,
 }
