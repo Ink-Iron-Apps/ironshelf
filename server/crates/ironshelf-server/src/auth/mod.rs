@@ -22,6 +22,8 @@ pub struct AuthUser {
     pub user_id: String,
     pub username: String,
     pub is_owner: bool,
+    /// The session ID used to authenticate this request (None for API key auth).
+    pub session_id: Option<String>,
 }
 
 /// Hash a password with argon2.
@@ -108,6 +110,7 @@ pub(crate) async fn validate_api_key(pool: &sqlx::SqlitePool, token: &str) -> Re
         user_id: row.get("user_id"),
         username: row.get("username"),
         is_owner: row.get::<i32, _>("is_owner") != 0,
+        session_id: None, // API key auth, no session
     })
 }
 
@@ -136,6 +139,7 @@ async fn validate_session(pool: &sqlx::SqlitePool, session_id: &str) -> Result<A
         user_id: row.get("user_id"),
         username: row.get("username"),
         is_owner: row.get::<i32, _>("is_owner") != 0,
+        session_id: Some(session_id.to_string()),
     })
 }
 

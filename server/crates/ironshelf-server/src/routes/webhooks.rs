@@ -111,9 +111,22 @@ pub async fn create_webhook(
         ));
     }
 
-    if body.url.is_empty() || body.name.is_empty() {
+    if body.name.trim().is_empty() {
         return Err(AppError::BadRequest(
-            "Name and URL are required".to_string(),
+            "Name is required".to_string(),
+        ));
+    }
+
+    if body.url.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "URL is required".to_string(),
+        ));
+    }
+
+    // Validate URL format (must be http or https).
+    if !body.url.starts_with("http://") && !body.url.starts_with("https://") {
+        return Err(AppError::BadRequest(
+            "URL must start with http:// or https://".to_string(),
         ));
     }
 
@@ -161,6 +174,18 @@ pub async fn update_webhook(
         if events.is_empty() {
             return Err(AppError::BadRequest(
                 "At least one event must be specified".to_string(),
+            ));
+        }
+    }
+
+    // Validate URL format if provided
+    if let Some(ref url) = body.url {
+        if url.trim().is_empty() {
+            return Err(AppError::BadRequest("URL must not be empty".to_string()));
+        }
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(AppError::BadRequest(
+                "URL must start with http:// or https://".to_string(),
             ));
         }
     }
@@ -235,7 +260,7 @@ pub async fn list_deliveries(
         ));
     }
 
-    let limit = query.limit.unwrap_or(20).min(100);
+    let limit = query.limit.unwrap_or(20).max(1).min(100);
 
     let deliveries = state
         .ironshelf_db

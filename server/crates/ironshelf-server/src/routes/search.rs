@@ -149,6 +149,7 @@ pub async fn global_search(
     let mut series_results: Vec<(RelevanceRank, SeriesResult)> = Vec::new();
     let mut book_results: Vec<BookResult> = Vec::new();
     let mut used_index = false;
+    let mut total_books_count: usize = 0;
 
     // Authors and series always use in-memory search (small datasets, no index needed).
     for library in libraries.iter() {
@@ -215,6 +216,9 @@ pub async fn global_search(
             match index_guard.search(&query, limit, offset) {
                 Ok(index_results) => {
                     used_index = true;
+                    // Tantivy returns a page of results; we don't have the true total
+                    // from the index, so we report the page size as a lower bound.
+                    total_books_count = index_results.len();
                     for result in index_results {
                         book_results.push(BookResult {
                             id: result.book_id,
@@ -268,6 +272,7 @@ pub async fn global_search(
             }
 
             ranked_books.sort_by(|a, b| a.0.cmp(&b.0));
+            total_books_count = ranked_books.len();
             let offset = ((page - 1) * per_page) as usize;
             book_results = ranked_books
                 .into_iter()
@@ -282,7 +287,14 @@ pub async fn global_search(
     author_results.sort_by(|a, b| a.0.cmp(&b.0));
     series_results.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let total_count = author_results.len() + series_results.len() + book_results.len();
+    // Compute total from unpaginated counts for all types.
+    let total_authors_count = author_results.len();
+    let total_series_count = series_results.len();
+    // For books: if tantivy was used, the results are already paginated so we
+    // cannot know the true total here. For in-memory fallback, we paginated
+    // from ranked_books above. In both cases book_results.len() is post-pagination,
+    // so we track the pre-pagination count separately.
+    let total_count = total_authors_count + total_series_count + total_books_count;
 
     let offset = ((page - 1) * per_page) as usize;
 

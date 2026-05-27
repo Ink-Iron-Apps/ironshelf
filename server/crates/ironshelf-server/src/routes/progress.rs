@@ -78,6 +78,20 @@ pub async fn update_progress(
     Path(book_id): Path<String>,
     Json(request): Json<UpdateProgressRequest>,
 ) -> Result<StatusCode, AppError> {
+    // Validate percent is within [0.0, 1.0] range.
+    // Use negated inclusive range check so NaN (which fails all comparisons) is also rejected.
+    if !(request.percent >= 0.0 && request.percent <= 1.0) {
+        return Err(AppError::BadRequest(
+            "percent must be between 0.0 and 1.0".to_string(),
+        ));
+    }
+
+    if request.format.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "format must not be empty".to_string(),
+        ));
+    }
+
     let pool = state.ironshelf_db.pool();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -96,6 +110,14 @@ pub async fn update_progress(
     .execute(pool)
     .await
     .map_err(AppError::internal)?;
+
+    // Auto-mark book as completed when progress reaches 100%.
+    if (request.percent - 1.0).abs() < f64::EPSILON {
+        let _ = state
+            .ironshelf_db
+            .mark_book_completed(&user.user_id, &book_id)
+            .await;
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -176,11 +198,16 @@ pub async fn delete_bookmark(
     Path((_book_id, bookmark_id)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    sqlx::query("DELETE FROM bookmarks WHERE id = ? AND user_id = ?")
+    let result = sqlx::query("DELETE FROM bookmarks WHERE id = ? AND user_id = ?")
         .bind(&bookmark_id)
         .bind(&user.user_id)
         .execute(pool)
         .await
         .map_err(AppError::internal)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found("bookmark"));
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }

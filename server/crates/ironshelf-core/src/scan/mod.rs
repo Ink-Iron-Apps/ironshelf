@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs;
-use tracing;
 
 #[derive(Debug, Error)]
 pub enum ScanError {
