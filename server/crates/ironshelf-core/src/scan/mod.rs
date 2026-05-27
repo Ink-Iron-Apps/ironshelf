@@ -306,7 +306,7 @@ impl FolderSource {
             }
         }
         let mut genres: Vec<(String, i64)> = genre_counts.into_iter().collect();
-        genres.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        genres.sort_by_key(|a| a.0.to_lowercase());
         genres
     }
 
