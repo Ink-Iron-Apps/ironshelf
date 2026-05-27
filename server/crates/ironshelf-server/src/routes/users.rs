@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::auth::AuthUser;
+use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -33,7 +34,7 @@ pub struct InviteResponse {
 pub async fn list_users(
     State(state): State<AppState>,
     axum::Extension(current_user): axum::Extension<AuthUser>,
-) -> Result<Json<Vec<UserListEntry>>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<Vec<UserListEntry>>, AppError> {
     require_user_management(&current_user, state.ironshelf_db.pool()).await?;
 
     let pool = state.ironshelf_db.pool();
@@ -41,7 +42,7 @@ pub async fn list_users(
     let user_rows = sqlx::query("SELECT id, username, is_owner, created_at FROM users ORDER BY created_at")
         .fetch_all(pool)
         .await
-        .map_err(|_| internal_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     let mut users: Vec<UserListEntry> = Vec::new();
 
@@ -52,7 +53,7 @@ pub async fn list_users(
             .bind(&user_id)
             .fetch_all(pool)
             .await
-            .map_err(|_| internal_error("db_error"))?;
+            .map_err(AppError::internal)?;
 
         let permissions: Vec<String> = permission_rows
             .iter()
@@ -76,13 +77,12 @@ pub async fn delete_user(
     State(state): State<AppState>,
     axum::Extension(current_user): axum::Extension<AuthUser>,
     Path(target_user_id): Path<String>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<StatusCode, AppError> {
     require_owner(&current_user)?;
 
     if current_user.user_id == target_user_id {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Cannot delete yourself", "code": "cannot_delete_self"})),
+        return Err(AppError::BadRequest(
+            "Cannot delete yourself".to_string(),
         ));
     }
 
@@ -94,13 +94,10 @@ pub async fn delete_user(
             .bind(&target_user_id)
             .fetch_optional(pool)
             .await
-            .map_err(|_| internal_error("db_error"))?;
+            .map_err(AppError::internal)?;
 
     if target_exists.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "User not found", "code": "user_not_found"})),
-        ));
+        return Err(AppError::not_found("user"));
     }
 
     // CASCADE handles sessions, api_keys, permissions, reading_progress, bookmarks, sort_prefs
@@ -108,7 +105,7 @@ pub async fn delete_user(
         .bind(&target_user_id)
         .execute(pool)
         .await
-        .map_err(|_| internal_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -119,7 +116,7 @@ pub async fn set_permissions(
     axum::Extension(current_user): axum::Extension<AuthUser>,
     Path(target_user_id): Path<String>,
     Json(request): Json<SetPermissionsRequest>,
-) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<StatusCode, AppError> {
     require_user_management(&current_user, state.ironshelf_db.pool()).await?;
 
     let pool = state.ironshelf_db.pool();
@@ -129,20 +126,14 @@ pub async fn set_permissions(
         .bind(&target_user_id)
         .fetch_optional(pool)
         .await
-        .map_err(|_| internal_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
-    let target_row = target_row.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "User not found", "code": "user_not_found"})),
-        )
-    })?;
+    let target_row = target_row.ok_or_else(|| AppError::not_found("user"))?;
 
     let target_is_owner: bool = target_row.get::<i32, _>("is_owner") != 0;
     if target_is_owner {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Cannot modify owner permissions", "code": "cannot_modify_owner"})),
+        return Err(AppError::BadRequest(
+            "Cannot modify owner permissions".to_string(),
         ));
     }
 
@@ -150,12 +141,8 @@ pub async fn set_permissions(
     let valid_permissions = ["read", "download", "manage_library", "manage_users"];
     for permission in &request.permissions {
         if !valid_permissions.contains(&permission.as_str()) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("Invalid permission: {}", permission),
-                    "code": "invalid_permission"
-                })),
+            return Err(AppError::BadRequest(
+                format!("Invalid permission: {}", permission),
             ));
         }
     }
@@ -165,7 +152,7 @@ pub async fn set_permissions(
         .bind(&target_user_id)
         .execute(pool)
         .await
-        .map_err(|_| internal_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     for permission in &request.permissions {
         sqlx::query("INSERT INTO permissions (user_id, permission) VALUES (?, ?)")
@@ -173,7 +160,7 @@ pub async fn set_permissions(
             .bind(permission)
             .execute(pool)
             .await
-            .map_err(|_| internal_error("db_error"))?;
+            .map_err(AppError::internal)?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -183,7 +170,7 @@ pub async fn set_permissions(
 pub async fn create_invite(
     State(state): State<AppState>,
     axum::Extension(current_user): axum::Extension<AuthUser>,
-) -> Result<(StatusCode, Json<InviteResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<InviteResponse>), AppError> {
     require_user_management(&current_user, state.ironshelf_db.pool()).await?;
 
     let pool = state.ironshelf_db.pool();
@@ -195,7 +182,7 @@ pub async fn create_invite(
         .bind(&current_user.user_id)
         .execute(pool)
         .await
-        .map_err(|_| internal_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     let created_at = chrono::Utc::now().to_rfc3339();
 
@@ -211,13 +198,10 @@ pub async fn create_invite(
 // --- helpers ---
 
 /// Require the current user to be the instance owner.
-fn require_owner(
-    user: &AuthUser,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+fn require_owner(user: &AuthUser) -> Result<(), AppError> {
     if !user.is_owner {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Owner access required", "code": "forbidden"})),
+        return Err(AppError::Forbidden(
+            "Owner access required".to_string(),
         ));
     }
     Ok(())
@@ -227,7 +211,7 @@ fn require_owner(
 async fn require_user_management(
     user: &AuthUser,
     pool: &sqlx::SqlitePool,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), AppError> {
     if user.is_owner {
         return Ok(());
     }
@@ -241,9 +225,8 @@ async fn require_user_management(
     .unwrap_or(0);
 
     if has_permission == 0 {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Insufficient permissions", "code": "forbidden"})),
+        return Err(AppError::Forbidden(
+            "Insufficient permissions".to_string(),
         ));
     }
 
@@ -262,9 +245,3 @@ fn generate_invite_code() -> String {
         .collect::<String>()
 }
 
-fn internal_error(code: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({"error": "Internal server error", "code": code})),
-    )
-}

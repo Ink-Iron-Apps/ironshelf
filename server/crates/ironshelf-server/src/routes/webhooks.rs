@@ -160,7 +160,7 @@ pub async fn update_webhook(
     Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
     Json(body): Json<UpdateWebhookRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     // Validate events if provided
     if let Some(ref events) = body.events {
         for event in events {
@@ -218,7 +218,7 @@ pub async fn update_webhook(
         .await
         .map_err(AppError::internal)?;
 
-    Ok(Json(serde_json::json!({ "updated": true })))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// DELETE /api/v1/webhooks/:id — delete a webhook.
@@ -226,7 +226,7 @@ pub async fn delete_webhook(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<axum::http::StatusCode, AppError> {
     state
         .ironshelf_db
         .delete_webhook(&webhook_id, &auth_user.user_id)
@@ -236,7 +236,7 @@ pub async fn delete_webhook(
             other => AppError::internal(other),
         })?;
 
-    Ok(Json(serde_json::json!({ "deleted": true })))
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 /// GET /api/v1/webhooks/:id/deliveries — delivery history.
