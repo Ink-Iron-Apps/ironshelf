@@ -1,0 +1,209 @@
+import 'package:flutter/material.dart';
+import '../models/book.dart';
+import 'book_cover.dart';
+import 'progress_bar.dart';
+
+/// Book card for grid layout.
+class BookCard extends StatelessWidget {
+  final Book book;
+  final String? authorName;
+  final double? progressPercent;
+  final VoidCallback? onTap;
+
+  const BookCard({
+    super.key,
+    required this.book,
+    this.authorName,
+    this.progressPercent,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                BookCover(
+                  bookId: book.id,
+                  hasCover: book.hasCover,
+                  title: book.title,
+                  width: double.infinity,
+                  height: double.infinity,
+                  heroTag: 'book_cover_${book.id}',
+                ),
+                // Series index badge
+                if (book.seriesIndex != null)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '#${_formatSeriesIndex(book.seriesIndex!)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ),
+                // Progress overlay
+                if (progressPercent != null && progressPercent! > 0)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: ReadingProgressBar(
+                      percent: progressPercent!,
+                      height: 3,
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(8),
+                        bottomRight: Radius.circular(8),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            book.title,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (authorName != null)
+            Text(
+              authorName!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatSeriesIndex(double index) {
+    if (index == index.roundToDouble()) {
+      return index.toInt().toString();
+    }
+    return index.toString();
+  }
+}
+
+/// Book list tile for list layout.
+class BookListTile extends StatelessWidget {
+  final Book book;
+  final String? authorName;
+  final double? progressPercent;
+  final VoidCallback? onTap;
+  final Widget? trailing;
+
+  const BookListTile({
+    super.key,
+    required this.book,
+    this.authorName,
+    this.progressPercent,
+    this.onTap,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        child: Row(
+          children: [
+            BookCover(
+              bookId: book.id,
+              hasCover: book.hasCover,
+              title: book.title,
+              width: 48,
+              height: 70,
+              heroTag: 'book_cover_${book.id}',
+              borderRadius: BorderRadius.circular(6),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book.title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (authorName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      authorName!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (book.seriesIndex != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Book #${_formatSeriesIndex(book.seriesIndex!)}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                  if (progressPercent != null && progressPercent! > 0) ...[
+                    const SizedBox(height: 4),
+                    ReadingProgressBar(
+                      percent: progressPercent!,
+                      height: 3,
+                      showLabel: true,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: 8),
+              trailing!,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatSeriesIndex(double index) {
+    if (index == index.roundToDouble()) {
+      return index.toInt().toString();
+    }
+    return index.toString();
+  }
+}
