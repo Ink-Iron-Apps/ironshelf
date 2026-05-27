@@ -81,10 +81,10 @@ impl LibrarySource {
         }
     }
 
-    pub async fn custom_columns(&self) -> Vec<CustomColumn> {
+    pub async fn custom_columns(&self) -> Result<Vec<CustomColumn>, String> {
         match self {
-            Self::Calibre(source) => source.custom_columns().await.unwrap_or_default(),
-            Self::Folder(_) => vec![], // No custom columns for folder source
+            Self::Calibre(source) => source.custom_columns().await.map_err(|e| e.to_string()),
+            Self::Folder(_) => Ok(vec![]), // No custom columns for folder source
         }
     }
 
@@ -104,7 +104,16 @@ impl LibrarySource {
 
     pub fn cover_path(&self, book_path: &str) -> Option<PathBuf> {
         match self {
-            Self::Calibre(source) => Some(source.cover_path(book_path)),
+            Self::Calibre(source) => {
+                let path = source.cover_path(book_path);
+                // SAFETY: Reject paths that escape the library root (path traversal defense).
+                if source.is_path_within_library(&path) {
+                    Some(path)
+                } else {
+                    tracing::warn!("path traversal blocked for cover: {}", path.display());
+                    None
+                }
+            }
             Self::Folder(_) => None,
         }
     }
@@ -118,6 +127,19 @@ impl LibrarySource {
                 // The FolderSource stores library_path, and file_name is rel_path
                 // This is a bit awkward — file_name contains the full relative path for folder
                 PathBuf::from(file_name)
+            }
+        }
+    }
+
+    /// Check whether a file path is safely within the library root.
+    /// Returns false if the path escapes via `..` or symlinks.
+    pub fn is_path_safe(&self, path: &std::path::Path) -> bool {
+        match self {
+            Self::Calibre(source) => source.is_path_within_library(path),
+            Self::Folder(_) => {
+                // TODO(security): FolderSource should also validate paths against library_path.
+                // For now, the rel_path comes from the scan itself (trusted), not user input.
+                true
             }
         }
     }

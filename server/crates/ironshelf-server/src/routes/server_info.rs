@@ -25,11 +25,12 @@ pub async fn server_info(
     let pool = state.ironshelf_db.pool();
 
     // Check if any users exist to determine registration state.
+    // SAFETY: Do NOT default to 0 on DB error — that would falsely enable open registration.
     let user_count: i64 = sqlx::query("SELECT COUNT(*) as count FROM users")
         .fetch_one(pool)
         .await
         .map(|row| row.get("count"))
-        .unwrap_or(0);
+        .map_err(AppError::internal)?;
 
     let registration_open = user_count == 0;
     let invite_required = user_count > 0;

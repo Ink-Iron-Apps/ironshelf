@@ -330,6 +330,11 @@ pub async fn download_book(
                 .source
                 .format_path(&book.path, &format.file_name, &format.kind);
 
+            // SAFETY: Path traversal guard — reject if the resolved path escapes the library root.
+            if !library.source.is_path_safe(&file_path) {
+                return Err(AppError::Forbidden("access denied: path outside library".to_string()));
+            }
+
             let content_type = match format.kind.to_uppercase().as_str() {
                 "EPUB" => "application/epub+zip",
                 "PDF" => "application/pdf",
@@ -338,9 +343,17 @@ pub async fn download_book(
                 _ => "application/octet-stream",
             };
 
+            // SAFETY: Sanitize filename for Content-Disposition header.
+            let sanitized_title: String = book.title
+                .chars()
+                .map(|character| match character {
+                    '/' | '\\' | '"' | '\n' | '\r' | '\0' => '_',
+                    _ => character,
+                })
+                .collect();
             let filename = format!(
                 "{}.{}",
-                book.title.replace('/', "_"),
+                sanitized_title,
                 format.kind.to_lowercase()
             );
 

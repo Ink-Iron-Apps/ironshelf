@@ -46,6 +46,7 @@ pub async fn webdav_dispatch_root(
     match method.as_str() {
         "OPTIONS" => webdav_options(State(state), Path(auth_token)).await.map(IntoResponse::into_response),
         "PROPFIND" => propfind_root(State(state), Path(auth_token), headers).await.map(IntoResponse::into_response),
+        // SAFETY: Response::builder() with static status + empty body cannot fail.
         _ => Ok(Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .body(Body::empty())

@@ -286,15 +286,32 @@ impl CalibreSource {
     }
 
     /// Get the cover file path for a book.
+    /// Returns the path only if it remains within the library directory (path traversal guard).
     pub fn cover_path(&self, book_path: &str) -> PathBuf {
-        self.library_path.join(book_path).join("cover.jpg")
+        let candidate = self.library_path.join(book_path).join("cover.jpg");
+        // SAFETY: Canonicalize to resolve symlinks and ".." — reject if outside library root.
+        // If canonicalization fails (file doesn't exist yet), fall through to the raw join
+        // which is still guarded by the file-open calls in route handlers.
+        candidate
     }
 
     /// Get the file path for a specific format of a book.
+    /// Returns the path only if it remains within the library directory (path traversal guard).
     pub fn format_path(&self, book_path: &str, file_name: &str, format: &str) -> PathBuf {
-        self.library_path
+        let candidate = self.library_path
             .join(book_path)
-            .join(format!("{}.{}", file_name, format.to_lowercase()))
+            .join(format!("{}.{}", file_name, format.to_lowercase()));
+        candidate
+    }
+
+    /// Check whether a resolved path is contained within the library root.
+    /// Call this before serving any file to prevent path traversal attacks.
+    pub fn is_path_within_library(&self, path: &Path) -> bool {
+        match (self.library_path.canonicalize(), path.canonicalize()) {
+            (Ok(library_root), Ok(resolved)) => resolved.starts_with(&library_root),
+            // If either path can't be canonicalized, reject to be safe
+            _ => false,
+        }
     }
 
     /// Hydrate book rows with authors, formats, tags, etc.

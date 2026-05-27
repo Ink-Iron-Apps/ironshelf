@@ -23,13 +23,9 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<(u64, u64)> 
         return None;
     }
 
-    let parts: Vec<&str> = range_str.splitn(2, '-').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let start_str = parts[0].trim();
-    let end_str = parts[1].trim();
+    let (start_str, end_str) = range_str.split_once('-')?;
+    let start_str = start_str.trim();
+    let end_str = end_str.trim();
 
     if start_str.is_empty() {
         // Suffix range: "-500" means last 500 bytes
@@ -128,6 +124,11 @@ pub async fn get_file(
                 .source
                 .format_path(&book.path, &format.file_name, &format.kind);
 
+            // SAFETY: Path traversal guard — reject if the resolved path escapes the library root.
+            if !library.source.is_path_safe(&file_path) {
+                return Err(AppError::Forbidden("access denied: path outside library".to_string()));
+            }
+
             let content_type = match format.kind.to_uppercase().as_str() {
                 "EPUB" => "application/epub+zip",
                 "PDF" => "application/pdf",
@@ -136,9 +137,18 @@ pub async fn get_file(
                 _ => "application/octet-stream",
             };
 
+            // SAFETY: Sanitize filename for Content-Disposition header. Strip characters
+            // that could enable header injection or cause filesystem issues.
+            let sanitized_title: String = book.title
+                .chars()
+                .map(|character| match character {
+                    '/' | '\\' | '"' | '\n' | '\r' | '\0' => '_',
+                    _ => character,
+                })
+                .collect();
             let filename = format!(
                 "{}.{}",
-                book.title.replace('/', "_"),
+                sanitized_title,
                 format.kind.to_lowercase()
             );
 
@@ -156,6 +166,16 @@ pub async fn get_file(
 
                 if let Some((range_start, range_end)) = parse_range_header(range_str, file_size) {
                     let content_length = range_end - range_start + 1;
+
+                    // SAFETY: Cap range response to 100 MB to prevent memory exhaustion.
+                    // Clients requesting larger ranges should use multiple requests.
+                    const MAX_RANGE_BYTES: u64 = 100 * 1024 * 1024;
+                    if content_length > MAX_RANGE_BYTES {
+                        return Err(AppError::BadRequest(format!(
+                            "Range too large ({} bytes). Maximum single range is {} bytes.",
+                            content_length, MAX_RANGE_BYTES
+                        )));
+                    }
 
                     // Read the requested byte range
                     let mut file = File::open(&file_path)

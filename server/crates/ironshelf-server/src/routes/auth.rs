@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::auth::{hash_password, verify_password, AuthUser};
+use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -57,6 +58,23 @@ pub async fn register(
     Json(request): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
     let pool = state.ironshelf_db.pool();
+
+    // SAFETY: Enforce minimum password length to prevent trivially guessable passwords.
+    if request.password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must be at least 8 characters", "code": "password_too_short"})),
+        ));
+    }
+
+    // SAFETY: Enforce username length limits.
+    let trimmed_username = request.username.trim();
+    if trimmed_username.is_empty() || trimmed_username.len() > 64 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Username must be 1-64 characters", "code": "invalid_username"})),
+        ));
+    }
 
     // Check if any users exist (first = owner)
     let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
@@ -197,7 +215,9 @@ pub async fn login(
         "session_id": session_id,
     });
 
-    // Set session cookie
+    // Set session cookie.
+    // TODO(security): Add `; Secure` flag when behind TLS (detect via X-Forwarded-Proto
+    // or a config flag). Currently omitted so HTTP-only dev setups work.
     let cookie = format!(
         "ironshelf_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
         session_id
@@ -217,13 +237,14 @@ pub async fn login(
 pub async fn logout(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
-) -> StatusCode {
+) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    let _ = sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?")
         .bind(&user.user_id)
         .execute(pool)
-        .await;
-    StatusCode::NO_CONTENT
+        .await
+        .map_err(AppError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// GET /api/v1/auth/me
@@ -281,7 +302,7 @@ pub async fn create_api_key(
 pub async fn list_api_keys(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
-) -> Result<Json<Vec<ApiKeySummary>>, StatusCode> {
+) -> Result<Json<Vec<ApiKeySummary>>, AppError> {
     let pool = state.ironshelf_db.pool();
 
     let rows = sqlx::query(
@@ -290,7 +311,7 @@ pub async fn list_api_keys(
     .bind(&user.user_id)
     .fetch_all(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(AppError::internal)?;
 
     let keys = rows
         .iter()
@@ -310,14 +331,15 @@ pub async fn delete_api_key(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
     axum::extract::Path(key_id): axum::extract::Path<String>,
-) -> StatusCode {
+) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    let _ = sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
         .bind(&key_id)
         .bind(&user.user_id)
         .execute(pool)
-        .await;
-    StatusCode::NO_CONTENT
+        .await
+        .map_err(AppError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // --- helpers ---

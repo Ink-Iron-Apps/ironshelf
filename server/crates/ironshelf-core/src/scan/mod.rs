@@ -331,8 +331,10 @@ impl FolderSource {
     }
 
     pub fn book(&self, book_id: i64) -> Option<Book> {
+        // SAFETY: Reject negative IDs — `as usize` on a negative i64 wraps to a huge value.
+        let index: usize = book_id.try_into().ok()?;
         self.books
-            .get(book_id as usize)
+            .get(index)
             .map(|b| self.scanned_to_book(b, book_id))
     }
 
