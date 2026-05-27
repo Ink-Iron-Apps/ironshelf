@@ -198,7 +198,7 @@ pub async fn oidc_callback(
     let pool = state.ironshelf_db.pool();
     let user_row = find_or_create_oidc_user(
         pool,
-        &oidc_config,
+        oidc_config,
         &claims,
     )
     .await?;
