@@ -345,9 +345,16 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::post(routes::acquisition::acquisition_grab),
         );
 
-    // Resolve state on each sub-router before applying the auth middleware layer.
-    // This converts each `Router<AppState>` to `Router<()>`, keeping the type tree
-    // shallow enough for the compiler's trait solver to verify the FromFn Service bounds.
+    // Build the auth middleware layer using a closure that captures AppState.
+    // This avoids the `from_fn_with_state` + `State<>` extractor pattern which
+    // triggers a type-inference failure in Rust's trait solver when the router
+    // has many merged sub-routers (FromFn's extractor tuple type becomes _).
+    let auth_state = app_state.clone();
+    let auth_middleware_layer = axum::middleware::from_fn(move |request, next| {
+        let state = auth_state.clone();
+        async move { auth::auth_middleware(State(state), request, next).await }
+    });
+
     let protected_routes = Router::new()
         .merge(auth_management_routes)
         .merge(library_routes)
@@ -356,10 +363,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(genre_webhook_routes)
         .merge(acquisition_routes)
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            auth::auth_middleware,
-        ));
+        .layer(auth_middleware_layer.clone());
 
     // OPDS catalog routes (Bearer auth via same middleware — OPDS readers use Authorization header)
     let opds_routes = Router::new()
@@ -371,10 +375,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/opds/recent", get(routes::opds::recent_feed))
         .route("/opds/search", get(routes::opds::search_feed))
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            auth::auth_middleware,
-        ));
+        .layer(auth_middleware_layer);
 
     // Kobo Sync API routes (auth is via path token, no session middleware)
     let kobo_routes = Router::new()
