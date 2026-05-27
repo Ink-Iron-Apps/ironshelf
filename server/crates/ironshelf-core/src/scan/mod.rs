@@ -457,7 +457,7 @@ fn extract_dc_element(opf: &str, element: &str) -> Option<String> {
     ];
 
     for pattern in &patterns {
-        if let Some(start) = opf.find(pattern.as_str()) {
+        if let Some(start) = opf.find(&**pattern) {
             let after_tag = &opf[start..];
             let content_start = after_tag.find('>').map(|i| i + 1)?;
             let close_tag = format!("</dc:{element}>");
@@ -484,7 +484,7 @@ fn extract_dc_elements(opf: &str, element: &str) -> Vec<String> {
 
     loop {
         let found = open_patterns.iter().filter_map(|pattern| {
-            opf[search_from..].find(pattern.as_str()).map(|pos| search_from + pos)
+            opf[search_from..].find(&**pattern).map(|pos| search_from + pos)
         }).min();
 
         match found {

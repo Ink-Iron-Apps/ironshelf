@@ -30,16 +30,16 @@ pub struct SearchResult {
     pub snippet: Option<String>,
 }
 
-/// Parameters for indexing a single book.
-#[derive(Debug)]
-pub struct BookIndexEntry<'a> {
+/// Entry for indexing a single book (used for both single-book and batch operations).
+#[derive(Debug, Clone)]
+pub struct BookIndexEntry {
     pub book_id: i64,
-    pub title: &'a str,
-    pub authors: &'a str,
-    pub series: Option<&'a str>,
-    pub tags: &'a str,
-    pub description: Option<&'a str>,
-    pub library_id: &'a str,
+    pub title: String,
+    pub author_names: String,
+    pub series_name: Option<String>,
+    pub tags: String,
+    pub description: Option<String>,
+    pub library_id: String,
 }
 
 /// Field handles for quick access without name lookups.
@@ -131,7 +131,7 @@ impl SearchIndex {
 
     /// Index a single book (add or update). Removes any existing document with
     /// the same book_id + library_id before inserting.
-    pub fn index_book(&self, entry: &BookIndexEntry<'_>) -> Result<(), SearchIndexError> {
+    pub fn index_book(&self, entry: &BookIndexEntry) -> Result<(), SearchIndexError> {
         let mut writer = self.create_writer()?;
 
         // Delete existing document for this book (by composite key).
@@ -140,14 +140,17 @@ impl SearchIndex {
             tantivy::Term::from_field_text(self.fields.book_id, &book_id_string);
         writer.delete_term(book_id_term);
 
+        let series_value: &str = entry.series_name.as_deref().unwrap_or("");
+        let description_value: &str = entry.description.as_deref().unwrap_or("");
+
         writer.add_document(doc!(
             self.fields.book_id => book_id_string,
-            self.fields.title => entry.title,
-            self.fields.author_names => entry.authors,
-            self.fields.series_name => entry.series.unwrap_or(""),
-            self.fields.tags => entry.tags,
-            self.fields.description => entry.description.unwrap_or(""),
-            self.fields.library_id => entry.library_id,
+            self.fields.title => &*entry.title,
+            self.fields.author_names => &*entry.author_names,
+            self.fields.series_name => series_value,
+            self.fields.tags => &*entry.tags,
+            self.fields.description => description_value,
+            self.fields.library_id => &*entry.library_id,
         )).map_err(|tantivy_error| {
             SearchIndexError::Tantivy(format!("failed to add document: {tantivy_error}"))
         })?;
@@ -266,16 +269,18 @@ impl SearchIndex {
 
         let book_count = books.len();
 
-        for entry in books {
+        for entry in &books {
             let book_id_string = entry.book_id.to_string();
+            let series_value: &str = entry.series_name.as_deref().unwrap_or("");
+            let description_value: &str = entry.description.as_deref().unwrap_or("");
             writer.add_document(doc!(
                 self.fields.book_id => book_id_string,
-                self.fields.title => entry.title.as_str(),
-                self.fields.author_names => entry.author_names.as_str(),
-                self.fields.series_name => entry.series_name.unwrap_or_default(),
-                self.fields.tags => entry.tags.as_str(),
-                self.fields.description => entry.description.unwrap_or_default(),
-                self.fields.library_id => entry.library_id.as_str(),
+                self.fields.title => &*entry.title,
+                self.fields.author_names => &*entry.author_names,
+                self.fields.series_name => series_value,
+                self.fields.tags => &*entry.tags,
+                self.fields.description => description_value,
+                self.fields.library_id => &*entry.library_id,
             )).map_err(|tantivy_error| {
                 SearchIndexError::Tantivy(format!("failed to add document during rebuild: {tantivy_error}"))
             })?;
@@ -301,18 +306,6 @@ impl SearchIndex {
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
-}
-
-/// Entry for batch indexing during a rebuild operation.
-#[derive(Debug, Clone)]
-pub struct BookIndexEntry {
-    pub book_id: i64,
-    pub title: String,
-    pub author_names: String,
-    pub series_name: Option<String>,
-    pub tags: String,
-    pub description: Option<String>,
-    pub library_id: String,
 }
 
 /// Errors that can occur during search index operations.
