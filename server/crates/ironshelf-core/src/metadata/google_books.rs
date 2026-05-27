@@ -14,6 +14,9 @@ pub struct GoogleBooksProvider {
 }
 
 impl GoogleBooksProvider {
+    // TODO(security): This expect() will panic if TLS backend init fails at runtime.
+    // Consider making this fallible (return Result) and constructing once at startup
+    // rather than per-request in route handlers.
     pub fn new() -> Self {
         Self {
             http_client: Client::builder()

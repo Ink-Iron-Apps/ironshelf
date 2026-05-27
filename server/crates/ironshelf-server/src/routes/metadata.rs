@@ -297,11 +297,8 @@ pub async fn bulk_metadata_scan(
     let open_library_provider = OpenLibraryProvider::new();
 
     for book in &books_needing_enrichment {
-        let primary_author = if !book.author_ids.is_empty() {
-            author_name_map.get(&book.author_ids[0]).cloned()
-        } else {
-            None
-        };
+        let primary_author = book.author_ids.first()
+            .and_then(|author_id| author_name_map.get(author_id).cloned());
 
         let author_ref = primary_author.as_deref();
 
@@ -398,12 +395,9 @@ async fn find_book_title_author(
 
     for library in libraries.iter() {
         if let Ok(Some(book)) = library.source.book(book_id).await {
-            let primary_author = if !book.author_ids.is_empty() {
+            let primary_author = if let Some(first_id) = book.author_ids.first() {
                 let authors = library.source.authors().await.unwrap_or_default();
-                authors
-                    .iter()
-                    .find(|author| author.id == book.author_ids[0])
-                    .map(|author| author.name.clone())
+                authors.iter().find(|author| author.id == *first_id).map(|author| author.name.clone())
             } else {
                 None
             };

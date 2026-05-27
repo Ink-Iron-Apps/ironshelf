@@ -21,11 +21,7 @@ pub async fn get_series(
 
     for library in libraries.iter() {
         if let Ok(Some(series)) = library.source.series(series_id).await {
-            let books = library
-                .source
-                .books_in_series(series_id)
-                .await
-                .unwrap_or_default();
+            let books = library.source.books_in_series(series_id).await?;
 
             return Ok(Json(SeriesDetail { series, books }));
         }

@@ -146,6 +146,11 @@ impl RateLimiter {
 ///
 /// Checks `X-Forwarded-For` first (first IP in the chain), then `X-Real-Ip`,
 /// then falls back to the peer socket address.
+///
+/// TODO(security): X-Forwarded-For is trivially spoofable by direct clients.
+/// When not behind a trusted reverse proxy, an attacker can bypass rate limiting
+/// by rotating the header value. Consider adding a config flag to disable header
+/// trust when the server is directly exposed, or use the rightmost non-private IP.
 fn extract_client_address<B>(request: &Request<B>) -> IpAddr {
     // X-Forwarded-For: client, proxy1, proxy2 — take first.
     if let Some(forwarded_for) = request.headers().get("x-forwarded-for") {

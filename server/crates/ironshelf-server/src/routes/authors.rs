@@ -88,20 +88,12 @@ pub async fn get_author(
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
-        let authors = library.source.authors().await.unwrap_or_default();
+        let authors = library.source.authors().await?;
 
         if let Some(author) = authors.into_iter().find(|a| a.id == author_id) {
-            let series = library
-                .source
-                .series_by_author(author_id)
-                .await
-                .unwrap_or_default();
+            let series = library.source.series_by_author(author_id).await?;
 
-            let standalone = library
-                .source
-                .standalone_books(author_id)
-                .await
-                .unwrap_or_default();
+            let standalone = library.source.standalone_books(author_id).await?;
 
             return Ok(Json(AuthorDetail {
                 author,
@@ -122,11 +114,7 @@ pub async fn author_series(
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
-        let series = library
-            .source
-            .series_by_author(author_id)
-            .await
-            .unwrap_or_default();
+        let series = library.source.series_by_author(author_id).await?;
 
         if !series.is_empty() {
             return Ok(Json(series));
@@ -144,11 +132,7 @@ pub async fn author_standalone(
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
-        let books = library
-            .source
-            .standalone_books(author_id)
-            .await
-            .unwrap_or_default();
+        let books = library.source.standalone_books(author_id).await?;
 
         if !books.is_empty() {
             return Ok(Json(books));

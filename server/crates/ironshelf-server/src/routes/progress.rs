@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::auth::AuthUser;
+use crate::error::AppError;
 use crate::state::AppState;
 
 #[derive(Serialize, Deserialize)]
@@ -43,7 +44,7 @@ pub async fn get_progress(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<String>,
-) -> Result<Json<Vec<ReadingProgress>>, StatusCode> {
+) -> Result<Json<Vec<ReadingProgress>>, AppError> {
     let pool = state.ironshelf_db.pool();
 
     let rows = sqlx::query(
@@ -54,7 +55,7 @@ pub async fn get_progress(
     .bind(&book_id)
     .fetch_all(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(AppError::internal)?;
 
     let progress = rows
         .iter()
@@ -76,7 +77,7 @@ pub async fn update_progress(
     axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<String>,
     Json(request): Json<UpdateProgressRequest>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -94,7 +95,7 @@ pub async fn update_progress(
     .bind(&now)
     .execute(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(AppError::internal)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -104,7 +105,7 @@ pub async fn list_bookmarks(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<String>,
-) -> Result<Json<Vec<Bookmark>>, StatusCode> {
+) -> Result<Json<Vec<Bookmark>>, AppError> {
     let pool = state.ironshelf_db.pool();
 
     let rows = sqlx::query(
@@ -115,7 +116,7 @@ pub async fn list_bookmarks(
     .bind(&book_id)
     .fetch_all(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(AppError::internal)?;
 
     let bookmarks = rows
         .iter()
@@ -137,7 +138,7 @@ pub async fn create_bookmark(
     axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<String>,
     Json(request): Json<CreateBookmarkRequest>,
-) -> Result<(StatusCode, Json<Bookmark>), StatusCode> {
+) -> Result<(StatusCode, Json<Bookmark>), AppError> {
     let pool = state.ironshelf_db.pool();
     let bookmark_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -154,7 +155,7 @@ pub async fn create_bookmark(
     .bind(&now)
     .execute(pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(AppError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -173,12 +174,13 @@ pub async fn delete_bookmark(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
     Path((_book_id, bookmark_id)): Path<(String, String)>,
-) -> StatusCode {
+) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    let _ = sqlx::query("DELETE FROM bookmarks WHERE id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM bookmarks WHERE id = ? AND user_id = ?")
         .bind(&bookmark_id)
         .bind(&user.user_id)
         .execute(pool)
-        .await;
-    StatusCode::NO_CONTENT
+        .await
+        .map_err(AppError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }

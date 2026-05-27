@@ -34,10 +34,15 @@ impl ThumbnailParams {
     }
 
     /// Build the cache file name for these params.
+    /// Sanitizes book_id to prevent path traversal (strips path separators and dots).
     pub fn cache_filename(&self, book_id: &str) -> String {
+        let sanitized_id: String = book_id
+            .chars()
+            .filter(|character| character.is_alphanumeric() || *character == '-' || *character == '_')
+            .collect();
         format!(
             "{}_{}x{}_q{}.jpg",
-            book_id, self.width, self.height, self.quality
+            sanitized_id, self.width, self.height, self.quality
         )
     }
 }

@@ -80,7 +80,7 @@ pub async fn get_library(
         .find(|l| l.id == library_id)
         .ok_or(AppError::not_found("library"))?;
 
-    let custom_columns = library.source.custom_columns().await;
+    let custom_columns = library.source.custom_columns().await?;
 
     Ok(Json(LibraryDetail {
         summary: LibrarySummary {

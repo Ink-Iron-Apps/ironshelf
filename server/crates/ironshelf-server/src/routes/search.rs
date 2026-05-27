@@ -126,6 +126,17 @@ pub async fn global_search(
         ));
     }
 
+    // SAFETY: Cap query length to prevent excessive memory use in tantivy tokenizer
+    // and in-memory substring matching.
+    const MAX_QUERY_LENGTH: usize = 500;
+    if query.len() > MAX_QUERY_LENGTH {
+        return Err(AppError::BadRequest(format!(
+            "query too long ({} chars). Maximum is {} characters.",
+            query.len(),
+            MAX_QUERY_LENGTH
+        )));
+    }
+
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).min(100).max(1);
     let include_authors = params.search_type == "all" || params.search_type == "author";
