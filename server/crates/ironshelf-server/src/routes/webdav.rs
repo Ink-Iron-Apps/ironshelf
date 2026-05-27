@@ -61,6 +61,9 @@ pub async fn webdav_dispatch_path(
     Path((auth_token, resource_path)): Path<(String, String)>,
     request: Request,
 ) -> Result<Response, AppError> {
+    // SAFETY: Reject path traversal attempts before any processing.
+    validate_webdav_path(&resource_path)?;
+
     let method = request.method().clone();
     let headers = request.headers().clone();
 
@@ -367,6 +370,7 @@ pub async fn webdav_mkcol(
 // ---------------------------------------------------------------------------
 
 /// `DELETE /webdav/{auth_token}/{*path}` — delete a WebDAV file or directory.
+/// For directories, also deletes all child files to prevent orphaned entries.
 pub async fn webdav_delete(
     State(state): State<AppState>,
     Path((auth_token, resource_path)): Path<(String, String)>,
@@ -374,9 +378,30 @@ pub async fn webdav_delete(
     let auth_user = authenticate_webdav_token(&state, &auth_token).await?;
     let normalized_path = format!("/{}", normalize_path(&resource_path));
 
+    // Delete the exact path (file or directory marker).
     state
         .ironshelf_db
         .delete_webdav_file(&auth_user.user_id, &normalized_path)
+        .await
+        .map_err(AppError::internal)?;
+
+    // If this looks like a directory, also delete with trailing slash and all children.
+    // This prevents orphaned files when a directory is deleted.
+    let directory_prefix = if normalized_path.ends_with('/') {
+        normalized_path.clone()
+    } else {
+        format!("{normalized_path}/")
+    };
+
+    state
+        .ironshelf_db
+        .delete_webdav_file(&auth_user.user_id, &directory_prefix)
+        .await
+        .map_err(AppError::internal)?;
+
+    state
+        .ironshelf_db
+        .delete_webdav_files_by_prefix(&auth_user.user_id, &directory_prefix)
         .await
         .map_err(AppError::internal)?;
 
@@ -493,6 +518,10 @@ fn parse_depth(headers: &HeaderMap) -> u32 {
 }
 
 /// Normalize a path: remove leading/trailing slashes, collapse doubles.
+/// Returns an empty string for root paths.
+///
+/// SAFETY: The caller must validate the result against path traversal
+/// before using it. Use `validate_webdav_path()` for user-facing paths.
 fn normalize_path(path: &str) -> String {
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {
@@ -500,6 +529,22 @@ fn normalize_path(path: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Validate that a WebDAV resource path does not contain path traversal segments.
+/// Returns `Err(AppError)` if `..` segments or null bytes are found.
+fn validate_webdav_path(path: &str) -> Result<(), AppError> {
+    // Reject paths with null bytes, which could bypass path checks in some systems.
+    if path.contains('\0') {
+        return Err(AppError::BadRequest("Invalid path: null bytes not allowed".to_string()));
+    }
+    // Reject path traversal via `..` segments.
+    for segment in path.split('/') {
+        if segment == ".." {
+            return Err(AppError::BadRequest("Invalid path: '..' segments not allowed".to_string()));
+        }
+    }
+    Ok(())
 }
 
 /// Ensure all parent directory markers exist for a given file path.
