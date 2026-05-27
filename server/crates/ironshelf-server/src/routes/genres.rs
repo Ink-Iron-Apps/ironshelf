@@ -246,10 +246,10 @@ fn sort_books(books: &mut Vec<ironshelf_core::model::Book>, sort_field: &Option<
             books.sort_by(|a, b| a.sort_title.to_lowercase().cmp(&b.sort_title.to_lowercase()));
         }
         Some("pubdate") => {
-            books.sort_by(|a, b| a.pubdate.cmp(&b.pubdate));
+            books.sort_by_key(|book| book.pubdate);
         }
         Some("added_at") => {
-            books.sort_by(|a, b| a.added_at.cmp(&b.added_at));
+            books.sort_by_key(|book| book.added_at);
         }
         Some("rating") => {
             books.sort_by_key(|book| book.rating.unwrap_or(0));

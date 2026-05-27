@@ -163,6 +163,30 @@ pub struct StoredCompletedBook {
     pub completed_at: String,
 }
 
+/// Parameters for creating a new highlight.
+#[derive(Debug)]
+pub struct CreateHighlightParams<'a> {
+    pub user_id: &'a str,
+    pub book_id: &'a str,
+    pub format: &'a str,
+    pub cfi_range: &'a str,
+    pub text_content: Option<&'a str>,
+    pub color: &'a str,
+    pub note: Option<&'a str>,
+}
+
+/// Parameters for updating a webhook.
+#[derive(Debug)]
+pub struct UpdateWebhookParams<'a> {
+    pub webhook_id: &'a str,
+    pub user_id: &'a str,
+    pub name: Option<&'a str>,
+    pub url: Option<&'a str>,
+    pub secret: Option<&'a str>,
+    pub events: Option<&'a [String]>,
+    pub is_active: Option<bool>,
+}
+
 /// Ironshelf's own database connection.
 #[derive(Clone)]
 pub struct IronshelfDb {
@@ -1250,14 +1274,17 @@ impl IronshelfDb {
     /// Create a new highlight for a user on a book. Returns the generated ID.
     pub async fn create_highlight(
         &self,
-        user_id: &str,
-        book_id: &str,
-        format: &str,
-        cfi_range: &str,
-        text_content: Option<&str>,
-        color: &str,
-        note: Option<&str>,
+        params: &CreateHighlightParams<'_>,
     ) -> Result<String, DbError> {
+        let CreateHighlightParams {
+            user_id,
+            book_id,
+            format,
+            cfi_range,
+            text_content,
+            color,
+            note,
+        } = params;
         let highlight_id = uuid::Uuid::new_v4().to_string();
 
         sqlx::query(
@@ -1481,14 +1508,17 @@ impl IronshelfDb {
     /// Update a webhook's mutable fields.
     pub async fn update_webhook(
         &self,
-        webhook_id: &str,
-        user_id: &str,
-        name: Option<&str>,
-        url: Option<&str>,
-        secret: Option<&str>,
-        events: Option<&[String]>,
-        is_active: Option<bool>,
+        params: &UpdateWebhookParams<'_>,
     ) -> Result<(), DbError> {
+        let UpdateWebhookParams {
+            webhook_id,
+            user_id,
+            name,
+            url,
+            secret,
+            events,
+            is_active,
+        } = params;
         if let Some(name) = name {
             sqlx::query("UPDATE webhooks SET name = ? WHERE id = ? AND user_id = ?")
                 .bind(name)
@@ -1524,7 +1554,7 @@ impl IronshelfDb {
         }
         if let Some(is_active) = is_active {
             sqlx::query("UPDATE webhooks SET is_active = ? WHERE id = ? AND user_id = ?")
-                .bind(is_active as i32)
+                .bind(*is_active as i32)
                 .bind(webhook_id)
                 .bind(user_id)
                 .execute(&self.pool)

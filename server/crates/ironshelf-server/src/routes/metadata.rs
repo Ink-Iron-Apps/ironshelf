@@ -165,7 +165,7 @@ pub async fn apply_metadata(
 
             let (_provider, metadata_json, _fetched_at) = &cached_entries[match_index];
             let metadata: BookMetadata = serde_json::from_str(metadata_json)
-                .map_err(|error| AppError::internal(error))?;
+                .map_err(AppError::internal)?;
 
             let tags_json = if metadata.categories.is_empty() {
                 None

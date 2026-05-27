@@ -30,6 +30,18 @@ pub struct SearchResult {
     pub snippet: Option<String>,
 }
 
+/// Parameters for indexing a single book.
+#[derive(Debug)]
+pub struct BookIndexEntry<'a> {
+    pub book_id: i64,
+    pub title: &'a str,
+    pub authors: &'a str,
+    pub series: Option<&'a str>,
+    pub tags: &'a str,
+    pub description: Option<&'a str>,
+    pub library_id: &'a str,
+}
+
 /// Field handles for quick access without name lookups.
 #[derive(Debug, Clone)]
 struct IndexFields {
@@ -119,32 +131,23 @@ impl SearchIndex {
 
     /// Index a single book (add or update). Removes any existing document with
     /// the same book_id + library_id before inserting.
-    pub fn index_book(
-        &self,
-        book_id: i64,
-        title: &str,
-        authors: &str,
-        series: Option<&str>,
-        tags: &str,
-        description: Option<&str>,
-        library_id: &str,
-    ) -> Result<(), SearchIndexError> {
+    pub fn index_book(&self, entry: &BookIndexEntry<'_>) -> Result<(), SearchIndexError> {
         let mut writer = self.create_writer()?;
 
         // Delete existing document for this book (by composite key).
-        let book_id_string = book_id.to_string();
+        let book_id_string = entry.book_id.to_string();
         let book_id_term =
             tantivy::Term::from_field_text(self.fields.book_id, &book_id_string);
         writer.delete_term(book_id_term);
 
         writer.add_document(doc!(
             self.fields.book_id => book_id_string,
-            self.fields.title => title,
-            self.fields.author_names => authors,
-            self.fields.series_name => series.unwrap_or(""),
-            self.fields.tags => tags,
-            self.fields.description => description.unwrap_or(""),
-            self.fields.library_id => library_id,
+            self.fields.title => entry.title,
+            self.fields.author_names => entry.authors,
+            self.fields.series_name => entry.series.unwrap_or(""),
+            self.fields.tags => entry.tags,
+            self.fields.description => entry.description.unwrap_or(""),
+            self.fields.library_id => entry.library_id,
         )).map_err(|tantivy_error| {
             SearchIndexError::Tantivy(format!("failed to add document: {tantivy_error}"))
         })?;

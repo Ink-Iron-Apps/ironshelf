@@ -487,7 +487,7 @@ pub async fn update_reading_state(
         .bind(&now)
         .execute(pool)
         .await
-        .map_err(|error| AppError::internal(error))?;
+        .map_err(AppError::internal)?;
     }
 
     // Kobo expects a 200 with a JSON response acknowledging the update.

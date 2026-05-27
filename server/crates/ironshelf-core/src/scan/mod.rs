@@ -149,7 +149,7 @@ impl FolderSource {
             Ok(opf_content)
         })
         .await
-        .map_err(|e| ScanError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
+        .map_err(|e| ScanError::Io(std::io::Error::other(e)))?
     }
 
     /// Derive metadata from file path when epub parsing unavailable.
@@ -545,7 +545,7 @@ fn html_decode(s: &str) -> String {
 
 /// Generate sort name (last name first for "First Last" patterns).
 fn sort_name(name: &str) -> String {
-    let parts: Vec<&str> = name.trim().split_whitespace().collect();
+    let parts: Vec<&str> = name.split_whitespace().collect();
     if parts.len() >= 2 {
         format!("{}, {}", parts.last().unwrap(), parts[..parts.len() - 1].join(" "))
     } else {

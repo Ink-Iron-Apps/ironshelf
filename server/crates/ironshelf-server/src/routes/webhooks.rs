@@ -206,15 +206,15 @@ pub async fn update_webhook(
 
     state
         .ironshelf_db
-        .update_webhook(
-            &webhook_id,
-            &auth_user.user_id,
-            body.name.as_deref(),
-            body.url.as_deref(),
-            body.secret.as_deref(),
-            body.events.as_deref(),
-            body.is_active,
-        )
+        .update_webhook(&ironshelf_core::db::UpdateWebhookParams {
+            webhook_id: &webhook_id,
+            user_id: &auth_user.user_id,
+            name: body.name.as_deref(),
+            url: body.url.as_deref(),
+            secret: body.secret.as_deref(),
+            events: body.events.as_deref(),
+            is_active: body.is_active,
+        })
         .await
         .map_err(AppError::internal)?;
 
