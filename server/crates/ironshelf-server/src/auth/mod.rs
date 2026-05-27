@@ -54,17 +54,20 @@ pub async fn auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let auth_user = extract_auth_user(&state, &request).await?;
+    let auth_user = extract_auth_user(&state, request.headers()).await?;
     request.extensions_mut().insert(auth_user);
     Ok(next.run(request).await)
 }
 
 /// Extract authenticated user from request headers.
-async fn extract_auth_user(state: &AppState, request: &Request) -> Result<AuthUser, StatusCode> {
+///
+/// Takes `&HeaderMap` (not `&Request`) to avoid borrowing the non-Sync request
+/// body across await points, which would make the future non-Send.
+async fn extract_auth_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<AuthUser, StatusCode> {
     let pool = state.ironshelf_db.pool();
 
     // Try Bearer token first (API key: "Bearer irs_<prefix>.<secret>")
-    if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
+    if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
         let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
         if let Some(token) = auth_str.strip_prefix("Bearer ") {
             return validate_api_key(pool, token).await;
@@ -72,7 +75,7 @@ async fn extract_auth_user(state: &AppState, request: &Request) -> Result<AuthUs
     }
 
     // Try session cookie
-    if let Some(cookie_header) = request.headers().get(header::COOKIE) {
+    if let Some(cookie_header) = headers.get(header::COOKIE) {
         let cookie_str = cookie_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
         if let Some(session_id) = extract_session_cookie(cookie_str) {
             return validate_session(pool, &session_id).await;
