@@ -230,7 +230,7 @@ pub async fn genre_series(
 }
 
 /// Sort books by the given field and direction.
-fn sort_books(books: &mut Vec<ironshelf_core::model::Book>, sort_field: &Option<String>, sort_direction: &Option<String>) {
+fn sort_books(books: &mut [ironshelf_core::model::Book], sort_field: &Option<String>, sort_direction: &Option<String>) {
     let sort_params = SortParams {
         sort: sort_field.clone(),
         dir: sort_direction.clone(),
