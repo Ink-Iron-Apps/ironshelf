@@ -357,7 +357,7 @@ pub async fn rebuild_search_index(
     }
     drop(libraries);
 
-    let index_guard = search_index.read().await;
+    let index_guard = search_index.write().await;
     let books_indexed = index_guard.rebuild(entries).map_err(|index_error| {
         AppError::Internal(format!("failed to rebuild search index: {index_error}"))
     })?;

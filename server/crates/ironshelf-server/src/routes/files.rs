@@ -7,18 +7,10 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 use crate::error::AppError;
 use crate::state::AppState;
-use crate::thumbnail::{self, ThumbnailParams};
 
 #[derive(Deserialize)]
 pub struct FileQuery {
     pub format: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct CoverQuery {
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    pub quality: Option<u8>,
 }
 
 /// Parse an HTTP Range header value like "bytes=0-499" or "bytes=500-".

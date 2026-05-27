@@ -1,6 +1,7 @@
 //! Webhook management routes.
 
 use axum::extract::{Path, Query, State};
+use axum::Extension;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
@@ -65,14 +66,8 @@ pub struct DeliveryResponse {
 /// GET /api/v1/webhooks — list the current user's webhooks.
 pub async fn list_webhooks(
     State(state): State<AppState>,
-    request: axum::extract::Request,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<WebhookResponse>>, AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
     let webhooks = state
         .ironshelf_db
         .list_webhooks(&auth_user.user_id)
@@ -97,21 +92,9 @@ pub async fn list_webhooks(
 /// POST /api/v1/webhooks — create a new webhook.
 pub async fn create_webhook(
     State(state): State<AppState>,
-    request: axum::extract::Request,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(body): Json<CreateWebhookRequest>,
 ) -> Result<(axum::http::StatusCode, Json<WebhookResponse>), AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
-    let body: CreateWebhookRequest = serde_json::from_slice(
-        &axum::body::to_bytes(request.into_body(), 1024 * 64)
-            .await
-            .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?,
-    )
-    .map_err(|error| AppError::BadRequest(format!("Invalid JSON: {error}")))?;
-
     // Validate events
     for event in &body.events {
         if !VALID_EVENTS.contains(&event.as_str()) {
@@ -161,22 +144,10 @@ pub async fn create_webhook(
 /// PATCH /api/v1/webhooks/:id — update a webhook.
 pub async fn update_webhook(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
-    request: axum::extract::Request,
+    Json(body): Json<UpdateWebhookRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
-    let body: UpdateWebhookRequest = serde_json::from_slice(
-        &axum::body::to_bytes(request.into_body(), 1024 * 64)
-            .await
-            .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?,
-    )
-    .map_err(|error| AppError::BadRequest(format!("Invalid JSON: {error}")))?;
-
     // Validate events if provided
     if let Some(ref events) = body.events {
         for event in events {
@@ -214,15 +185,9 @@ pub async fn update_webhook(
 /// DELETE /api/v1/webhooks/:id — delete a webhook.
 pub async fn delete_webhook(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
-    request: axum::extract::Request,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
     state
         .ironshelf_db
         .delete_webhook(&webhook_id, &auth_user.user_id)
@@ -238,16 +203,10 @@ pub async fn delete_webhook(
 /// GET /api/v1/webhooks/:id/deliveries — delivery history.
 pub async fn list_deliveries(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
     Query(query): Query<DeliveryQuery>,
-    request: axum::extract::Request,
 ) -> Result<Json<Vec<DeliveryResponse>>, AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
     // Verify ownership
     let webhook = state
         .ironshelf_db
@@ -290,15 +249,9 @@ pub async fn list_deliveries(
 /// POST /api/v1/webhooks/:id/test — send a test event.
 pub async fn test_webhook(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(webhook_id): Path<String>,
-    request: axum::extract::Request,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let auth_user = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or(AppError::Unauthorized("Not authenticated".to_string()))?;
-
     // Verify ownership
     let webhook = state
         .ironshelf_db

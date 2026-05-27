@@ -27,7 +27,7 @@ pub struct ContinueReadingEntry {
 
 /// GET /api/v1/books/continue — returns the authenticated user's in-progress books.
 ///
-/// Returns books where progress percent > 0 and < 100, sorted by most recently updated.
+/// Returns books where progress percent > 0 and < 1.0 (fraction), sorted by most recently updated.
 /// Limited to 20 results.
 pub async fn continue_reading(
     State(state): State<AppState>,
@@ -39,7 +39,7 @@ pub async fn continue_reading(
     let progress_rows = sqlx::query(
         "SELECT book_id, format, percent, updated_at \
          FROM reading_progress \
-         WHERE user_id = ? AND percent > 0.0 AND percent < 100.0 \
+         WHERE user_id = ? AND percent > 0.0 AND percent < 1.0 \
          ORDER BY updated_at DESC \
          LIMIT 20",
     )

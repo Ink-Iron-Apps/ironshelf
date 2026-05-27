@@ -60,38 +60,48 @@ pub async fn server_stats(
     let pool = state.ironshelf_db.pool();
 
     // Aggregate book/author/series counts across all loaded libraries.
-    let libraries = state.libraries.read().await;
+    // Collect data while holding the read lock, then drop it before doing
+    // filesystem stat calls (which can be slow for large libraries or NFS).
     let mut total_books: i64 = 0;
     let mut total_authors: i64 = 0;
     let mut total_series: i64 = 0;
     let mut storage_bytes: u64 = 0;
+    let mut file_paths_to_stat: Vec<std::path::PathBuf> = Vec::new();
 
-    for library in libraries.iter() {
-        if let Ok(books) = library.source.all_books().await {
-            total_books += books.len() as i64;
+    {
+        let libraries = state.libraries.read().await;
+        for library in libraries.iter() {
+            if let Ok(books) = library.source.all_books().await {
+                total_books += books.len() as i64;
 
-            // Sum file sizes from book formats for storage estimate.
-            for book in &books {
-                for format in &book.formats {
-                    let file_path = library
-                        .source
-                        .format_path(&book.path, &format.file_name, &format.kind);
-                    if let Ok(metadata) = tokio::fs::metadata(&file_path).await {
-                        storage_bytes += metadata.len();
+                // Collect file paths for later stat calls outside the lock.
+                for book in &books {
+                    for format in &book.formats {
+                        let file_path = library
+                            .source
+                            .format_path(&book.path, &format.file_name, &format.kind);
+                        file_paths_to_stat.push(file_path);
+                    }
+                }
+            }
+
+            if let Ok(authors) = library.source.authors().await {
+                total_authors += authors.len() as i64;
+
+                // Count series across all authors.
+                for author in &authors {
+                    if let Ok(author_series) = library.source.series_by_author(author.id).await {
+                        total_series += author_series.len() as i64;
                     }
                 }
             }
         }
+    }
 
-        if let Ok(authors) = library.source.authors().await {
-            total_authors += authors.len() as i64;
-
-            // Count series across all authors.
-            for author in &authors {
-                if let Ok(author_series) = library.source.series_by_author(author.id).await {
-                    total_series += author_series.len() as i64;
-                }
-            }
+    // Stat file sizes outside the libraries lock to avoid blocking mutations.
+    for file_path in &file_paths_to_stat {
+        if let Ok(metadata) = tokio::fs::metadata(file_path).await {
+            storage_bytes += metadata.len();
         }
     }
 

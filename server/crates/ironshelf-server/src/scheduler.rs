@@ -30,47 +30,59 @@ async fn library_rescan_task(application_state: AppState) {
         interval.tick().await;
         tracing::info!("scheduler: running library rescan");
 
-        let libraries = application_state.libraries.read().await;
+        // Collect folder sources we need to rescan, then drop the libraries
+        // read lock so we don't block library mutations during the scan.
+        let folder_sources: Vec<(String, std::sync::Arc<tokio::sync::RwLock<ironshelf_core::scan::FolderSource>>)> = {
+            let libraries = application_state.libraries.read().await;
+            libraries
+                .iter()
+                .filter_map(|library| {
+                    if let LibrarySource::Folder(ref folder_source) = library.source {
+                        Some((library.name.clone(), std::sync::Arc::clone(folder_source)))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
         let mut total_new_books: usize = 0;
 
-        for library in libraries.iter() {
-            if let LibrarySource::Folder(ref folder_source) = library.source {
-                // Count books before rescan.
-                let books_before = {
-                    let source = folder_source.read().await;
-                    source.all_books().len()
-                };
+        for (library_name, folder_source) in &folder_sources {
+            // Count books before rescan.
+            let books_before = {
+                let source = folder_source.read().await;
+                source.all_books().len()
+            };
 
-                // Perform rescan.
-                {
-                    let mut source = folder_source.write().await;
-                    if let Err(scan_error) = source.scan().await {
-                        tracing::error!(
-                            "scheduler: rescan failed for library '{}': {scan_error}",
-                            library.name
-                        );
-                        continue;
-                    }
-                }
-
-                // Count books after rescan.
-                let books_after = {
-                    let source = folder_source.read().await;
-                    source.all_books().len()
-                };
-
-                let newly_added = books_after.saturating_sub(books_before);
-                if newly_added > 0 {
-                    total_new_books += newly_added;
-                    tracing::info!(
-                        "scheduler: library '{}' found {} new book(s)",
-                        library.name,
-                        newly_added
+            // Perform rescan.
+            {
+                let mut source = folder_source.write().await;
+                if let Err(scan_error) = source.scan().await {
+                    tracing::error!(
+                        "scheduler: rescan failed for library '{}': {scan_error}",
+                        library_name
                     );
+                    continue;
                 }
             }
+
+            // Count books after rescan.
+            let books_after = {
+                let source = folder_source.read().await;
+                source.all_books().len()
+            };
+
+            let newly_added = books_after.saturating_sub(books_before);
+            if newly_added > 0 {
+                total_new_books += newly_added;
+                tracing::info!(
+                    "scheduler: library '{}' found {} new book(s)",
+                    library_name,
+                    newly_added
+                );
+            }
         }
-        drop(libraries);
 
         // If new books were found, re-index them in the search index.
         if total_new_books > 0 {
@@ -107,7 +119,7 @@ async fn library_rescan_task(application_state: AppState) {
                 }
                 drop(libraries);
 
-                let index_guard = search_index.read().await;
+                let index_guard = search_index.write().await;
                 match index_guard.rebuild(entries) {
                     Ok(count) => {
                         tracing::info!("scheduler: search index rebuilt with {count} book(s)");

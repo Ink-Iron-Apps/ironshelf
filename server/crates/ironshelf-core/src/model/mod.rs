@@ -110,18 +110,5 @@ pub enum CustomValue {
     Null,
 }
 
-/// Sort direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SortDirection {
-    Asc,
-    Desc,
-}
-
-/// Pagination params.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Paginated<T> {
-    pub items: Vec<T>,
-    pub total: i64,
-    pub page: i64,
-}
+// Note: Pagination and sorting types live in ironshelf-server's pagination module.
+// They are server-level concerns, not domain model types.
