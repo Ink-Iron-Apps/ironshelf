@@ -220,16 +220,11 @@ fn parse_torznab_response(
                     }
                 }
             }
-            Ok(Event::Text(ref event)) => {
-                if inside_item {
-                    text_buffer.push_str(
-                        &event
-                            .unescape()
-                            .unwrap_or_default()
-                            .to_string(),
-                    );
-                }
+            Ok(Event::Text(ref event)) if inside_item => {
+                text_buffer.push_str(&event.unescape().unwrap_or_default());
             }
+            Ok(Event::Text(_)) => {}
+
             Ok(Event::End(ref event)) => {
                 let tag_name = String::from_utf8_lossy(event.name().as_ref()).to_string();
 
@@ -254,10 +249,8 @@ fn parse_torznab_response(
                 } else if inside_item {
                     match current_tag.as_str() {
                         "title" => current_title = text_buffer.clone(),
-                        "link" => {
-                            if current_link.is_empty() {
-                                current_link = text_buffer.clone();
-                            }
+                        "link" if current_link.is_empty() => {
+                            current_link = text_buffer.clone();
                         }
                         "pubDate" => current_published_at = Some(text_buffer.clone()),
                         "category" => current_category = Some(text_buffer.clone()),

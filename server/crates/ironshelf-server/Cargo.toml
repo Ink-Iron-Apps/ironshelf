@@ -35,7 +35,7 @@ urlencoding = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rusqlite = "0.31"
 tempfile = "3"
