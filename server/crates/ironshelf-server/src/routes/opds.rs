@@ -56,6 +56,7 @@ fn feed_header(title: &str, feed_id: &str, self_href: &str) -> String {
 "#,
         feed_id = xml_escape(feed_id),
         title = xml_escape(title),
+        self_href = xml_escape(self_href),
         updated = updated,
     )
 }
@@ -477,7 +478,8 @@ pub async fn search_feed(
     matching_books.truncate(100);
 
     let feed_title = format!("Search: {}", query.q);
-    let self_href = format!("/opds/search?q={}", xml_escape(&query.q));
+    let url_encoded_query = urlencoding::encode(&query.q);
+    let self_href = format!("/opds/search?q={}", url_encoded_query);
     let mut xml = feed_header(
         &feed_title,
         &format!("urn:ironshelf:search:{}", xml_escape(&query.q)),

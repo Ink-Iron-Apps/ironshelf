@@ -1208,6 +1208,22 @@ impl IronshelfDb {
         Ok(())
     }
 
+    /// Delete all WebDAV files whose path starts with the given prefix.
+    /// Used when deleting a directory to cascade to all children.
+    pub async fn delete_webdav_files_by_prefix(
+        &self,
+        user_id: &str,
+        prefix: &str,
+    ) -> Result<u64, DbError> {
+        let pattern = format!("{prefix}%");
+        let result = sqlx::query("DELETE FROM webdav_files WHERE user_id = ? AND path LIKE ?")
+            .bind(user_id)
+            .bind(&pattern)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Create a WebDAV directory marker (zero-byte entry with directory content type).
     pub async fn create_webdav_directory(
         &self,

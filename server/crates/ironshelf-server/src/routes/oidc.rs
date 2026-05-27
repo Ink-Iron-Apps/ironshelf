@@ -2,7 +2,7 @@
 //! Supports any OpenID Connect provider (Authelia, Authentik, Keycloak, Google, etc).
 
 use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -37,10 +37,25 @@ impl OidcStateStore {
         }
     }
 
+    /// Maximum number of pending OIDC flows stored in memory at once.
+    /// Prevents unbounded growth from incomplete authorization flows.
+    const MAX_PENDING_ENTRIES: usize = 1000;
+
     async fn insert(&self, state: String, pkce_verifier: String) {
         let mut entries = self.entries.write().await;
         // Lazy cleanup of expired entries
         entries.retain(|_, entry| entry.created_at.elapsed() < STATE_TTL);
+        // Cap total entries to prevent memory exhaustion from abandoned flows.
+        if entries.len() >= Self::MAX_PENDING_ENTRIES {
+            // Evict the oldest entry to make room.
+            if let Some(oldest_key) = entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.created_at)
+                .map(|(key, _)| key.clone())
+            {
+                entries.remove(&oldest_key);
+            }
+        }
         entries.insert(
             state,
             OidcPendingAuth {
@@ -52,9 +67,11 @@ impl OidcStateStore {
 
     async fn take(&self, state: &str) -> Option<String> {
         let mut entries = self.entries.write().await;
+        // Lazy cleanup of expired entries on every access path.
+        entries.retain(|_, entry| entry.created_at.elapsed() < STATE_TTL);
         let entry = entries.remove(state)?;
         if entry.created_at.elapsed() >= STATE_TTL {
-            return None; // expired
+            return None; // expired (race between retain and remove)
         }
         Some(entry.pkce_verifier)
     }
@@ -141,6 +158,7 @@ pub async fn oidc_login(
 /// GET /api/v1/auth/oidc/callback — handles callback from identity provider.
 pub async fn oidc_callback(
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     Query(params): Query<OidcCallbackParams>,
 ) -> Result<Response, AppError> {
     let oidc_config = get_oidc_config(&state)?;
@@ -188,10 +206,20 @@ pub async fn oidc_callback(
     // Create session
     let session_id = create_session(pool, &user_id).await.map_err(AppError::internal)?;
 
-    // Set session cookie and redirect to web UI
+    // Detect TLS via config flag or X-Forwarded-Proto header from reverse proxy.
+    // This matches the same logic used in the regular login route.
+    let is_tls = state.config.tls_enabled
+        || request_headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .map(|proto| proto.eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
+
+    let secure_suffix = if is_tls { "; Secure" } else { "" };
+
     let cookie = format!(
-        "ironshelf_session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800",
-        session_id
+        "ironshelf_session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800{}",
+        session_id, secure_suffix
     );
 
     let response = (

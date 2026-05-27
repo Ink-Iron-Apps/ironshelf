@@ -65,6 +65,13 @@ async fn main() -> anyhow::Result<()> {
 
     let oidc_state_store = routes::oidc::OidcStateStore::new();
 
+    // Shared HTTP client for all outbound requests (metadata providers, webhooks).
+    // Created once to reuse connection pools and TLS sessions across the server lifetime.
+    let http_client = reqwest::Client::builder()
+        .user_agent("ironshelf-server/0.1")
+        .build()
+        .expect("failed to build shared reqwest client");
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
@@ -73,15 +80,18 @@ async fn main() -> anyhow::Result<()> {
         thumbnail_cache_path: config.thumbnail_cache_path.clone(),
         config: config.clone(),
         oidc_state_store,
+        http_client,
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
     scheduler::start(app_state.clone());
 
     // Initialize rate limiters and spawn background cleanup tasks.
-    let api_rate_limiter = middleware::rate_limit::RateLimiter::api_tier();
+    let api_rate_limiter = middleware::rate_limit::RateLimiter::api_tier()
+        .with_trust_proxy_headers(config.trust_proxy_headers);
     api_rate_limiter.spawn_cleanup_task();
-    let auth_rate_limiter = middleware::rate_limit::RateLimiter::auth_tier();
+    let auth_rate_limiter = middleware::rate_limit::RateLimiter::auth_tier()
+        .with_trust_proxy_headers(config.trust_proxy_headers);
     auth_rate_limiter.spawn_cleanup_task();
 
     // Auth routes with strict rate limiting (10 req/min per IP).
@@ -472,7 +482,9 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
 async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     let database_ok = state.ironshelf_db.health_check().await.is_ok();
     let libraries_loaded = state.libraries.read().await.len();
-    let is_ready = database_ok && libraries_loaded > 0;
+    // A fresh install with zero libraries is a valid ready state — the user
+    // simply has not added any libraries yet. Only the database must be up.
+    let is_ready = database_ok;
 
     let status_code = if is_ready {
         StatusCode::OK
