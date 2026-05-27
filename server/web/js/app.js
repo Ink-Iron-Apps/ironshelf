@@ -63,6 +63,10 @@
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
     bellOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
     scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+    grip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+    fileText: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -627,6 +631,12 @@
       users: renderUsers,
       stats: renderStats,
       activity: renderActivity,
+      queue: renderReadingQueue,
+      highlights: renderHighlights,
+      genres: renderGenres,
+      genre: () => renderGenreDetail(parsed.params.id),
+      webhooks: renderWebhooks,
+      duplicates: renderDuplicates,
     };
 
     const handler = handlers[parsed.name];
@@ -828,15 +838,19 @@
     const navItems = [
       { id: 'home', label: 'Home', icon: 'home', path: '/' },
       { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
+      { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
+      { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
+      { id: 'highlights', label: 'Highlights', icon: 'edit', path: '/highlights' },
       { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
     ];
 
     navItems.push({ id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' });
 
+    navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
+
     if (currentUser?.is_owner) {
       navItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
-      navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
     }
 
     const navHtml = navItems.map(item => `
@@ -973,6 +987,12 @@
       registerLinkHtml = `<div class="login-footer" style="color:var(--color-muted)">Registration is closed on this server.</div>`;
     }
 
+    const isOidcEnabled = serverInfo?.oidc_enabled === true;
+    const oidcButtonHtml = isOidcEnabled ? `
+      <div class="login-divider">or</div>
+      <a href="${API}/auth/oidc/login" class="btn btn-sso">${icon('shield', 18)} Sign in with SSO</a>
+    ` : '';
+
     document.getElementById('app').innerHTML = `
       <div class="login-page">
         <div class="login-card">
@@ -992,6 +1012,7 @@
             </div>
             <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
           </form>
+          ${oidcButtonHtml}
           ${registerLinkHtml}
         </div>
       </div>
@@ -1624,6 +1645,7 @@
       const coverUrl = book.has_cover ? `${API}/books/${bookId}/cover` : '';
       const formats = book.formats || [];
       const tags = book.tags || [];
+      const genres = book.genres || [];
       const languages = book.languages || [];
       const customFields = book.custom || {};
 
@@ -1638,6 +1660,15 @@
         ratingHtml += `</span>`;
       }
 
+      // Genre chips
+      let genreChipsHtml = '';
+      if (genres.length > 0) {
+        genreChipsHtml = `<div class="genre-chips">${genres.map(genreItem => {
+          const genreItemName = typeof genreItem === 'string' ? genreItem : genreItem.name;
+          return `<a href="#/genre/${encodeURIComponent(genreItemName)}" class="genre-chip" style="background:${genreColorFromName(genreItemName)}">${escapeHtml(genreItemName)}</a>`;
+        }).join('')}</div>`;
+      }
+
       let bodyContent = `
         <div class="book-detail">
           <div class="book-detail-cover">
@@ -1650,6 +1681,7 @@
             <h1>${escapeHtml(book.title)}</h1>
             ${book.authors ? `<a class="author-link" href="#/author/${book.author_id || ''}">${escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors)}</a>` : ''}
             ${book.series_name ? `<p class="text-caption" style="margin-top:var(--space-2)">Book ${book.series_index || '?'} of <a href="#/series/${book.series_id || ''}">${escapeHtml(book.series_name)}</a></p>` : ''}
+            ${genreChipsHtml}
 
             <dl class="book-detail-metadata">
               ${tags.length > 0 ? `<dt>Tags</dt><dd>${tags.map(t => `<span class="chip">${escapeHtml(t)}</span>`).join(' ')}</dd>` : ''}
@@ -1681,11 +1713,15 @@
                   </a>
                 `).join('')}
                 ${renderAddToCollectionButton(bookId)}
+                <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
+                <div id="convert-btn-container"></div>
                 ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
               </div>
             ` : `
               <div class="book-detail-formats">
                 ${renderAddToCollectionButton(bookId)}
+                <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
+                <div id="convert-btn-container"></div>
                 ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
               </div>
             `}
@@ -1737,8 +1773,28 @@
       // Bind add-to-collection
       bindAddToCollectionButton(bookId);
 
+      // Bind add-to-queue
+      document.getElementById('add-to-queue-btn')?.addEventListener('click', async () => {
+        const queueBtn = document.getElementById('add-to-queue-btn');
+        queueBtn.disabled = true;
+        try {
+          await apiPost('/me/queue', { book_id: bookId });
+          toast('Added to reading queue', 'success');
+          queueBtn.innerHTML = `${icon('check', 16)} In Queue`;
+        } catch (err) {
+          toast(err.message, 'error');
+          queueBtn.disabled = false;
+        }
+      });
+
       // Bind enrich metadata
       document.getElementById('enrich-metadata-btn')?.addEventListener('click', () => showMetadataSearchModal(bookId));
+
+      // Render ratings & reviews below description
+      renderBookRatingsAndReviews(bookId, '.book-detail-info');
+
+      // Render conversion button if converters available
+      renderConversionButton(bookId, '#convert-btn-container');
     } catch (err) {
       renderShell(renderError('Failed to load book', err.message, () => renderBook(bookId)), 'libraries');
     }
@@ -1842,6 +1898,19 @@
 
           <button class="btn btn-danger mt-4" id="clear-all-notifications-btn">${icon('trash', 16)} Clear All Notifications</button>
         </div>
+
+        ${renderReaderPreferencesSection()}
+
+        ${currentUser?.is_owner ? `
+          <div class="settings-section">
+            <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Integrations</h3>
+            <p class="description">Manage webhooks, duplicate detection, and other advanced features.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
+              <a href="#/webhooks" class="btn btn-secondary">${icon('globe', 16)} Webhooks</a>
+              <a href="#/duplicates" class="btn btn-secondary">${icon('search', 16)} Duplicate Detection</a>
+            </div>
+          </div>
+        ` : ''}
 
         <div class="settings-section">
           <h3>Account</h3>
@@ -1984,6 +2053,9 @@
         });
       });
 
+      // Bind reader preferences
+      bindReaderPreferences();
+
       // Clear all notifications
       document.getElementById('clear-all-notifications-btn')?.addEventListener('click', () => {
         showConfirmModal({
@@ -2045,7 +2117,10 @@
                     <td><strong>${escapeHtml(u.username)}</strong></td>
                     <td><span class="badge ${u.is_owner ? 'badge-teal' : 'badge-muted'}">${u.is_owner ? 'Owner' : 'User'}</span></td>
                     <td class="text-caption">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
-                    <td class="text-right">${!u.is_owner ? `<button class="btn btn-ghost btn-sm delete-user-btn" data-user-id="${u.id}" aria-label="Remove ${escapeHtml(u.username)}">${icon('trash', 14)}</button>` : ''}</td>
+                    <td class="text-right" style="display:flex;gap:var(--space-1);justify-content:flex-end">
+                      ${!u.is_owner ? `<button class="btn btn-ghost btn-sm library-access-btn" data-user-id="${u.id}" aria-label="Library access for ${escapeHtml(u.username)}" title="Library access">${icon('library', 14)}</button>` : ''}
+                      ${!u.is_owner ? `<button class="btn btn-ghost btn-sm delete-user-btn" data-user-id="${u.id}" aria-label="Remove ${escapeHtml(u.username)}">${icon('trash', 14)}</button>` : ''}
+                    </td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -2129,6 +2204,13 @@
             }
           },
         });
+      });
+    });
+
+    // Library access buttons
+    document.querySelectorAll('.library-access-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        showLibraryAccessModal(btn.dataset.userId);
       });
     });
   }
@@ -2736,19 +2818,21 @@
 
   async function renderStats() {
     if (!await checkAuth()) return;
-    if (!currentUser?.is_owner) { navigateTo('/'); return; }
+    // Allow all users to see personal stats; server stats only for owners
     setTitle(['Stats']);
     breadcrumbTrail = [{ label: 'Stats', path: '/stats' }];
 
+    const showServerTab = currentUser?.is_owner;
+
     renderShell(`
-      <div class="page-header"><h1>Server Stats</h1></div>
+      <div class="page-header"><h1>Stats</h1></div>
       <div class="stats-grid">
         ${Array(8).fill('<div class="skeleton stat-card-skeleton" style="height:100px;border-radius:var(--radius-lg)"></div>').join('')}
       </div>
     `, 'stats');
 
     try {
-      const stats = await apiGet('/stats');
+      const stats = showServerTab ? await apiGet('/stats') : {};
 
       const statCards = [
         { label: 'Total Books', value: stats.total_books ?? 0, iconName: 'book', color: 'var(--color-teal-bright)' },
@@ -2762,7 +2846,15 @@
       ];
 
       let bodyContent = `
-        <div class="page-header"><h1>Server Stats</h1></div>
+        <div class="page-header"><h1>Stats</h1></div>
+        <div class="tab-nav" id="stats-tabs">
+          <button class="tab-nav-item active" data-tab="personal">My Reading</button>
+          ${showServerTab ? '<button class="tab-nav-item" data-tab="server">Server</button>' : ''}
+        </div>
+        <div class="tab-panel active" id="personal-stats-panel" data-tab-panel="personal">
+          <div style="padding:var(--space-4);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading personal stats...</div>
+        </div>
+        ${showServerTab ? `<div class="tab-panel" data-tab-panel="server">` : '<div style="display:none">'}
         <div class="stats-grid">
           ${statCards.map(card => `
             <div class="card stat-card">
@@ -2838,7 +2930,23 @@
         `;
       }
 
+      bodyContent += `</div>`; // close server tab panel
+
       renderShell(bodyContent, 'stats');
+
+      // Bind tab switching
+      document.querySelectorAll('#stats-tabs .tab-nav-item').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('#stats-tabs .tab-nav-item').forEach(tabItem => tabItem.classList.remove('active'));
+          tab.classList.add('active');
+          document.querySelectorAll('[data-tab-panel]').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.tabPanel === tab.dataset.tab);
+          });
+        });
+      });
+
+      // Load personal stats
+      renderPersonalStats();
     } catch (err) {
       renderShell(renderError('Failed to load stats', err.message, () => renderStats()), 'stats');
     }
@@ -3150,6 +3258,1751 @@
         <button class="btn btn-primary" id="retry-btn">${icon('refresh', 16)} Try Again</button>
       </div>
     `;
+  }
+
+  // ============================================================
+  // New Feature Pages
+  // ============================================================
+
+  // --- Star Rating Widget Helper ---
+
+  function renderStarRatingWidget(currentValue = 0, options = {}) {
+    const { readonly = false, widgetId = 'star-rating' } = options;
+    // currentValue is 1-10 mapped to 5 stars (half-star increments)
+    const starCount = 5;
+    const normalizedValue = Math.max(0, Math.min(10, currentValue));
+
+    let starsHtml = '';
+    for (let i = 1; i <= starCount; i++) {
+      const fullThreshold = i * 2;
+      const halfThreshold = fullThreshold - 1;
+      let starClass = '';
+      if (normalizedValue >= fullThreshold) {
+        starClass = 'filled';
+      } else if (normalizedValue >= halfThreshold) {
+        starClass = 'half';
+      }
+      starsHtml += `<button type="button" class="star-btn ${starClass}" data-star-value="${fullThreshold}" aria-label="Rate ${i} star${i !== 1 ? 's' : ''}" ${readonly ? 'tabindex="-1"' : ''}>&#9733;</button>`;
+    }
+
+    return `<div class="star-rating-widget ${readonly ? 'readonly' : ''}" id="${widgetId}" data-value="${normalizedValue}" role="radiogroup" aria-label="Rating">${starsHtml}</div>`;
+  }
+
+  function bindStarRatingWidget(containerId, onChange) {
+    const widget = document.getElementById(containerId);
+    if (!widget || widget.classList.contains('readonly')) return;
+
+    widget.querySelectorAll('.star-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', () => {
+        const hoverValue = parseInt(btn.dataset.starValue);
+        widget.querySelectorAll('.star-btn').forEach(starButton => {
+          const starButtonValue = parseInt(starButton.dataset.starValue);
+          starButton.classList.toggle('hovered', starButtonValue <= hoverValue);
+        });
+      });
+
+      btn.addEventListener('mouseleave', () => {
+        widget.querySelectorAll('.star-btn').forEach(starButton => {
+          starButton.classList.remove('hovered');
+        });
+      });
+
+      btn.addEventListener('click', () => {
+        const clickedValue = parseInt(btn.dataset.starValue);
+        const currentStored = parseInt(widget.dataset.value) || 0;
+        // Click same star toggles between full and half
+        let newValue = clickedValue;
+        if (currentStored === clickedValue) {
+          newValue = clickedValue - 1; // half star
+        } else if (currentStored === clickedValue - 1) {
+          newValue = 0; // clear
+        }
+        widget.dataset.value = newValue;
+        // Update visual state
+        widget.querySelectorAll('.star-btn').forEach(starButton => {
+          const starButtonValue = parseInt(starButton.dataset.starValue);
+          starButton.classList.remove('filled', 'half');
+          if (newValue >= starButtonValue) {
+            starButton.classList.add('filled');
+          } else if (newValue >= starButtonValue - 1 && newValue % 2 !== 0) {
+            starButton.classList.add('half');
+          }
+        });
+        if (onChange) onChange(newValue);
+      });
+    });
+  }
+
+  // --- Genre Color Helper ---
+
+  function genreColorFromName(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 55%, 40%)`;
+  }
+
+  // --- Reading Preferences (localStorage) ---
+
+  function getReaderPreferences() {
+    try {
+      const stored = localStorage.getItem('ironshelf_reader_prefs');
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return { theme: 'dark', fontSize: 16, direction: 'ltr' };
+  }
+
+  function setReaderPreferences(prefs) {
+    localStorage.setItem('ironshelf_reader_prefs', JSON.stringify(prefs));
+  }
+
+  // ============================================================
+  // 1. Ratings + Reviews on Book Detail
+  // ============================================================
+
+  async function renderBookRatingsAndReviews(bookId, containerSelector) {
+    const container = document.querySelector(containerSelector);
+    if (!container) return;
+
+    let ratingsHtml = '';
+
+    try {
+      const [ratingsData, reviewsData] = await Promise.all([
+        apiGet(`/books/${bookId}/ratings`).catch(() => null),
+        apiGet(`/books/${bookId}/reviews`).catch(() => []),
+      ]);
+
+      const averageRating = ratingsData?.average_rating || 0;
+      const totalRatings = ratingsData?.total_ratings || 0;
+      const userRating = ratingsData?.user_rating || 0;
+      const reviews = Array.isArray(reviewsData) ? reviewsData : (reviewsData?.items || []);
+
+      // Rating section
+      ratingsHtml += `
+        <div class="reviews-section" id="ratings-reviews-section">
+          <h3>${icon('star', 20)} Ratings & Reviews</h3>
+
+          <div class="rating-summary">
+            <div class="rating-summary-value">${averageRating ? (averageRating / 2).toFixed(1) : '—'}</div>
+            <div>
+              ${renderStarRatingWidget(averageRating, { readonly: true, widgetId: 'book-avg-rating' })}
+              <div class="rating-summary-meta">${totalRatings} rating${totalRatings !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:var(--space-6)">
+            <p class="text-caption mb-4">Your rating</p>
+            ${renderStarRatingWidget(userRating, { readonly: false, widgetId: 'user-rating-widget' })}
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)">
+            <h4>Reviews (${reviews.length})</h4>
+            <button class="btn btn-primary btn-sm" id="write-review-btn">${icon('edit', 14)} Write Review</button>
+          </div>
+
+          <div id="reviews-list">
+      `;
+
+      if (reviews.length === 0) {
+        ratingsHtml += `<p class="text-caption" style="padding:var(--space-4)">No reviews yet. Be the first to share your thoughts.</p>`;
+      } else {
+        for (const review of reviews) {
+          ratingsHtml += renderReviewCard(review, bookId);
+        }
+      }
+
+      ratingsHtml += `</div></div>`;
+    } catch {
+      ratingsHtml = '';
+    }
+
+    container.insertAdjacentHTML('beforeend', ratingsHtml);
+
+    // Bind user rating widget
+    bindStarRatingWidget('user-rating-widget', async (newValue) => {
+      try {
+        await apiPost(`/books/${bookId}/ratings`, { rating: newValue });
+        toast('Rating saved', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+
+    // Bind write review
+    document.getElementById('write-review-btn')?.addEventListener('click', () => {
+      showWriteReviewModal(bookId);
+    });
+
+    // Bind edit/delete review buttons
+    bindReviewActions(bookId);
+
+    // Bind spoiler toggles
+    document.querySelectorAll('.spoiler-hidden').forEach(el => {
+      el.addEventListener('click', () => el.classList.add('revealed'));
+    });
+  }
+
+  function renderReviewCard(review, bookId) {
+    const reviewUserInitial = (review.username || '?').charAt(0).toUpperCase();
+    const isOwnReview = currentUser && (review.user_id === currentUser.id || review.username === currentUser.username);
+    const reviewRating = review.rating || 0;
+
+    return `
+      <div class="card review-card" data-review-id="${review.id}">
+        <div class="review-card-header">
+          <div class="review-card-user">
+            <div class="user-avatar">${reviewUserInitial}</div>
+            <div>
+              <div class="username">${escapeHtml(review.username || 'Anonymous')}</div>
+              <div class="review-date">${relativeTime(review.created_at)}</div>
+            </div>
+            ${reviewRating ? renderStarRatingWidget(reviewRating, { readonly: true, widgetId: `review-stars-${review.id}` }) : ''}
+          </div>
+          ${isOwnReview ? `
+            <div class="review-card-actions">
+              <button class="btn btn-ghost btn-sm edit-review-btn" data-review-id="${review.id}" aria-label="Edit review">${icon('edit', 14)}</button>
+              <button class="btn btn-ghost btn-sm delete-review-btn" data-review-id="${review.id}" aria-label="Delete review">${icon('trash', 14)}</button>
+            </div>
+          ` : ''}
+        </div>
+        ${review.is_spoiler ? `<div class="spoiler-tag">${icon('warning', 12)} Contains spoilers</div>` : ''}
+        ${review.title ? `<div class="review-title">${escapeHtml(review.title)}</div>` : ''}
+        <div class="review-body ${review.is_spoiler ? 'spoiler-hidden' : ''}">${escapeHtml(review.body || '')}</div>
+      </div>
+    `;
+  }
+
+  function bindReviewActions(bookId) {
+    document.querySelectorAll('.edit-review-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const reviewId = btn.dataset.reviewId;
+        try {
+          const review = await apiGet(`/reviews/${reviewId}`).catch(() => null);
+          showWriteReviewModal(bookId, review);
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+    });
+
+    document.querySelectorAll('.delete-review-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const reviewId = btn.dataset.reviewId;
+        showConfirmModal({
+          title: 'Delete Review',
+          message: 'Are you sure you want to delete your review? This cannot be undone.',
+          confirmText: 'Delete',
+          onConfirm: async () => {
+            try {
+              await apiDelete(`/reviews/${reviewId}`);
+              toast('Review deleted', 'success');
+              renderBook(bookId);
+            } catch (err) {
+              toast(err.message, 'error');
+            }
+          },
+        });
+      });
+    });
+  }
+
+  function showWriteReviewModal(bookId, existingReview = null) {
+    const isEditing = !!existingReview;
+    const { close } = showModal({
+      title: isEditing ? 'Edit Review' : 'Write a Review',
+      content: `
+        <form id="review-form" novalidate>
+          <div class="form-group">
+            <label class="form-label">Rating</label>
+            ${renderStarRatingWidget(existingReview?.rating || 0, { widgetId: 'review-modal-rating' })}
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="review-title-input">Title</label>
+            <input type="text" class="form-input" id="review-title-input" placeholder="Sum up your thoughts" value="${existingReview ? escapeHtml(existingReview.title || '') : ''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="review-body-input">Review</label>
+            <textarea class="form-input" id="review-body-input" rows="6" placeholder="What did you think of this book?" style="resize:vertical">${existingReview ? escapeHtml(existingReview.body || '') : ''}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-toggle">
+              <input type="checkbox" id="review-spoiler-checkbox" ${existingReview?.is_spoiler ? 'checked' : ''}>
+              <span>Contains spoilers</span>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">${isEditing ? 'Save Changes' : 'Submit Review'}</button>
+          </div>
+        </form>
+      `,
+    });
+
+    bindStarRatingWidget('review-modal-rating', () => {});
+    const form = document.getElementById('review-form');
+    form.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+
+      const ratingWidget = document.getElementById('review-modal-rating');
+      const payload = {
+        rating: parseInt(ratingWidget?.dataset.value) || 0,
+        title: document.getElementById('review-title-input').value.trim(),
+        body: document.getElementById('review-body-input').value.trim(),
+        is_spoiler: document.getElementById('review-spoiler-checkbox').checked,
+      };
+
+      try {
+        if (isEditing) {
+          await apiPatch(`/reviews/${existingReview.id}`, payload);
+          toast('Review updated', 'success');
+        } else {
+          await apiPost(`/books/${bookId}/reviews`, payload);
+          toast('Review submitted', 'success');
+        }
+        close();
+        renderBook(bookId);
+      } catch (err) {
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  // ============================================================
+  // 2. Reading Queue
+  // ============================================================
+
+  async function renderReadingQueue() {
+    if (!await checkAuth()) return;
+    setTitle(['Reading Queue']);
+    breadcrumbTrail = [{ label: 'Reading Queue', path: '/queue' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Reading Queue</h1></div>
+      ${skeletonList(5)}
+    `, 'queue');
+
+    try {
+      const queueData = await apiGet('/me/queue');
+      const queueItems = Array.isArray(queueData) ? queueData : (queueData?.items || []);
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Reading Queue</h1>
+          <div class="actions">
+            <span class="badge badge-teal">${queueItems.length} book${queueItems.length !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+      `;
+
+      if (queueItems.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.clock}</div>
+            <h3>Your queue is empty</h3>
+            <p>Add books to your reading queue from any book detail page.</p>
+            <a href="#/libraries" class="btn btn-primary btn-lg">Browse Libraries</a>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div class="queue-list" id="queue-list">`;
+        for (let i = 0; i < queueItems.length; i++) {
+          const queueItem = queueItems[i];
+          const coverUrl = queueItem.has_cover ? `${API}/books/${queueItem.book_id || queueItem.id}/cover` : '';
+          bodyContent += `
+            <div class="queue-item" data-queue-id="${queueItem.id}" data-queue-position="${i}" draggable="true">
+              <div class="queue-item-drag" aria-label="Drag to reorder" title="Drag to reorder">
+                ${Icons.menu}
+              </div>
+              <div class="queue-item-position">${i + 1}</div>
+              <div class="queue-item-cover">
+                ${coverUrl ? `<img src="${coverUrl}" alt="" loading="lazy">` : `<div style="width:100%;height:100%;background:var(--color-surface-active);display:flex;align-items:center;justify-content:center;color:var(--color-muted)">${Icons.book}</div>`}
+              </div>
+              <div class="queue-item-info" role="link" tabindex="0" data-navigate-book="${queueItem.book_id || queueItem.id}">
+                <div class="queue-item-title">${escapeHtml(queueItem.title || 'Unknown')}</div>
+                <div class="queue-item-author">${queueItem.authors ? escapeHtml(Array.isArray(queueItem.authors) ? queueItem.authors.join(', ') : queueItem.authors) : ''}</div>
+              </div>
+              <div class="queue-item-actions">
+                <button class="btn btn-ghost btn-icon queue-move-up" ${i === 0 ? 'disabled' : ''} data-queue-id="${queueItem.id}" aria-label="Move up" title="Move up">
+                  ${Icons.arrowUp}
+                </button>
+                <button class="btn btn-ghost btn-icon queue-move-down" ${i === queueItems.length - 1 ? 'disabled' : ''} data-queue-id="${queueItem.id}" aria-label="Move down" title="Move down">
+                  ${Icons.arrowDown}
+                </button>
+                <button class="btn btn-ghost btn-icon queue-remove" data-queue-id="${queueItem.id}" aria-label="Remove from queue" title="Remove">
+                  ${Icons.x}
+                </button>
+              </div>
+            </div>
+          `;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'queue');
+
+      // Bind navigate to book
+      document.querySelectorAll('[data-navigate-book]').forEach(el => {
+        const handler = () => navigateTo(`/book/${el.dataset.navigateBook}`);
+        el.addEventListener('click', handler);
+        el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind move up/down
+      document.querySelectorAll('.queue-move-up').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiPatch(`/me/queue/${btn.dataset.queueId}/move`, { direction: 'up' });
+            renderReadingQueue();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      document.querySelectorAll('.queue-move-down').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiPatch(`/me/queue/${btn.dataset.queueId}/move`, { direction: 'down' });
+            renderReadingQueue();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      // Bind remove
+      document.querySelectorAll('.queue-remove').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiDelete(`/me/queue/${btn.dataset.queueId}`);
+            toast('Removed from queue', 'success');
+            renderReadingQueue();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      // Simple drag-and-drop reorder
+      bindQueueDragReorder();
+
+    } catch (err) {
+      renderShell(renderError('Failed to load reading queue', err.message, () => renderReadingQueue()), 'queue');
+    }
+  }
+
+  function bindQueueDragReorder() {
+    const list = document.getElementById('queue-list');
+    if (!list) return;
+
+    let draggedItem = null;
+
+    list.addEventListener('dragstart', (e) => {
+      draggedItem = e.target.closest('.queue-item');
+      if (draggedItem) {
+        draggedItem.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      }
+    });
+
+    list.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const afterElement = getDragAfterElement(list, e.clientY);
+      if (afterElement) {
+        list.insertBefore(draggedItem, afterElement);
+      } else {
+        list.appendChild(draggedItem);
+      }
+    });
+
+    list.addEventListener('dragend', async () => {
+      if (draggedItem) {
+        draggedItem.classList.remove('dragging');
+        // Collect new order
+        const newOrder = [...list.querySelectorAll('.queue-item')].map(item => item.dataset.queueId);
+        draggedItem = null;
+        // Update positions visually
+        list.querySelectorAll('.queue-item-position').forEach((pos, idx) => { pos.textContent = idx + 1; });
+        // Send new order to server
+        try {
+          await apiPost('/me/queue/reorder', { order: newOrder });
+        } catch (err) {
+          toast(err.message, 'error');
+          renderReadingQueue();
+        }
+      }
+    });
+  }
+
+  function getDragAfterElement(container, y) {
+    const items = [...container.querySelectorAll('.queue-item:not(.dragging)')];
+    return items.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) {
+        return { offset, element: child };
+      }
+      return closest;
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+  }
+
+  // ============================================================
+  // 3. Reading Goals & Stats (Personal Tab)
+  // ============================================================
+
+  async function renderPersonalStats() {
+    // Called as a tab inside renderStats
+    const tabPanel = document.getElementById('personal-stats-panel');
+    if (!tabPanel) return;
+
+    tabPanel.innerHTML = `<div style="padding:var(--space-4);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading personal stats...</div>`;
+
+    try {
+      const personalStats = await apiGet('/me/stats').catch(() => ({}));
+      const readingGoal = await apiGet('/me/reading-goal').catch(() => null);
+      const currentYear = new Date().getFullYear();
+
+      let html = '';
+
+      // Reading Goal
+      const goalTarget = readingGoal?.target || 0;
+      const goalCompleted = readingGoal?.completed || personalStats.books_completed_this_year || 0;
+      const goalPercent = goalTarget > 0 ? Math.min(100, Math.round((goalCompleted / goalTarget) * 100)) : 0;
+
+      html += `
+        <div class="card reading-goal-card mb-6">
+          <div class="reading-goal-header">
+            <h3>${icon('star', 18)} ${currentYear} Reading Goal</h3>
+            <button class="btn btn-ghost btn-sm" id="set-reading-goal-btn">${icon('edit', 14)} ${goalTarget > 0 ? 'Edit' : 'Set Goal'}</button>
+          </div>
+          ${goalTarget > 0 ? `
+            <div class="reading-goal-progress">
+              <div class="reading-goal-progress-fill" style="width:${goalPercent}%"></div>
+            </div>
+            <div class="reading-goal-counts">
+              <span><strong>${goalCompleted}</strong> of <strong>${goalTarget}</strong> books</span>
+              <span>${goalPercent}% complete</span>
+            </div>
+          ` : `
+            <p class="text-caption">Set a reading goal to track your progress this year.</p>
+          `}
+        </div>
+      `;
+
+      // Reading Streak
+      const currentStreak = personalStats.current_streak || 0;
+      const longestStreak = personalStats.longest_streak || 0;
+      html += `
+        <div class="streak-display">
+          <div class="card streak-card">
+            <div class="streak-card-icon" style="background:rgba(245,158,11,0.15);color:var(--color-warning)">&#128293;</div>
+            <div>
+              <div class="streak-card-value">${currentStreak} day${currentStreak !== 1 ? 's' : ''}</div>
+              <div class="streak-card-label">Current streak</div>
+            </div>
+          </div>
+          <div class="card streak-card">
+            <div class="streak-card-icon" style="background:rgba(34,197,94,0.15);color:var(--color-success)">&#127942;</div>
+            <div>
+              <div class="streak-card-value">${longestStreak} day${longestStreak !== 1 ? 's' : ''}</div>
+              <div class="streak-card-label">Longest streak</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Monthly chart
+      const monthlyData = personalStats.monthly_books || [];
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const maxMonthly = Math.max(1, ...monthlyData.map(m => m.count || 0));
+      html += `
+        <h3 class="mt-6 mb-4">${icon('barChart', 18)} Books per Month</h3>
+        <div class="monthly-chart">
+          ${monthNames.map((monthName, monthIndex) => {
+            const monthData = monthlyData.find(m => m.month === monthIndex + 1) || { count: 0 };
+            const barHeight = Math.max(2, (monthData.count / maxMonthly) * 100);
+            return `
+              <div class="monthly-chart-bar">
+                <div class="bar" style="height:${barHeight}%" title="${monthData.count} book${monthData.count !== 1 ? 's' : ''}">
+                  ${monthData.count > 0 ? `<span class="bar-label">${monthData.count}</span>` : ''}
+                </div>
+                <span class="month-label">${monthName}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+
+      // Year in Books summary stats
+      const totalBooks = personalStats.total_books_read || 0;
+      const shortestBook = personalStats.shortest_book || null;
+      const longestBook = personalStats.longest_book || null;
+      const topAuthor = personalStats.top_author || null;
+      const topGenre = personalStats.top_genre || null;
+
+      html += `
+        <h3 class="mt-6 mb-4">${icon('book', 18)} Year in Books</h3>
+        <div class="stats-grid">
+          <div class="card stat-card">
+            <div class="stat-card-icon" style="color:var(--color-teal-bright);background:var(--color-teal-dim)">${icon('check', 22)}</div>
+            <div class="stat-card-value">${totalBooks}</div>
+            <div class="stat-card-label">Books Read</div>
+          </div>
+          ${shortestBook ? `
+            <div class="card stat-card">
+              <div class="stat-card-icon" style="color:var(--color-info);background:rgba(59,130,246,0.15)">${icon('book', 22)}</div>
+              <div class="stat-card-value">${shortestBook.pages || '?'}</div>
+              <div class="stat-card-label">Shortest (pages)</div>
+            </div>
+          ` : ''}
+          ${longestBook ? `
+            <div class="card stat-card">
+              <div class="stat-card-icon" style="color:var(--color-warning);background:rgba(245,158,11,0.15)">${icon('book', 22)}</div>
+              <div class="stat-card-value">${longestBook.pages || '?'}</div>
+              <div class="stat-card-label">Longest (pages)</div>
+            </div>
+          ` : ''}
+          ${topAuthor ? `
+            <div class="card stat-card">
+              <div class="stat-card-icon" style="color:var(--color-success);background:rgba(34,197,94,0.15)">${icon('author', 22)}</div>
+              <div class="stat-card-value" style="font-size:var(--text-base);font-family:var(--font-body)">${escapeHtml(topAuthor)}</div>
+              <div class="stat-card-label">Top Author</div>
+            </div>
+          ` : ''}
+          ${topGenre ? `
+            <div class="card stat-card">
+              <div class="stat-card-icon" style="color:var(--color-teal-bright);background:var(--color-teal-dim)">${icon('collection', 22)}</div>
+              <div class="stat-card-value" style="font-size:var(--text-base);font-family:var(--font-body)">${escapeHtml(topGenre)}</div>
+              <div class="stat-card-label">Top Genre</div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+
+      // Completed book covers grid
+      const completedBooks = personalStats.completed_books || [];
+      if (completedBooks.length > 0) {
+        html += `
+          <h3 class="mt-6 mb-4">Completed</h3>
+          <div class="year-in-books-grid">
+            ${completedBooks.map(completedBook => {
+              const completedCoverUrl = completedBook.has_cover ? `${API}/books/${completedBook.id}/cover` : '';
+              return `
+                <div class="mini-cover" data-book-id="${completedBook.id}" role="link" tabindex="0" title="${escapeHtml(completedBook.title || '')}">
+                  ${completedCoverUrl ? `<img src="${completedCoverUrl}" alt="" loading="lazy">` : `<div style="width:100%;height:100%;background:var(--color-surface-active);display:flex;align-items:center;justify-content:center;color:var(--color-muted)">${Icons.book}</div>`}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+
+      // Formats breakdown (pie chart via conic-gradient)
+      const formatBreakdown = personalStats.format_breakdown || [];
+      if (formatBreakdown.length > 0) {
+        const formatColors = ['#095F73', '#3BB3C9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+        const formatTotal = formatBreakdown.reduce((sum, formatItem) => sum + (formatItem.count || 0), 0);
+        let cumulativePercent = 0;
+        const gradientStops = formatBreakdown.map((formatItem, formatIndex) => {
+          const percentage = formatTotal > 0 ? (formatItem.count / formatTotal) * 100 : 0;
+          const start = cumulativePercent;
+          cumulativePercent += percentage;
+          return `${formatColors[formatIndex % formatColors.length]} ${start}% ${cumulativePercent}%`;
+        }).join(', ');
+
+        html += `
+          <h3 class="mt-6 mb-4">Formats</h3>
+          <div style="display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap">
+            <div class="formats-pie" style="background:conic-gradient(${gradientStops})">
+              <div class="formats-pie-inner">${formatTotal}</div>
+            </div>
+            <div class="formats-legend">
+              ${formatBreakdown.map((formatItem, formatIndex) => `
+                <div class="formats-legend-item">
+                  <span class="formats-legend-dot" style="background:${formatColors[formatIndex % formatColors.length]}"></span>
+                  ${escapeHtml(formatItem.format || 'Other')} (${formatItem.count})
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      tabPanel.innerHTML = html;
+
+      // Bind set reading goal
+      document.getElementById('set-reading-goal-btn')?.addEventListener('click', () => {
+        const { close: closeGoalModal } = showModal({
+          title: 'Set Reading Goal',
+          content: `
+            <form id="reading-goal-form" novalidate>
+              <div class="form-group">
+                <label class="form-label" for="goal-target-input">Books to read in ${currentYear}</label>
+                <input type="number" class="form-input" id="goal-target-input" min="1" max="500" value="${goalTarget || 12}" required>
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save Goal</button>
+              </div>
+            </form>
+          `,
+        });
+
+        const goalForm = document.getElementById('reading-goal-form');
+        goalForm.querySelector('[data-action="cancel"]').addEventListener('click', closeGoalModal);
+        goalForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const targetValue = parseInt(document.getElementById('goal-target-input').value);
+          if (!targetValue || targetValue < 1) return;
+          try {
+            await apiPost('/me/reading-goal', { target: targetValue, year: currentYear });
+            toast('Reading goal set!', 'success');
+            closeGoalModal();
+            renderPersonalStats();
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        });
+      });
+
+      // Bind completed book covers
+      tabPanel.querySelectorAll('.mini-cover[data-book-id]').forEach(cover => {
+        const handler = () => navigateTo(`/book/${cover.dataset.bookId}`);
+        cover.addEventListener('click', handler);
+        cover.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+    } catch (err) {
+      tabPanel.innerHTML = `<div class="error-state" style="padding:var(--space-6)"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ============================================================
+  // 4. Highlights Page
+  // ============================================================
+
+  async function renderHighlights() {
+    if (!await checkAuth()) return;
+    setTitle(['Highlights']);
+    breadcrumbTrail = [{ label: 'Highlights', path: '/highlights' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Highlights</h1></div>
+      ${skeletonList(5)}
+    `, 'highlights');
+
+    try {
+      const highlightsData = await apiGet('/me/highlights');
+      const allHighlights = Array.isArray(highlightsData) ? highlightsData : (highlightsData?.items || []);
+
+      // Group by book
+      const groupedByBook = {};
+      for (const highlight of allHighlights) {
+        const bookKey = highlight.book_id || 'unknown';
+        if (!groupedByBook[bookKey]) {
+          groupedByBook[bookKey] = {
+            bookTitle: highlight.book_title || 'Unknown Book',
+            bookId: highlight.book_id,
+            highlights: [],
+          };
+        }
+        groupedByBook[bookKey].highlights.push(highlight);
+      }
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Highlights</h1>
+          <div class="actions">
+            <button class="btn btn-secondary" id="export-highlights-btn">${icon('download', 16)} Export</button>
+          </div>
+        </div>
+      `;
+
+      // Color filter + search
+      bodyContent += `
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <div class="search-bar">
+              <span class="search-icon">${Icons.search}</span>
+              <input type="search" placeholder="Search highlights..." aria-label="Search highlights" id="highlight-search-input">
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <div class="color-filter-pills" id="highlight-color-filters">
+              <button class="color-filter-pill pill-all active" data-color="all" aria-label="All colors" title="All colors"></button>
+              <button class="color-filter-pill pill-yellow" data-color="yellow" aria-label="Yellow" title="Yellow"></button>
+              <button class="color-filter-pill pill-green" data-color="green" aria-label="Green" title="Green"></button>
+              <button class="color-filter-pill pill-blue" data-color="blue" aria-label="Blue" title="Blue"></button>
+              <button class="color-filter-pill pill-pink" data-color="pink" aria-label="Pink" title="Pink"></button>
+              <button class="color-filter-pill pill-purple" data-color="purple" aria-label="Purple" title="Purple"></button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      if (allHighlights.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.edit}</div>
+            <h3>No highlights yet</h3>
+            <p>Highlight passages while reading to save them here.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div id="highlights-container">`;
+        for (const bookKey of Object.keys(groupedByBook)) {
+          const group = groupedByBook[bookKey];
+          bodyContent += `
+            <div class="highlights-group" data-book-group="${bookKey}">
+              <div class="highlights-group-header">
+                <h3>${icon('book', 16)} ${escapeHtml(group.bookTitle)}</h3>
+                ${group.bookId ? `<a href="#/book/${group.bookId}">View book</a>` : ''}
+              </div>
+          `;
+          for (const highlight of group.highlights) {
+            const colorClass = `highlight-${highlight.color || 'yellow'}`;
+            bodyContent += `
+              <div class="card highlight-card ${colorClass}" data-highlight-color="${highlight.color || 'yellow'}" data-highlight-text="${escapeHtml(highlight.text || '')}">
+                <div class="highlight-card-content">
+                  <div class="highlight-text">"${escapeHtml(highlight.text || '')}"</div>
+                  ${highlight.note ? `<div class="highlight-note">${escapeHtml(highlight.note)}</div>` : ''}
+                  <div class="highlight-meta">
+                    <span>${relativeTime(highlight.created_at)}</span>
+                    ${highlight.chapter ? `<span>Ch. ${escapeHtml(highlight.chapter)}</span>` : ''}
+                    ${highlight.position ? `<span>Pos. ${highlight.position}</span>` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          bodyContent += `</div>`;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'highlights');
+
+      // Bind color filter
+      const colorFilters = document.getElementById('highlight-color-filters');
+      colorFilters?.querySelectorAll('.color-filter-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          colorFilters.querySelectorAll('.color-filter-pill').forEach(filterPill => filterPill.classList.remove('active'));
+          pill.classList.add('active');
+          filterHighlights(pill.dataset.color, document.getElementById('highlight-search-input')?.value || '');
+        });
+      });
+
+      // Bind search
+      const highlightSearchInput = document.getElementById('highlight-search-input');
+      if (highlightSearchInput) {
+        const debouncedHighlightSearch = debounce((value) => {
+          const activeColor = colorFilters?.querySelector('.color-filter-pill.active')?.dataset.color || 'all';
+          filterHighlights(activeColor, value);
+        }, 300);
+        highlightSearchInput.addEventListener('input', () => debouncedHighlightSearch(highlightSearchInput.value));
+      }
+
+      // Bind export
+      document.getElementById('export-highlights-btn')?.addEventListener('click', () => {
+        showHighlightExportModal(allHighlights);
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load highlights', err.message, () => renderHighlights()), 'highlights');
+    }
+  }
+
+  function filterHighlights(color, searchQuery) {
+    const cards = document.querySelectorAll('.highlight-card');
+    const groups = document.querySelectorAll('.highlights-group');
+
+    cards.forEach(card => {
+      const matchColor = color === 'all' || card.dataset.highlightColor === color;
+      const matchSearch = !searchQuery || (card.dataset.highlightText || '').toLowerCase().includes(searchQuery.toLowerCase());
+      card.style.display = (matchColor && matchSearch) ? '' : 'none';
+    });
+
+    // Hide empty groups
+    groups.forEach(group => {
+      const visibleCards = group.querySelectorAll('.highlight-card:not([style*="display: none"])');
+      group.style.display = visibleCards.length > 0 ? '' : 'none';
+    });
+  }
+
+  function showHighlightExportModal(highlights) {
+    const { close } = showModal({
+      title: 'Export Highlights',
+      description: 'Choose a format to export your highlights.',
+      content: `
+        <div class="modal-actions" style="border-top:0;padding-top:0;margin-top:0;justify-content:center;gap:var(--space-4)">
+          <button class="btn btn-primary" id="export-highlights-json">${icon('download', 16)} JSON</button>
+          <button class="btn btn-secondary" id="export-highlights-md">${icon('download', 16)} Markdown</button>
+        </div>
+      `,
+    });
+
+    document.getElementById('export-highlights-json')?.addEventListener('click', () => {
+      downloadBlob(JSON.stringify(highlights, null, 2), 'ironshelf-highlights.json', 'application/json');
+      toast('Highlights exported as JSON', 'success');
+      close();
+    });
+
+    document.getElementById('export-highlights-md')?.addEventListener('click', () => {
+      let markdownContent = '# My Highlights\n\n';
+      const groupedByBookForExport = {};
+      for (const highlight of highlights) {
+        const exportBookKey = highlight.book_title || 'Unknown';
+        if (!groupedByBookForExport[exportBookKey]) groupedByBookForExport[exportBookKey] = [];
+        groupedByBookForExport[exportBookKey].push(highlight);
+      }
+      for (const [exportBookTitle, exportBookHighlights] of Object.entries(groupedByBookForExport)) {
+        markdownContent += `## ${exportBookTitle}\n\n`;
+        for (const highlight of exportBookHighlights) {
+          markdownContent += `> ${highlight.text || ''}\n`;
+          if (highlight.note) markdownContent += `\n*${highlight.note}*\n`;
+          markdownContent += '\n---\n\n';
+        }
+      }
+      downloadBlob(markdownContent, 'ironshelf-highlights.md', 'text/markdown');
+      toast('Highlights exported as Markdown', 'success');
+      close();
+    });
+  }
+
+  function downloadBlob(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ============================================================
+  // 5. Genre Browse Page
+  // ============================================================
+
+  async function renderGenres() {
+    if (!await checkAuth()) return;
+    setTitle(['Genres']);
+    breadcrumbTrail = [{ label: 'Genres', path: '/genres' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Genres</h1></div>
+      ${skeletonCards(12)}
+    `, 'genres');
+
+    try {
+      const genresData = await apiGet('/genres');
+      const genres = Array.isArray(genresData) ? genresData : (genresData?.items || []);
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Genres</h1>
+        </div>
+      `;
+
+      if (genres.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.collection}</div>
+            <h3>No genres found</h3>
+            <p>Genre data is extracted from your book metadata.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div class="grid grid-genres">`;
+        for (const genre of genres) {
+          const genreName = genre.name || genre;
+          const backgroundColor = genreColorFromName(genreName);
+          const bookCount = genre.book_count || 0;
+          bodyContent += `
+            <div class="genre-card" data-genre-name="${escapeHtml(genreName)}" role="link" tabindex="0"
+                 aria-label="${escapeHtml(genreName)} (${bookCount} books)"
+                 style="background:${backgroundColor}">
+              ${escapeHtml(genreName)}
+              ${bookCount ? `<span style="opacity:0.7;margin-left:var(--space-1);font-weight:400;font-size:var(--text-xs)">(${bookCount})</span>` : ''}
+            </div>
+          `;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'genres');
+
+      // Bind genre cards
+      document.querySelectorAll('[data-genre-name]').forEach(card => {
+        const handler = () => navigateTo(`/genre/${encodeURIComponent(card.dataset.genreName)}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load genres', err.message, () => renderGenres()), 'genres');
+    }
+  }
+
+  // Genre Detail
+  let genreSortField = 'title';
+  let genreSortDirection = 'asc';
+  let genrePageNumber = 1;
+
+  async function renderGenreDetail(genreName) {
+    if (!await checkAuth()) return;
+    const decodedGenreName = decodeURIComponent(genreName);
+    setTitle([decodedGenreName]);
+    breadcrumbTrail = [
+      { label: 'Genres', path: '/genres' },
+      { label: decodedGenreName, path: `/genre/${genreName}` },
+    ];
+
+    renderShell(`
+      <div class="page-header"><h1>${escapeHtml(decodedGenreName)}</h1></div>
+      ${skeletonCards(8)}
+    `, 'genres');
+
+    try {
+      const params = new URLSearchParams({
+        page: genrePageNumber,
+        per_page: 40,
+        sort: genreSortField,
+        direction: genreSortDirection,
+      });
+
+      const booksResponse = await apiGet(`/genres/${encodeURIComponent(decodedGenreName)}/books?${params}`);
+      const books = Array.isArray(booksResponse) ? booksResponse : (booksResponse?.items || booksResponse?.data || []);
+      const totalPages = booksResponse?.total_pages || 1;
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1 style="display:flex;align-items:center;gap:var(--space-3)">
+            <span class="genre-chip" style="background:${genreColorFromName(decodedGenreName)};font-size:var(--text-sm);padding:var(--space-2) var(--space-4)">${escapeHtml(decodedGenreName)}</span>
+          </h1>
+          <div class="actions">
+            <span class="badge badge-teal">${books.length}${totalPages > 1 ? '+' : ''} book${books.length !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        ${renderToolbar({
+          searchPlaceholder: 'Search in genre...',
+          sortOptions: [
+            { value: 'title', label: 'Title' },
+            { value: 'added', label: 'Date Added' },
+            { value: 'rating', label: 'Rating' },
+          ],
+          currentSort: genreSortField,
+          currentDirection: genreSortDirection,
+        })}
+      `;
+
+      if (books.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.bookOpen}</div>
+            <h3>No books in this genre</h3>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div class="grid grid-books">`;
+        for (const book of books) {
+          bodyContent += renderBookCard(book);
+        }
+        bodyContent += `</div>`;
+        bodyContent += renderPagination(genrePageNumber, totalPages);
+      }
+
+      renderShell(bodyContent, 'genres');
+
+      // Bind book cards
+      document.querySelectorAll('[data-book-id]').forEach(card => {
+        const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      bindToolbar(document.querySelector('.main-body'), {
+        currentDirection: genreSortDirection,
+        onSearch: () => {}, // Server-side search not yet supported for genres
+        onSort: (field, direction) => {
+          genreSortField = field;
+          genreSortDirection = direction;
+          genrePageNumber = 1;
+          renderGenreDetail(genreName);
+        },
+      });
+
+      bindPagination(document.querySelector('.main-body'), (page) => {
+        genrePageNumber = page;
+        renderGenreDetail(genreName);
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load genre', err.message, () => renderGenreDetail(genreName)), 'genres');
+    }
+  }
+
+  // ============================================================
+  // 6. Webhooks Management
+  // ============================================================
+
+  const WEBHOOK_EVENT_TYPES = [
+    'book.added', 'book.removed', 'book.updated',
+    'library.scanned', 'user.registered', 'user.login',
+    'collection.created', 'collection.updated',
+    'progress.updated', 'metadata.enriched',
+  ];
+
+  async function renderWebhooks() {
+    if (!await checkAuth()) return;
+    if (!currentUser?.is_owner) { navigateTo('/settings'); return; }
+    setTitle(['Webhooks']);
+    breadcrumbTrail = [
+      { label: 'Settings', path: '/settings' },
+      { label: 'Webhooks', path: '/webhooks' },
+    ];
+
+    renderShell(`
+      <div class="page-header"><h1>Webhooks</h1></div>
+      ${skeletonList(3)}
+    `, 'settings');
+
+    try {
+      const webhooksData = await apiGet('/webhooks');
+      const webhooks = Array.isArray(webhooksData) ? webhooksData : (webhooksData?.items || []);
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Webhooks</h1>
+          <div class="actions">
+            <button class="btn btn-primary" id="create-webhook-btn">${icon('plus', 16)} New Webhook</button>
+          </div>
+        </div>
+      `;
+
+      if (webhooks.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.globe}</div>
+            <h3>No webhooks configured</h3>
+            <p>Set up webhooks to notify external services when events happen.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div style="display:flex;flex-direction:column;gap:var(--space-4)">`;
+        for (const webhook of webhooks) {
+          const events = webhook.events || [];
+          bodyContent += `
+            <div class="card webhook-card" data-webhook-id="${webhook.id}">
+              <div class="webhook-card-header">
+                <div>
+                  <div class="webhook-card-name">${escapeHtml(webhook.name || 'Unnamed')}</div>
+                  <div class="webhook-card-url">${escapeHtml(webhook.url || '')}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:var(--space-3)">
+                  <label class="form-toggle">
+                    <input type="checkbox" class="webhook-active-toggle" data-webhook-id="${webhook.id}" ${webhook.is_active !== false ? 'checked' : ''}>
+                  </label>
+                  <button class="btn btn-ghost btn-sm webhook-test-btn" data-webhook-id="${webhook.id}" aria-label="Test webhook" title="Send test event">${icon('zap', 14)} Test</button>
+                  <button class="btn btn-ghost btn-sm webhook-edit-btn" data-webhook-id="${webhook.id}" aria-label="Edit webhook">${icon('edit', 14)}</button>
+                  <button class="btn btn-ghost btn-sm webhook-delete-btn" data-webhook-id="${webhook.id}" aria-label="Delete webhook">${icon('trash', 14)}</button>
+                </div>
+              </div>
+              <div class="webhook-events">
+                ${events.map(eventName => `<span class="badge badge-muted">${escapeHtml(eventName)}</span>`).join('')}
+              </div>
+              <details>
+                <summary style="font-size:var(--text-xs);color:var(--color-muted);cursor:pointer;margin-top:var(--space-2)">Delivery history</summary>
+                <div class="delivery-history" id="deliveries-${webhook.id}">
+                  <p style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-muted)">Loading...</p>
+                </div>
+              </details>
+            </div>
+          `;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'settings');
+
+      // Bind create
+      document.getElementById('create-webhook-btn')?.addEventListener('click', () => showWebhookModal());
+
+      // Bind edit/delete/test/toggle
+      document.querySelectorAll('.webhook-edit-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            const webhookDetail = webhooks.find(webhookItem => webhookItem.id === btn.dataset.webhookId);
+            showWebhookModal(webhookDetail);
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      document.querySelectorAll('.webhook-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          showConfirmModal({
+            title: 'Delete Webhook',
+            message: 'This webhook and all its delivery history will be permanently deleted.',
+            confirmText: 'Delete',
+            onConfirm: async () => {
+              try {
+                await apiDelete(`/webhooks/${btn.dataset.webhookId}`);
+                toast('Webhook deleted', 'success');
+                renderWebhooks();
+              } catch (err) { toast(err.message, 'error'); }
+            },
+          });
+        });
+      });
+
+      document.querySelectorAll('.webhook-test-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          btn.innerHTML = `${icon('zap', 14)} Sending...`;
+          try {
+            const testResult = await apiPost(`/webhooks/${btn.dataset.webhookId}/test`, {});
+            if (testResult?.success) {
+              toast('Test webhook delivered successfully', 'success');
+            } else {
+              toast(`Test delivery failed: ${testResult?.error || 'Unknown error'}`, 'error');
+            }
+          } catch (err) { toast(err.message, 'error'); }
+          btn.disabled = false;
+          btn.innerHTML = `${icon('zap', 14)} Test`;
+        });
+      });
+
+      document.querySelectorAll('.webhook-active-toggle').forEach(toggle => {
+        toggle.addEventListener('change', async () => {
+          try {
+            await apiPatch(`/webhooks/${toggle.dataset.webhookId}`, { is_active: toggle.checked });
+            toast(toggle.checked ? 'Webhook enabled' : 'Webhook disabled', 'info');
+          } catch (err) {
+            toast(err.message, 'error');
+            toggle.checked = !toggle.checked;
+          }
+        });
+      });
+
+      // Load delivery history on details expand
+      document.querySelectorAll('details').forEach(details => {
+        details.addEventListener('toggle', async () => {
+          if (!details.open) return;
+          const deliveriesContainer = details.querySelector('.delivery-history');
+          const webhookId = details.closest('[data-webhook-id]')?.dataset.webhookId;
+          if (!webhookId || !deliveriesContainer) return;
+          try {
+            const deliveries = await apiGet(`/webhooks/${webhookId}/deliveries`);
+            const deliveryItems = Array.isArray(deliveries) ? deliveries : (deliveries?.items || []);
+            if (deliveryItems.length === 0) {
+              deliveriesContainer.innerHTML = `<p style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-muted)">No deliveries yet</p>`;
+            } else {
+              deliveriesContainer.innerHTML = deliveryItems.map(delivery => `
+                <div class="delivery-item" data-delivery-id="${delivery.id}">
+                  <span class="delivery-status-dot ${delivery.status_code >= 200 && delivery.status_code < 300 ? 'success' : 'failure'}"></span>
+                  <span style="flex:1">${escapeHtml(delivery.event || '')} &rarr; ${delivery.status_code || '?'}</span>
+                  <span style="color:var(--color-muted)">${formatRelativeTime(delivery.created_at)}</span>
+                </div>
+              `).join('');
+
+              deliveriesContainer.querySelectorAll('.delivery-item').forEach(deliveryItem => {
+                deliveryItem.addEventListener('click', () => {
+                  const existingDetail = deliveryItem.nextElementSibling;
+                  if (existingDetail?.classList.contains('delivery-detail')) {
+                    existingDetail.remove();
+                    return;
+                  }
+                  const matchedDelivery = deliveryItems.find(d => d.id === deliveryItem.dataset.deliveryId);
+                  if (matchedDelivery) {
+                    const detailEl = document.createElement('div');
+                    detailEl.className = 'delivery-detail';
+                    detailEl.textContent = JSON.stringify(matchedDelivery.response || matchedDelivery, null, 2);
+                    deliveryItem.insertAdjacentElement('afterend', detailEl);
+                  }
+                });
+              });
+            }
+          } catch {
+            deliveriesContainer.innerHTML = `<p style="padding:var(--space-3);font-size:var(--text-xs);color:var(--color-muted)">Failed to load deliveries</p>`;
+          }
+        });
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load webhooks', err.message, () => renderWebhooks()), 'settings');
+    }
+  }
+
+  function showWebhookModal(existingWebhook = null) {
+    const isEditing = !!existingWebhook;
+    const existingEvents = existingWebhook?.events || [];
+
+    const { close } = showModal({
+      title: isEditing ? 'Edit Webhook' : 'Create Webhook',
+      content: `
+        <form id="webhook-form" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="webhook-name-input">Name</label>
+            <input type="text" class="form-input" id="webhook-name-input" required placeholder="e.g., Discord notification" value="${isEditing ? escapeHtml(existingWebhook.name || '') : ''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="webhook-url-input">URL</label>
+            <input type="url" class="form-input" id="webhook-url-input" required placeholder="https://example.com/webhook" value="${isEditing ? escapeHtml(existingWebhook.url || '') : ''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="webhook-secret-input">Secret (optional)</label>
+            <input type="text" class="form-input" id="webhook-secret-input" placeholder="Used for HMAC signature verification" value="${isEditing ? escapeHtml(existingWebhook.secret || '') : ''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Events</label>
+            <div class="event-checkbox-grid">
+              ${WEBHOOK_EVENT_TYPES.map(eventType => `
+                <label>
+                  <input type="checkbox" name="webhook_events" value="${eventType}" ${existingEvents.includes(eventType) ? 'checked' : ''}>
+                  ${escapeHtml(eventType)}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">${isEditing ? 'Save' : 'Create'}</button>
+          </div>
+        </form>
+      `,
+    });
+
+    // Widen modal
+    const modalElement = document.querySelector('.modal-overlay:last-child .modal');
+    if (modalElement) modalElement.style.maxWidth = '560px';
+
+    const webhookForm = document.getElementById('webhook-form');
+    webhookForm.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+    webhookForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = webhookForm.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+
+      const selectedEvents = [...webhookForm.querySelectorAll('input[name="webhook_events"]:checked')].map(cb => cb.value);
+      const payload = {
+        name: document.getElementById('webhook-name-input').value.trim(),
+        url: document.getElementById('webhook-url-input').value.trim(),
+        secret: document.getElementById('webhook-secret-input').value.trim() || null,
+        events: selectedEvents,
+      };
+
+      try {
+        if (isEditing) {
+          await apiPatch(`/webhooks/${existingWebhook.id}`, payload);
+          toast('Webhook updated', 'success');
+        } else {
+          await apiPost('/webhooks', payload);
+          toast('Webhook created', 'success');
+        }
+        close();
+        renderWebhooks();
+      } catch (err) {
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  // ============================================================
+  // 8. Duplicate Detection
+  // ============================================================
+
+  async function renderDuplicates() {
+    if (!await checkAuth()) return;
+    if (!currentUser?.is_owner) { navigateTo('/'); return; }
+    setTitle(['Duplicate Detection']);
+    breadcrumbTrail = [{ label: 'Duplicates', path: '/duplicates' }];
+
+    renderShell(`
+      <div class="page-header">
+        <h1>Duplicate Detection</h1>
+        <div class="actions">
+          <button class="btn btn-primary" id="scan-duplicates-btn">${icon('search', 16)} Scan for Duplicates</button>
+        </div>
+      </div>
+      <div class="empty-state">
+        <div class="empty-state-icon">${Icons.search}</div>
+        <h3>Ready to scan</h3>
+        <p>Click "Scan for Duplicates" to find potential duplicate books in your libraries.</p>
+      </div>
+    `, 'settings');
+
+    document.getElementById('scan-duplicates-btn')?.addEventListener('click', async () => {
+      const scanBtn = document.getElementById('scan-duplicates-btn');
+      scanBtn.disabled = true;
+      scanBtn.innerHTML = `${icon('search', 16)} Scanning...`;
+
+      const mainBody = document.querySelector('.main-body');
+      const emptyState = mainBody.querySelector('.empty-state');
+      if (emptyState) {
+        emptyState.innerHTML = `
+          <div class="progress-bar progress-bar-indeterminate" style="max-width:300px;margin:var(--space-8) auto">
+            <div class="progress-bar-fill"></div>
+          </div>
+          <p class="text-caption">Analyzing your library for duplicates...</p>
+        `;
+      }
+
+      try {
+        const duplicateResults = await apiGet('/duplicates/scan');
+        const groups = Array.isArray(duplicateResults) ? duplicateResults : (duplicateResults?.groups || []);
+
+        if (groups.length === 0) {
+          if (emptyState) {
+            emptyState.innerHTML = `
+              <div class="empty-state-icon">${Icons.check}</div>
+              <h3>No duplicates found</h3>
+              <p>Your library looks clean. No potential duplicates were detected.</p>
+            `;
+          }
+          scanBtn.disabled = false;
+          scanBtn.innerHTML = `${icon('search', 16)} Scan for Duplicates`;
+          return;
+        }
+
+        let duplicateHtml = `<h3 class="mb-6">Found ${groups.length} potential duplicate group${groups.length !== 1 ? 's' : ''}</h3>`;
+
+        for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+          const duplicateGroup = groups[groupIndex];
+          const confidence = duplicateGroup.confidence != null ? Math.round(duplicateGroup.confidence * 100) : null;
+          const duplicateBooks = duplicateGroup.books || [];
+
+          duplicateHtml += `
+            <div class="card duplicate-group" data-group-index="${groupIndex}">
+              <div class="duplicate-group-header">
+                <div style="display:flex;align-items:center;gap:var(--space-2)">
+                  ${confidence != null ? `<span class="badge badge-warning">${confidence}% match</span>` : ''}
+                  <span class="duplicate-group-reason">${escapeHtml(duplicateGroup.reason || 'Similar metadata')}</span>
+                </div>
+                <button class="btn btn-ghost btn-sm dismiss-duplicate-group" data-group-index="${groupIndex}" aria-label="Dismiss this group">Dismiss</button>
+              </div>
+              <div class="duplicate-books-row">
+                ${duplicateBooks.map(duplicateBook => {
+                  const duplicateCoverUrl = duplicateBook.has_cover ? `${API}/books/${duplicateBook.id}/cover` : '';
+                  return `
+                    <div class="duplicate-book-card">
+                      <div class="book-cover" style="height:200px;width:133px;margin:0 auto var(--space-3)">
+                        ${duplicateCoverUrl ? `<img src="${duplicateCoverUrl}" alt="" loading="lazy">` : `<div style="width:100%;height:100%;background:var(--color-surface-active);display:flex;align-items:center;justify-content:center;color:var(--color-muted)">${Icons.book}</div>`}
+                      </div>
+                      <div class="book-title">${escapeHtml(duplicateBook.title || 'Unknown')}</div>
+                      <div class="book-meta">${duplicateBook.format || ''} ${duplicateBook.file_size ? `(${formatStorageBytes(duplicateBook.file_size)})` : ''}</div>
+                      <button class="btn btn-primary btn-sm mt-2 keep-book-btn" data-book-id="${duplicateBook.id}">Keep</button>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        if (emptyState) emptyState.remove();
+        mainBody.querySelector('.page-header').insertAdjacentHTML('afterend', duplicateHtml);
+
+        // Bind dismiss
+        mainBody.querySelectorAll('.dismiss-duplicate-group').forEach(btn => {
+          btn.addEventListener('click', () => {
+            btn.closest('.duplicate-group')?.remove();
+            toast('Group dismissed', 'info');
+          });
+        });
+
+        // Bind keep
+        mainBody.querySelectorAll('.keep-book-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            toast('Book marked as preferred copy', 'success');
+            btn.disabled = true;
+            btn.textContent = 'Kept';
+          });
+        });
+
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = `${icon('search', 16)} Scan Again`;
+
+      } catch (err) {
+        toast(err.message, 'error');
+        scanBtn.disabled = false;
+        scanBtn.innerHTML = `${icon('search', 16)} Scan for Duplicates`;
+      }
+    });
+  }
+
+  // ============================================================
+  // 9. Format Conversion on Book Detail
+  // ============================================================
+
+  async function renderConversionButton(bookId, containerSelector) {
+    try {
+      const converters = await apiGet('/server/converters').catch(() => null);
+      if (!converters || !converters.available || converters.formats?.length === 0) return;
+
+      const container = document.querySelector(containerSelector);
+      if (!container) return;
+
+      const convertWrap = document.createElement('div');
+      convertWrap.className = 'convert-dropdown-wrap';
+      convertWrap.innerHTML = `
+        <button class="btn btn-secondary" id="convert-btn" aria-haspopup="true" aria-expanded="false">
+          ${icon('refresh', 16)} Convert
+        </button>
+      `;
+      container.appendChild(convertWrap);
+
+      let convertDropdownOpen = false;
+
+      document.getElementById('convert-btn')?.addEventListener('click', () => {
+        if (convertDropdownOpen) {
+          convertWrap.querySelector('.convert-dropdown')?.remove();
+          convertDropdownOpen = false;
+          return;
+        }
+        convertDropdownOpen = true;
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'convert-dropdown';
+        dropdown.innerHTML = (converters.formats || []).map(targetFormat => `
+          <button class="dropdown-item" data-convert-format="${targetFormat}">
+            ${icon('download', 16)} Convert to ${escapeHtml(targetFormat.toUpperCase())}
+          </button>
+        `).join('');
+        convertWrap.appendChild(dropdown);
+
+        dropdown.querySelectorAll('[data-convert-format]').forEach(formatBtn => {
+          formatBtn.addEventListener('click', async () => {
+            const targetFormat = formatBtn.dataset.convertFormat;
+            dropdown.remove();
+            convertDropdownOpen = false;
+
+            // Show conversion status
+            const statusEl = document.createElement('div');
+            statusEl.className = 'conversion-status';
+            statusEl.innerHTML = `
+              <span>Converting to ${escapeHtml(targetFormat.toUpperCase())}...</span>
+              <div class="progress-bar progress-bar-indeterminate">
+                <div class="progress-bar-fill"></div>
+              </div>
+            `;
+            convertWrap.after(statusEl);
+
+            try {
+              const conversionJob = await apiPost(`/books/${bookId}/convert`, { target_format: targetFormat });
+              const jobId = conversionJob?.job_id || conversionJob?.id;
+
+              if (jobId) {
+                // Poll for completion
+                let conversionPollCount = 0;
+                const conversionPollMax = 60;
+                const conversionPollInterval = setInterval(async () => {
+                  conversionPollCount++;
+                  try {
+                    const jobStatus = await apiGet(`/conversions/${jobId}`);
+                    if (jobStatus?.status === 'completed' || jobStatus?.status === 'done') {
+                      clearInterval(conversionPollInterval);
+                      statusEl.innerHTML = `
+                        <span style="color:var(--color-success)">Conversion complete!</span>
+                        <a href="${API}/books/${bookId}/file?format=${targetFormat}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
+                      `;
+                      toast('Format conversion complete', 'success');
+                    } else if (jobStatus?.status === 'failed') {
+                      clearInterval(conversionPollInterval);
+                      statusEl.innerHTML = `<span style="color:var(--color-danger)">Conversion failed: ${escapeHtml(jobStatus.error || 'Unknown error')}</span>`;
+                    }
+                    if (conversionPollCount >= conversionPollMax) {
+                      clearInterval(conversionPollInterval);
+                      statusEl.innerHTML = `<span style="color:var(--color-warning)">Conversion timed out. Check back later.</span>`;
+                    }
+                  } catch {
+                    // Keep polling
+                  }
+                }, 3000);
+              } else {
+                // Immediate result
+                statusEl.innerHTML = `
+                  <span style="color:var(--color-success)">Conversion complete!</span>
+                  <a href="${API}/books/${bookId}/file?format=${targetFormat}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
+                `;
+                toast('Format conversion complete', 'success');
+              }
+            } catch (err) {
+              statusEl.innerHTML = `<span style="color:var(--color-danger)">Conversion failed: ${escapeHtml(err.message)}</span>`;
+            }
+          });
+        });
+
+        // Close on outside click
+        const closeConvertDropdown = (e) => {
+          if (!convertWrap.contains(e.target)) {
+            dropdown.remove();
+            convertDropdownOpen = false;
+            document.removeEventListener('click', closeConvertDropdown);
+          }
+        };
+        setTimeout(() => document.addEventListener('click', closeConvertDropdown), 0);
+      });
+
+    } catch {
+      // No converters available — don't show button
+    }
+  }
+
+  // ============================================================
+  // 12. Reading Preferences in Settings
+  // ============================================================
+
+  function renderReaderPreferencesSection() {
+    const prefs = getReaderPreferences();
+
+    return `
+      <div class="settings-section">
+        <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('bookOpen', 20)} Reading Preferences</h3>
+        <p class="description">Defaults applied when opening a reader. Stored locally in this browser.</p>
+
+        <div class="reader-prefs-grid">
+          <div class="card reader-pref-card">
+            <h4>Reader Theme</h4>
+            <div class="reader-pref-option-group" id="reader-theme-options">
+              <button class="reader-pref-option ${prefs.theme === 'dark' ? 'active' : ''}" data-pref-theme="dark" style="background:${prefs.theme === 'dark' ? '' : '#1a1d23'};color:${prefs.theme === 'dark' ? '' : '#e5e7eb'}">Dark</button>
+              <button class="reader-pref-option ${prefs.theme === 'sepia' ? 'active' : ''}" data-pref-theme="sepia" style="background:${prefs.theme === 'sepia' ? '' : '#f4ecd8'};color:${prefs.theme === 'sepia' ? '' : '#5c4b37'}">Sepia</button>
+              <button class="reader-pref-option ${prefs.theme === 'light' ? 'active' : ''}" data-pref-theme="light" style="background:${prefs.theme === 'light' ? '' : '#ffffff'};color:${prefs.theme === 'light' ? '' : '#1a1a1a'}">Light</button>
+            </div>
+          </div>
+
+          <div class="card reader-pref-card">
+            <h4>Font Size</h4>
+            <input type="range" class="font-size-slider" id="reader-font-size" min="12" max="28" step="1" value="${prefs.fontSize || 16}">
+            <div class="font-size-value" id="font-size-display">${prefs.fontSize || 16}px</div>
+          </div>
+
+          <div class="card reader-pref-card">
+            <h4>Reading Direction</h4>
+            <div class="reader-pref-option-group" id="reader-direction-options">
+              <button class="reader-pref-option ${prefs.direction === 'ltr' ? 'active' : ''}" data-pref-direction="ltr">LTR (Left to Right)</button>
+              <button class="reader-pref-option ${prefs.direction === 'rtl' ? 'active' : ''}" data-pref-direction="rtl">RTL (Manga)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindReaderPreferences() {
+    const prefs = getReaderPreferences();
+
+    // Theme
+    document.querySelectorAll('[data-pref-theme]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-pref-theme]').forEach(themeBtn => themeBtn.classList.remove('active'));
+        btn.classList.add('active');
+        prefs.theme = btn.dataset.prefTheme;
+        setReaderPreferences(prefs);
+        toast(`Reader theme set to ${prefs.theme}`, 'info');
+      });
+    });
+
+    // Font size
+    const fontSizeSlider = document.getElementById('reader-font-size');
+    const fontSizeDisplay = document.getElementById('font-size-display');
+    if (fontSizeSlider) {
+      fontSizeSlider.addEventListener('input', () => {
+        const sizeValue = parseInt(fontSizeSlider.value);
+        if (fontSizeDisplay) fontSizeDisplay.textContent = `${sizeValue}px`;
+        prefs.fontSize = sizeValue;
+        setReaderPreferences(prefs);
+      });
+    }
+
+    // Direction
+    document.querySelectorAll('[data-pref-direction]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-pref-direction]').forEach(dirBtn => dirBtn.classList.remove('active'));
+        btn.classList.add('active');
+        prefs.direction = btn.dataset.prefDirection;
+        setReaderPreferences(prefs);
+        toast(`Reading direction set to ${prefs.direction.toUpperCase()}`, 'info');
+      });
+    });
+  }
+
+  // ============================================================
+  // 11. Library Access Control (in user edit)
+  // ============================================================
+
+  async function showLibraryAccessModal(userId) {
+    const [libraries, userAccessData] = await Promise.all([
+      apiGet('/libraries').catch(() => []),
+      apiGet(`/users/${userId}/library-access`).catch(() => null),
+    ]);
+
+    const allLibraries = Array.isArray(libraries) ? libraries : (libraries?.items || []);
+    const userAccess = userAccessData?.library_ids || [];
+    const hasAllAccess = userAccessData?.all_libraries !== false;
+
+    const { close } = showModal({
+      title: 'Library Access',
+      description: 'Select which libraries this user can access.',
+      content: `
+        <form id="library-access-form" novalidate>
+          <div class="form-group">
+            <label class="form-toggle">
+              <input type="checkbox" id="all-libraries-toggle" ${hasAllAccess ? 'checked' : ''}>
+              <span>All libraries</span>
+            </label>
+          </div>
+          <div class="library-access-list" id="library-access-list" style="${hasAllAccess ? 'opacity:0.5;pointer-events:none' : ''}">
+            ${allLibraries.map(lib => `
+              <div class="library-access-item">
+                <label>
+                  <input type="checkbox" name="library_access" value="${lib.id}" ${hasAllAccess || userAccess.includes(lib.id) ? 'checked' : ''}>
+                  ${icon('library', 16)} ${escapeHtml(lib.name)}
+                </label>
+              </div>
+            `).join('')}
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Access</button>
+          </div>
+        </form>
+      `,
+    });
+
+    const accessForm = document.getElementById('library-access-form');
+    accessForm.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+    // Toggle all libraries
+    document.getElementById('all-libraries-toggle')?.addEventListener('change', (e) => {
+      const list = document.getElementById('library-access-list');
+      if (list) {
+        list.style.opacity = e.target.checked ? '0.5' : '1';
+        list.style.pointerEvents = e.target.checked ? 'none' : '';
+      }
+    });
+
+    accessForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const isAllLibraries = document.getElementById('all-libraries-toggle').checked;
+      const selectedLibraryIds = isAllLibraries
+        ? []
+        : [...accessForm.querySelectorAll('input[name="library_access"]:checked')].map(cb => cb.value);
+
+      try {
+        await apiPatch(`/users/${userId}/library-access`, {
+          all_libraries: isAllLibraries,
+          library_ids: selectedLibraryIds,
+        });
+        toast('Library access updated', 'success');
+        close();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
   }
 
   // --- Keyboard Shortcuts ---
