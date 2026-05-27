@@ -6,7 +6,7 @@
 
 use image::imageops::FilterType;
 use image::ImageReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
 
 /// Maximum allowed dimension (width or height) for a thumbnail request.

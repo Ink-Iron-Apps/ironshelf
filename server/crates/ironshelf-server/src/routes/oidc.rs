@@ -203,7 +203,7 @@ pub async fn oidc_callback(
     .await?;
 
     let user_id: String = user_row.0;
-    let username: String = user_row.1;
+    let _username: String = user_row.1;
 
     // Create session
     let session_id = create_session(pool, &user_id).await.map_err(AppError::internal)?;
