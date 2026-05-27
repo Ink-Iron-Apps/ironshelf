@@ -264,13 +264,24 @@ pub async fn bulk_metadata_scan(
     Path(library_id): Path<String>,
     _auth_user: axum::Extension<AuthUser>,
 ) -> Result<Json<BulkScanResponse>, AppError> {
-    let libraries = state.libraries.read().await;
-    let library = libraries
-        .iter()
-        .find(|library| library.id == library_id)
-        .ok_or(AppError::not_found("library"))?;
+    // Collect book data and author mappings while holding the lock, then drop it
+    // before making external HTTP requests to avoid blocking library mutations.
+    let (all_books, author_name_map) = {
+        let libraries = state.libraries.read().await;
+        let library = libraries
+            .iter()
+            .find(|library| library.id == library_id)
+            .ok_or(AppError::not_found("library"))?;
 
-    let all_books = library.source.all_books().await?;
+        let all_books = library.source.all_books().await?;
+        let authors = library.source.authors().await.unwrap_or_default();
+        let author_name_map: std::collections::HashMap<i64, String> = authors
+            .into_iter()
+            .map(|author| (author.id, author.name))
+            .collect();
+
+        (all_books, author_name_map)
+    };
 
     // Find books that are missing description.
     let books_needing_enrichment: Vec<_> = all_books
@@ -287,12 +298,7 @@ pub async fn bulk_metadata_scan(
 
     for book in &books_needing_enrichment {
         let primary_author = if !book.author_ids.is_empty() {
-            // Resolve the first author name from the library source.
-            let authors = library.source.authors().await.unwrap_or_default();
-            authors
-                .iter()
-                .find(|author| author.id == book.author_ids[0])
-                .map(|author| author.name.clone())
+            author_name_map.get(&book.author_ids[0]).cloned()
         } else {
             None
         };

@@ -100,15 +100,15 @@ pub async fn create_library(
 ) -> Result<(StatusCode, Json<CreateLibraryResponse>), AppError> {
     let options_str = request.options.as_ref().map(|v| v.to_string());
 
-    // Validate path exists on disk
-    let library_path = std::path::Path::new(&request.path);
-    if !library_path.exists() {
-        return Err(AppError::UnprocessableEntity(
+    // Validate path exists on disk (use async fs to avoid blocking the runtime)
+    let library_path = std::path::PathBuf::from(&request.path);
+    let path_metadata = tokio::fs::metadata(&library_path)
+        .await
+        .map_err(|_| AppError::UnprocessableEntity(
             "specified path does not exist on disk".to_string(),
-        ));
-    }
+        ))?;
 
-    if !library_path.is_dir() {
+    if !path_metadata.is_dir() {
         return Err(AppError::UnprocessableEntity(
             "specified path is not a directory".to_string(),
         ));
@@ -117,7 +117,7 @@ pub async fn create_library(
     // Validate metadata.db presence for Calibre sources
     if matches!(request.source_kind, SourceKind::Calibre) {
         let metadata_path = library_path.join("metadata.db");
-        if !metadata_path.exists() {
+        if tokio::fs::metadata(&metadata_path).await.is_err() {
             return Err(AppError::UnprocessableEntity(
                 "no metadata.db found at the specified path".to_string(),
             ));
@@ -237,14 +237,22 @@ pub async fn scan_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    let libraries = state.libraries.read().await;
-    let library = libraries
-        .iter()
-        .find(|l| l.id == library_id)
-        .ok_or(AppError::not_found("library"))?;
+    // Clone the folder source Arc so we can drop the libraries lock before scanning.
+    let folder_source = {
+        let libraries = state.libraries.read().await;
+        let library = libraries
+            .iter()
+            .find(|l| l.id == library_id)
+            .ok_or(AppError::not_found("library"))?;
 
-    // Folder source: rescan directory tree. Calibre: no-op (metadata.db is truth).
-    if let LibrarySource::Folder(ref folder) = library.source {
+        // Folder source: rescan directory tree. Calibre: no-op (metadata.db is truth).
+        match library.source {
+            LibrarySource::Folder(ref folder) => Some(Arc::clone(folder)),
+            LibrarySource::Calibre(_) => None,
+        }
+    };
+
+    if let Some(folder) = folder_source {
         let mut source = folder.write().await;
         source
             .scan()
