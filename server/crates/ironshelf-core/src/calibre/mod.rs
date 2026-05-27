@@ -198,6 +198,52 @@ impl CalibreSource {
         }))
     }
 
+    /// All unique genres/tags in this library with book counts, sorted alphabetically.
+    pub async fn genres(&self) -> Result<Vec<(String, i64)>, CalibreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT t.name, COUNT(btl.book) AS book_count
+            FROM tags t
+            JOIN books_tags_link btl ON btl.tag = t.id
+            GROUP BY t.id
+            ORDER BY t.name COLLATE NOCASE
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let genres = rows
+            .iter()
+            .map(|row| {
+                let name: String = row.get("name");
+                let book_count: i64 = row.get("book_count");
+                (name, book_count)
+            })
+            .collect();
+
+        Ok(genres)
+    }
+
+    /// Books that have a specific tag/genre (case-insensitive match).
+    pub async fn books_by_genre(&self, genre_name: &str) -> Result<Vec<Book>, CalibreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT b.id, b.title, b.sort, b.series_index, b.pubdate, b.timestamp,
+                   b.path, b.has_cover
+            FROM books b
+            JOIN books_tags_link btl ON btl.book = b.id
+            JOIN tags t ON t.id = btl.tag
+            WHERE LOWER(t.name) = LOWER(?)
+            ORDER BY b.sort
+            "#,
+        )
+        .bind(genre_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        self.hydrate_books(rows).await
+    }
+
     /// All books in the library (flat list).
     pub async fn all_books(&self) -> Result<Vec<Book>, CalibreError> {
         let rows = sqlx::query(
