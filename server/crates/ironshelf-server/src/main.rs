@@ -112,9 +112,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/alive", get(liveness))
         .route("/api/v1/server/info", get(routes::server_info::server_info));
 
-    // Protected routes (auth required)
-    let protected_routes = Router::new()
-        // Auth management
+    // Protected routes (auth required).
+    // Split into sub-routers and merged to keep the type tree shallow enough
+    // for Rust's trait solver to verify the middleware Service bounds.
+    let auth_management_routes = Router::new()
         .route("/api/v1/auth/me", get(routes::auth::me))
         .route("/api/v1/auth/logout", axum::routing::post(routes::auth::logout))
         .route(
@@ -125,7 +126,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/auth/api-keys/{id}",
             axum::routing::delete(routes::auth::delete_api_key),
         )
-        // User management (owner / manage_users)
         .route("/api/v1/users", get(routes::users::list_users))
         .route(
             "/api/v1/users/invite",
@@ -138,8 +138,9 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/users/{id}/permissions",
             axum::routing::patch(routes::users::set_permissions),
-        )
-        // Libraries (CRUD via GUI)
+        );
+
+    let library_routes = Router::new()
         .route(
             "/api/v1/libraries",
             get(routes::libraries::list_libraries).post(routes::libraries::create_library),
@@ -154,25 +155,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/libraries/{id}/metadata/scan", axum::routing::post(routes::metadata::bulk_metadata_scan))
         .route("/api/v1/libraries/{id}/authors", get(routes::authors::list_authors))
         .route("/api/v1/libraries/{id}/books", get(routes::books::list_books))
-        // Authors
         .route("/api/v1/authors/{id}", get(routes::authors::get_author))
         .route("/api/v1/authors/{id}/series", get(routes::authors::author_series))
         .route("/api/v1/authors/{id}/standalone", get(routes::authors::author_standalone))
-        // Series
         .route("/api/v1/series/{id}", get(routes::series::get_series))
-        // Search
         .route("/api/v1/search", get(routes::search::global_search))
         .route("/api/v1/search/rebuild", axum::routing::post(routes::search::rebuild_search_index))
-        // Continue reading
         .route("/api/v1/books/continue", get(routes::continue_reading::continue_reading))
-        // Books
         .route("/api/v1/books/{id}", get(routes::books::get_book))
         .route("/api/v1/books/{id}/cover", get(routes::files::get_cover))
         .route("/api/v1/books/{id}/file", get(routes::files::get_file))
-        // Metadata enrichment
         .route("/api/v1/books/{id}/metadata/search", get(routes::metadata::search_metadata))
-        .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata))
-        // Progress + bookmarks
+        .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata));
+
+    let reading_routes = Router::new()
         .route(
             "/api/v1/books/{id}/progress",
             get(routes::progress::get_progress).put(routes::progress::update_progress),
@@ -185,7 +181,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/books/{id}/bookmarks/{bookmark_id}",
             axum::routing::delete(routes::progress::delete_bookmark),
         )
-        // Highlights / annotations
         .route(
             "/api/v1/books/{id}/highlights",
             get(routes::highlights::list_book_highlights)
@@ -200,7 +195,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/me/highlights",
             get(routes::highlights::list_all_highlights),
         )
-        // Collections (reading lists)
         .route(
             "/api/v1/collections",
             get(routes::collections::list_collections).post(routes::collections::create_collection),
@@ -218,17 +212,16 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/collections/{id}/books/{book_id}",
             axum::routing::delete(routes::collections::remove_book_from_collection),
-        )
-        // Import / export (data portability)
+        );
+
+    let data_routes = Router::new()
         .route("/api/v1/export/reading-progress", get(routes::import_export::export_reading_progress))
         .route("/api/v1/export/bookmarks", get(routes::import_export::export_bookmarks))
         .route("/api/v1/export/collections", get(routes::import_export::export_collections))
         .route("/api/v1/export/all", get(routes::import_export::export_all))
         .route("/api/v1/import", axum::routing::post(routes::import_export::import_user_data))
-        // Library config backup (owner only)
         .route("/api/v1/export/library-config", get(routes::import_export::export_library_config))
         .route("/api/v1/import/library-config", axum::routing::post(routes::import_export::import_library_config))
-        // Notifications
         .route(
             "/api/v1/notifications",
             get(routes::notifications::list_notifications),
@@ -249,11 +242,11 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/notifications/{id}",
             axum::routing::delete(routes::notifications::delete_notification),
         )
-        // Stats + activity
         .route("/api/v1/stats", get(routes::stats::server_stats))
         .route("/api/v1/activity", get(routes::stats::user_activity))
-        .route("/api/v1/activity/all", get(routes::stats::server_activity))
-        // Genres
+        .route("/api/v1/activity/all", get(routes::stats::server_activity));
+
+    let genre_webhook_routes = Router::new()
         .route("/api/v1/genres", get(routes::genres::list_all_genres))
         .route("/api/v1/genres/{genre_name}", get(routes::genres::get_genre_books))
         .route("/api/v1/genres/{genre_name}/authors", get(routes::genres::genre_authors))
@@ -263,7 +256,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/libraries/{id}/genres/{genre_name}/books",
             get(routes::genres::list_library_genre_books),
         )
-        // Webhooks
         .route(
             "/api/v1/webhooks",
             get(routes::webhooks::list_webhooks).post(routes::webhooks::create_webhook),
@@ -280,8 +272,9 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/webhooks/{id}/test",
             axum::routing::post(routes::webhooks::test_webhook),
-        )
-        // Acquisition engine — Indexers
+        );
+
+    let acquisition_routes = Router::new()
         .route(
             "/api/v1/indexers",
             get(routes::acquisition::list_indexers)
@@ -296,7 +289,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/indexers/{id}/test",
             axum::routing::post(routes::acquisition::test_indexer),
         )
-        // Acquisition engine — Download Clients
         .route(
             "/api/v1/download-clients",
             get(routes::acquisition::list_download_clients)
@@ -311,7 +303,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/download-clients/{id}/test",
             axum::routing::post(routes::acquisition::test_download_client),
         )
-        // Acquisition engine — Wanted List
         .route(
             "/api/v1/wanted",
             get(routes::acquisition::list_wanted)
@@ -330,7 +321,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/wanted/{id}/grab",
             axum::routing::post(routes::acquisition::grab_wanted_item),
         )
-        // Acquisition engine — Downloads
         .route(
             "/api/v1/downloads",
             get(routes::acquisition::list_downloads),
@@ -344,7 +334,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/downloads/{id}/retry",
             axum::routing::post(routes::acquisition::retry_download),
         )
-        // Acquisition engine — Global search + grab
         .route(
             "/api/v1/acquisition/search",
             get(routes::acquisition::acquisition_search),
@@ -352,7 +341,15 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/acquisition/grab",
             axum::routing::post(routes::acquisition::acquisition_grab),
-        )
+        );
+
+    let protected_routes = Router::new()
+        .merge(auth_management_routes)
+        .merge(library_routes)
+        .merge(reading_routes)
+        .merge(data_routes)
+        .merge(genre_webhook_routes)
+        .merge(acquisition_routes)
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
