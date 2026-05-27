@@ -450,7 +450,15 @@ pub async fn search_feed(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let search_term = query.q.to_lowercase();
+    let trimmed_query = query.q.trim();
+    if trimmed_query.is_empty() {
+        // Return an empty feed for blank queries instead of matching everything.
+        let mut xml = feed_header("Search Results", "urn:ironshelf:search:empty", "/opds/search");
+        xml.push_str("</feed>\n");
+        return Ok(OpdsResponse(xml));
+    }
+
+    let search_term = trimmed_query.to_lowercase();
     let libraries = state.libraries.read().await;
     let mut matching_books = Vec::new();
 

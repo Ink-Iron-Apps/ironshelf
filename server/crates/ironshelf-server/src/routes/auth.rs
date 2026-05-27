@@ -60,19 +60,37 @@ pub async fn register(
     let pool = state.ironshelf_db.pool();
 
     // SAFETY: Enforce minimum password length to prevent trivially guessable passwords.
-    if request.password.len() < 8 {
+    // Use .chars().count() to count Unicode characters, not bytes.
+    let password_char_count = request.password.chars().count();
+    if password_char_count < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Password must be at least 8 characters", "code": "password_too_short"})),
         ));
     }
 
-    // SAFETY: Enforce username length limits.
+    // SAFETY: Cap password length to prevent argon2 DoS with extremely long inputs.
+    if password_char_count > 1024 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must not exceed 1024 characters", "code": "password_too_long"})),
+        ));
+    }
+
+    // SAFETY: Enforce username length limits and character restrictions.
     let trimmed_username = request.username.trim();
     if trimmed_username.is_empty() || trimmed_username.len() > 64 {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Username must be 1-64 characters", "code": "invalid_username"})),
+        ));
+    }
+
+    // Reject control characters (newlines, tabs, null bytes, etc.) in usernames.
+    if trimmed_username.chars().any(|character| character.is_control()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Username must not contain control characters", "code": "invalid_username"})),
         ));
     }
 
@@ -99,7 +117,7 @@ pub async fn register(
     // Check username not taken
     let existing: Option<sqlx::sqlite::SqliteRow> =
         sqlx::query("SELECT id FROM users WHERE username = ?")
-            .bind(&request.username)
+            .bind(trimmed_username)
             .fetch_optional(pool)
             .await
             .map_err(|_| server_error("db_error"))?;
@@ -118,7 +136,7 @@ pub async fn register(
 
     sqlx::query("INSERT INTO users (id, username, password_hash, is_owner) VALUES (?, ?, ?, ?)")
         .bind(&user_id)
-        .bind(&request.username)
+        .bind(trimmed_username)
         .bind(&password_hash)
         .bind(is_owner as i32)
         .execute(pool)
@@ -169,7 +187,7 @@ pub async fn register(
         StatusCode::CREATED,
         Json(AuthResponse {
             user_id,
-            username: request.username,
+            username: trimmed_username.to_string(),
             is_owner,
             session_id,
         }),
@@ -248,11 +266,25 @@ pub async fn logout(
     axum::Extension(user): axum::Extension<AuthUser>,
 ) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    sqlx::query("DELETE FROM sessions WHERE user_id = ?")
-        .bind(&user.user_id)
-        .execute(pool)
-        .await
-        .map_err(AppError::internal)?;
+
+    // Delete only the current session, not all sessions for the user.
+    // This preserves sessions on other devices (phone, tablet, etc).
+    if let Some(ref current_session_id) = user.session_id {
+        sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
+            .bind(current_session_id)
+            .bind(&user.user_id)
+            .execute(pool)
+            .await
+            .map_err(AppError::internal)?;
+    } else {
+        // Authenticated via API key — delete all sessions for a clean logout.
+        sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+            .bind(&user.user_id)
+            .execute(pool)
+            .await
+            .map_err(AppError::internal)?;
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -342,12 +374,17 @@ pub async fn delete_api_key(
     axum::extract::Path(key_id): axum::extract::Path<String>,
 ) -> Result<StatusCode, AppError> {
     let pool = state.ironshelf_db.pool();
-    sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
+    let result = sqlx::query("DELETE FROM api_keys WHERE id = ? AND user_id = ?")
         .bind(&key_id)
         .bind(&user.user_id)
         .execute(pool)
         .await
         .map_err(AppError::internal)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::not_found("API key"));
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -104,12 +104,18 @@ pub async fn server_stats(
             if let Ok(authors) = library.source.authors().await {
                 total_authors += authors.len() as i64;
 
-                // Count series across all authors.
+                // Count series across all authors, deduplicating by series ID to
+                // avoid overcounting series shared by multiple authors.
+                let mut seen_series_ids: std::collections::HashSet<i64> =
+                    std::collections::HashSet::new();
                 for author in &authors {
                     if let Ok(author_series) = library.source.series_by_author(author.id).await {
-                        total_series += author_series.len() as i64;
+                        for series in &author_series {
+                            seen_series_ids.insert(series.id);
+                        }
                     }
                 }
+                total_series += seen_series_ids.len() as i64;
             }
         }
     }
@@ -226,7 +232,7 @@ pub async fn user_activity(
     axum::Extension(current_user): axum::Extension<AuthUser>,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<Vec<ActivityLogEntry>>, AppError> {
-    let limit = query.limit.unwrap_or(50).min(200);
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
 
     let activity_entries = state
         .ironshelf_db
@@ -261,7 +267,7 @@ pub async fn server_activity(
 ) -> Result<Json<Vec<ActivityLogEntry>>, AppError> {
     require_owner(&current_user)?;
 
-    let limit = query.limit.unwrap_or(50).min(200);
+    let limit = query.limit.unwrap_or(50).max(1).min(200);
 
     let activity_entries = state
         .ironshelf_db

@@ -192,9 +192,10 @@ pub async fn update_collection(
         ));
     }
 
-    // Validate name if provided
-    if let Some(ref name) = request.name {
-        if name.trim().is_empty() {
+    // Validate and trim name if provided
+    let trimmed_name = request.name.as_deref().map(|name| name.trim().to_string());
+    if let Some(ref name) = trimmed_name {
+        if name.is_empty() {
             return Err(AppError::BadRequest(
                 "collection name must not be empty".to_string(),
             ));
@@ -205,7 +206,7 @@ pub async fn update_collection(
         .ironshelf_db
         .update_collection(
             &collection_id,
-            request.name.as_deref(),
+            trimmed_name.as_deref(),
             request.description.as_deref(),
             request.is_public,
         )
@@ -259,6 +260,15 @@ pub async fn add_book_to_collection(
         return Err(AppError::Forbidden(
             "only the collection owner can add books".to_string(),
         ));
+    }
+
+    // Validate position if explicitly provided
+    if let Some(position) = request.position {
+        if position < 0 {
+            return Err(AppError::BadRequest(
+                "position must not be negative".to_string(),
+            ));
+        }
     }
 
     // Default position: append at end (use count of existing books)
