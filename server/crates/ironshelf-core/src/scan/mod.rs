@@ -1,7 +1,7 @@
 //! Folder scanner + embedded EPUB OPF parser for non-Calibre libraries.
 //! Walks directories, reads epub metadata (dc:creator, calibre:series, etc).
 
-use crate::model::{Author, Book, CustomValue, Format, Series};
+use crate::model::{Author, Book, Format, Series};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -294,6 +294,30 @@ impl FolderSource {
             .iter()
             .enumerate()
             .filter(|(_, b)| b.authors.contains(&author_name.to_string()) && b.series_name.is_none())
+            .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
+            .collect()
+    }
+
+    /// All unique genres/tags across scanned books with book counts.
+    pub fn genres(&self) -> Vec<(String, i64)> {
+        let mut genre_counts: HashMap<String, i64> = HashMap::new();
+        for book in &self.books {
+            for tag in &book.tags {
+                *genre_counts.entry(tag.clone()).or_insert(0) += 1;
+            }
+        }
+        let mut genres: Vec<(String, i64)> = genre_counts.into_iter().collect();
+        genres.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        genres
+    }
+
+    /// Books that have a specific tag/genre (case-insensitive match).
+    pub fn books_by_genre(&self, genre_name: &str) -> Vec<Book> {
+        let genre_lower = genre_name.to_lowercase();
+        self.books
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.tags.iter().any(|tag| tag.to_lowercase() == genre_lower))
             .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect()
     }

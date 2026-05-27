@@ -75,7 +75,7 @@ pub async fn server_stats(
                 for format in &book.formats {
                     let file_path = library
                         .source
-                        .format_path(&book.path, &format.file_name, &format.format);
+                        .format_path(&book.path, &format.file_name, &format.kind);
                     if let Ok(metadata) = tokio::fs::metadata(&file_path).await {
                         storage_bytes += metadata.len();
                     }

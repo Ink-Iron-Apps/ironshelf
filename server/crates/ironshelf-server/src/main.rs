@@ -63,12 +63,16 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let oidc_state_store = routes::oidc::OidcStateStore::new();
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
         started_at: Instant::now(),
         search_index,
         thumbnail_cache_path: config.thumbnail_cache_path.clone(),
+        config: config.clone(),
+        oidc_state_store,
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
@@ -84,6 +88,8 @@ async fn main() -> anyhow::Result<()> {
     let auth_routes = Router::new()
         .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
+        .route("/api/v1/auth/oidc/login", get(routes::oidc::oidc_login))
+        .route("/api/v1/auth/oidc/callback", get(routes::oidc::oidc_callback))
         .layer(axum::middleware::from_fn_with_state(
             auth_rate_limiter,
             middleware::rate_limit::rate_limit_auth,
@@ -237,6 +243,34 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/stats", get(routes::stats::server_stats))
         .route("/api/v1/activity", get(routes::stats::user_activity))
         .route("/api/v1/activity/all", get(routes::stats::server_activity))
+        // Genres
+        .route("/api/v1/genres", get(routes::genres::list_all_genres))
+        .route("/api/v1/genres/{genre_name}", get(routes::genres::get_genre_books))
+        .route("/api/v1/genres/{genre_name}/authors", get(routes::genres::genre_authors))
+        .route("/api/v1/genres/{genre_name}/series", get(routes::genres::genre_series))
+        .route("/api/v1/libraries/{id}/genres", get(routes::genres::list_library_genres))
+        .route(
+            "/api/v1/libraries/{id}/genres/{genre_name}/books",
+            get(routes::genres::list_library_genre_books),
+        )
+        // Webhooks
+        .route(
+            "/api/v1/webhooks",
+            get(routes::webhooks::list_webhooks).post(routes::webhooks::create_webhook),
+        )
+        .route(
+            "/api/v1/webhooks/{id}",
+            axum::routing::patch(routes::webhooks::update_webhook)
+                .delete(routes::webhooks::delete_webhook),
+        )
+        .route(
+            "/api/v1/webhooks/{id}/deliveries",
+            get(routes::webhooks::list_deliveries),
+        )
+        .route(
+            "/api/v1/webhooks/{id}/test",
+            axum::routing::post(routes::webhooks::test_webhook),
+        )
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,

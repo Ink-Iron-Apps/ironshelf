@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::config::Config;
+use crate::routes::oidc::OidcStateStore;
+
 /// Polymorphic library source.
 #[derive(Clone)]
 pub enum LibrarySource {
@@ -26,7 +29,7 @@ impl LibrarySource {
 
     pub async fn series_by_author(&self, author_id: i64) -> Result<Vec<Series>, String> {
         match self {
-            Self::Calibre(source) => source.series_by_author(author_id).map_err(|e| e.to_string()).await,
+            Self::Calibre(source) => source.series_by_author(author_id).await.map_err(|e| e.to_string()),
             Self::Folder(source) => Ok(source.read().await.series_by_author(author_id)),
         }
     }
@@ -85,6 +88,20 @@ impl LibrarySource {
         }
     }
 
+    pub async fn genres(&self) -> Result<Vec<(String, i64)>, String> {
+        match self {
+            Self::Calibre(source) => source.genres().await.map_err(|e| e.to_string()),
+            Self::Folder(source) => Ok(source.read().await.genres()),
+        }
+    }
+
+    pub async fn books_by_genre(&self, genre_name: &str) -> Result<Vec<Book>, String> {
+        match self {
+            Self::Calibre(source) => source.books_by_genre(genre_name).await.map_err(|e| e.to_string()),
+            Self::Folder(source) => Ok(source.read().await.books_by_genre(genre_name)),
+        }
+    }
+
     pub fn cover_path(&self, book_path: &str) -> Option<PathBuf> {
         match self {
             Self::Calibre(source) => Some(source.cover_path(book_path)),
@@ -126,4 +143,8 @@ pub struct AppState {
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     /// Path to the thumbnail cache directory for resized cover images.
     pub thumbnail_cache_path: PathBuf,
+    /// Server configuration (needed for OIDC config access in route handlers).
+    pub config: Config,
+    /// In-memory OIDC state/PKCE verifier store for the authorization code flow.
+    pub oidc_state_store: OidcStateStore,
 }

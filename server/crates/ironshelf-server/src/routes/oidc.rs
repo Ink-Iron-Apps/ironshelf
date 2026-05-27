@@ -3,7 +3,7 @@
 
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -316,11 +316,6 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>, String> {
 }
 
 fn base64_decode_standard(input: &str) -> Result<Vec<u8>, String> {
-    // Use the jsonwebtoken crate's base64 decoding via DecodingKey::from_base64_secret
-    // or do a manual implementation. For simplicity, use a minimal approach.
-    use jsonwebtoken::decode_header;
-
-    // Actually, let's just manually decode base64.
     // Standard base64 alphabet
     const ALPHABET: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -498,17 +493,7 @@ fn compute_pkce_challenge(verifier: &str) -> String {
     use sha2::{Digest, Sha256};
 
     let hash = Sha256::digest(verifier.as_bytes());
-    // Base64url encode without padding
-    let encoded = hash
-        .iter()
-        .fold(String::new(), |mut accumulator, &byte| {
-            accumulator.push_str(&format!("{:02x}", byte));
-            accumulator
-        });
-
-    // Actually need proper base64url of the SHA256 hash
-    let base64 = base64_url_encode(&hash);
-    base64
+    base64_url_encode(&hash)
 }
 
 fn base64_url_encode(input: &[u8]) -> String {
