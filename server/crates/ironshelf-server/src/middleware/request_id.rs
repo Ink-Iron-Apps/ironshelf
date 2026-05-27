@@ -20,7 +20,7 @@ pub async fn request_id(request: Request<Body>, next: Next) -> Response<Body> {
 
     // Record the request ID in the current tracing span so every log line
     // emitted while handling this request includes it automatically.
-    tracing::Span::current().record("request_id", &generated_id.as_str());
+    tracing::Span::current().record("request_id", &*generated_id);
     tracing::debug!(request_id = %generated_id, "assigned request id");
 
     let mut response = next.run(request).await;

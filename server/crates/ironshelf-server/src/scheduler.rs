@@ -298,7 +298,7 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
 
         // Notify all users that books need metadata enrichment.
         let truncated_list = if candidates.len() > 5 {
-            let first_five: Vec<&str> = candidates.iter().take(5).map(|title| title.as_str()).collect();
+            let first_five: Vec<&str> = candidates.iter().take(5).map(|title| &**title).collect();
             format!("{} and {} more", first_five.join(", "), candidates.len() - 5)
         } else {
             candidates.join(", ")
