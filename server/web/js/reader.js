@@ -687,3 +687,8 @@ const IronshelfReader = (() => {
     close,
   };
 })();
+
+// Attach to window for use by app.js
+if (typeof window !== 'undefined') {
+  window.IronshelfReader = IronshelfReader;
+}
