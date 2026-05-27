@@ -34,7 +34,6 @@ reqwest = { version = "0.12", features = ["json"] }
 urlencoding = "2"
 trait-variant = "0.1"
 tantivy = "0.22"
-jsonwebtoken = "9"
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"

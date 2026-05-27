@@ -165,6 +165,20 @@ pub async fn update_webhook(
         }
     }
 
+    // Verify the webhook exists and is owned by this user before updating.
+    let webhook = state
+        .ironshelf_db
+        .get_webhook(&webhook_id)
+        .await
+        .map_err(AppError::internal)?
+        .ok_or(AppError::not_found("webhook"))?;
+
+    if webhook.user_id != auth_user.user_id {
+        return Err(AppError::Forbidden(
+            "You do not own this webhook".to_string(),
+        ));
+    }
+
     state
         .ironshelf_db
         .update_webhook(
@@ -273,7 +287,10 @@ pub async fn test_webhook(
         "message": "This is a test delivery from Ironshelf."
     });
 
-    webhook_dispatcher::dispatch_event(&state.ironshelf_db, "test", &test_payload).await;
+    // Send directly to this specific webhook rather than broadcasting via
+    // dispatch_event (which matches by event subscription and would never
+    // find this webhook since "test" is not a subscribable event type).
+    webhook_dispatcher::dispatch_to_webhook(&state.ironshelf_db, &webhook, "test", &test_payload).await;
 
     Ok(Json(serde_json::json!({
         "sent": true,

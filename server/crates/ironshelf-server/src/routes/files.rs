@@ -122,10 +122,11 @@ pub async fn get_file(
 
             let file_path = library
                 .source
-                .format_path(&book.path, &format.file_name, &format.kind);
+                .format_path(&book.path, &format.file_name, &format.kind)
+                .await;
 
             // SAFETY: Path traversal guard — reject if the resolved path escapes the library root.
-            if !library.source.is_path_safe(&file_path) {
+            if !library.source.is_path_safe(&file_path).await {
                 return Err(AppError::Forbidden("access denied: path outside library".to_string()));
             }
 

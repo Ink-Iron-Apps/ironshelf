@@ -79,7 +79,8 @@ pub async fn server_stats(
                     for format in &book.formats {
                         let file_path = library
                             .source
-                            .format_path(&book.path, &format.file_name, &format.kind);
+                            .format_path(&book.path, &format.file_name, &format.kind)
+                            .await;
                         file_paths_to_stat.push(file_path);
                     }
                 }
