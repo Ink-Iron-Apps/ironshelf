@@ -204,6 +204,9 @@ pub async fn library_sync(
     let mut entitlements = Vec::new();
 
     for library in libraries.iter() {
+        // TODO: implement Kobo sync pagination — all_books() loads every book into
+        // memory which risks OOM for 100k+ libraries. Kobo protocol needs careful
+        // handling to paginate without breaking sync state.
         let books = library.source.all_books().await.unwrap_or_default();
 
         for book in &books {

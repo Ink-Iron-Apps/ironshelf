@@ -47,6 +47,17 @@ pub struct Config {
     #[serde(default = "default_thumbnail_cache_path")]
     pub thumbnail_cache_path: PathBuf,
 
+    /// Whether the server is behind TLS (direct or via reverse proxy).
+    /// When true, session cookies include the `Secure` flag.
+    #[serde(default)]
+    pub tls_enabled: bool,
+
+    /// Whether to trust `X-Forwarded-For` and `X-Real-Ip` headers for client IP extraction.
+    /// Set to true ONLY when the server is behind a trusted reverse proxy.
+    /// When false, the rate limiter always uses the peer socket address.
+    #[serde(default)]
+    pub trust_proxy_headers: bool,
+
     /// Optional OIDC/SSO configuration for external identity provider login.
     #[serde(default)]
     pub oidc: Option<OidcConfig>,
@@ -106,6 +117,8 @@ impl Config {
                 database_path: default_ironshelf_db(),
                 search_index_path: default_search_index_path(),
                 thumbnail_cache_path: default_thumbnail_cache_path(),
+                tls_enabled: false,
+                trust_proxy_headers: false,
                 oidc: None,
             }
         };
@@ -127,6 +140,12 @@ impl Config {
         }
         if let Ok(thumbnail_cache_path) = std::env::var("IRONSHELF_THUMBNAIL_CACHE") {
             config.thumbnail_cache_path = PathBuf::from(thumbnail_cache_path);
+        }
+        if let Ok(tls_enabled) = std::env::var("IRONSHELF_TLS_ENABLED") {
+            config.tls_enabled = tls_enabled == "true" || tls_enabled == "1";
+        }
+        if let Ok(trust_proxy_headers) = std::env::var("IRONSHELF_TRUST_PROXY_HEADERS") {
+            config.trust_proxy_headers = trust_proxy_headers == "true" || trust_proxy_headers == "1";
         }
 
         Ok(config)

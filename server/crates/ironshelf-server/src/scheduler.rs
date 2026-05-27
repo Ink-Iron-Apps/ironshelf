@@ -91,30 +91,52 @@ async fn library_rescan_task(application_state: AppState) {
                 let libraries = application_state.libraries.read().await;
                 let mut entries: Vec<BookIndexEntry> = Vec::new();
 
+                const PAGINATION_BATCH_SIZE: i64 = 500;
+
                 for library in libraries.iter() {
-                    let all_books = library.source.all_books().await.unwrap_or_default();
                     let authors = library.source.authors().await.unwrap_or_default();
                     let author_name_map: std::collections::HashMap<i64, String> = authors
                         .into_iter()
                         .map(|author| (author.id, author.name))
                         .collect();
 
-                    for book in all_books {
-                        let author_names: Vec<String> = book
-                            .author_ids
-                            .iter()
-                            .filter_map(|author_id| author_name_map.get(author_id).cloned())
-                            .collect();
+                    // Use paginated iteration to avoid loading all books into memory at once.
+                    let mut page_offset: i64 = 0;
+                    loop {
+                        let page_books = library
+                            .source
+                            .books_paginated(page_offset, PAGINATION_BATCH_SIZE)
+                            .await
+                            .unwrap_or_default();
 
-                        entries.push(BookIndexEntry {
-                            book_id: book.id,
-                            title: book.title,
-                            author_names: author_names.join(", "),
-                            series_name: None,
-                            tags: book.tags.join(", "),
-                            description: book.description,
-                            library_id: library.id.clone(),
-                        });
+                        if page_books.is_empty() {
+                            break;
+                        }
+
+                        let page_length = page_books.len() as i64;
+
+                        for book in page_books {
+                            let author_names: Vec<String> = book
+                                .author_ids
+                                .iter()
+                                .filter_map(|author_id| author_name_map.get(author_id).cloned())
+                                .collect();
+
+                            entries.push(BookIndexEntry {
+                                book_id: book.id,
+                                title: book.title,
+                                author_names: author_names.join(", "),
+                                series_name: None,
+                                tags: book.tags.join(", "),
+                                description: book.description,
+                                library_id: library.id.clone(),
+                            });
+                        }
+
+                        if page_length < PAGINATION_BATCH_SIZE {
+                            break;
+                        }
+                        page_offset += PAGINATION_BATCH_SIZE;
                     }
                 }
                 drop(libraries);

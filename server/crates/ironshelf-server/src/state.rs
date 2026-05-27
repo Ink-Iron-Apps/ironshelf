@@ -74,6 +74,25 @@ impl LibrarySource {
         }
     }
 
+    /// Total number of books without loading them into memory.
+    pub async fn book_count(&self) -> Result<i64, String> {
+        match self {
+            Self::Calibre(source) => source.book_count().await.map_err(|e| e.to_string()),
+            Self::Folder(source) => Ok(source.read().await.book_count()),
+        }
+    }
+
+    /// Paginated books using SQL-level LIMIT/OFFSET (Calibre) or vec slicing (Folder).
+    pub async fn books_paginated(&self, offset: i64, limit: i64) -> Result<Vec<Book>, String> {
+        match self {
+            Self::Calibre(source) => source
+                .books_paginated(offset, limit)
+                .await
+                .map_err(|e| e.to_string()),
+            Self::Folder(source) => Ok(source.read().await.books_paginated(offset, limit)),
+        }
+    }
+
     pub async fn series(&self, series_id: i64) -> Result<Option<Series>, String> {
         match self {
             Self::Calibre(source) => source.series(series_id).await.map_err(|e| e.to_string()),
@@ -166,4 +185,7 @@ pub struct AppState {
     pub config: Config,
     /// In-memory OIDC state/PKCE verifier store for the authorization code flow.
     pub oidc_state_store: OidcStateStore,
+    /// Shared HTTP client for outbound requests (metadata providers, webhooks).
+    /// Created once at startup to reuse connection pools and TLS sessions.
+    pub http_client: reqwest::Client,
 }
