@@ -49,10 +49,10 @@ pub async fn list_authors(
 
     match sort_params.field() {
         Some("name") => {
-            authors.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            authors.sort_by_key(|a| a.name.to_lowercase());
         }
         Some("sort_name") => {
-            authors.sort_by(|a, b| a.sort_name.to_lowercase().cmp(&b.sort_name.to_lowercase()));
+            authors.sort_by_key(|a| a.sort_name.to_lowercase());
         }
         Some("book_count") => {
             authors.sort_by_key(|a| a.book_count);
@@ -62,7 +62,7 @@ pub async fn list_authors(
         }
         _ => {
             // Default: sort by sort_name ascending
-            authors.sort_by(|a, b| a.sort_name.to_lowercase().cmp(&b.sort_name.to_lowercase()));
+            authors.sort_by_key(|a| a.sort_name.to_lowercase());
         }
     }
 

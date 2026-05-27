@@ -87,7 +87,7 @@ pub struct SearchResponse {
 }
 
 /// Relevance ranking for in-memory fallback sorting.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RelevanceRank {
     /// Exact case-insensitive match.
     Exact,
@@ -138,7 +138,7 @@ pub async fn global_search(
     }
 
     let page = params.page.unwrap_or(1).max(1);
-    let per_page = params.per_page.unwrap_or(20).min(100).max(1);
+    let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
     let include_authors = params.search_type == "all" || params.search_type == "author";
     let include_series = params.search_type == "all" || params.search_type == "series";
     let include_books = params.search_type == "all" || params.search_type == "book";
@@ -271,7 +271,7 @@ pub async fn global_search(
                 }
             }
 
-            ranked_books.sort_by(|a, b| a.0.cmp(&b.0));
+            ranked_books.sort_by_key(|a| a.0);
             total_books_count = ranked_books.len();
             let offset = ((page - 1) * per_page) as usize;
             book_results = ranked_books
@@ -284,8 +284,8 @@ pub async fn global_search(
     }
 
     // Sort author and series results by relevance and paginate.
-    author_results.sort_by(|a, b| a.0.cmp(&b.0));
-    series_results.sort_by(|a, b| a.0.cmp(&b.0));
+    author_results.sort_by_key(|a| a.0);
+    series_results.sort_by_key(|a| a.0);
 
     // Compute total from unpaginated counts for all types.
     let total_authors_count = author_results.len();

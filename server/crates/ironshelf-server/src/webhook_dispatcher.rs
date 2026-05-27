@@ -65,6 +65,7 @@ pub async fn dispatch_to_webhook(
 /// Dispatch an event to all subscribed webhooks.
 ///
 /// Spawns a background task per webhook so the caller is never blocked.
+#[allow(dead_code)]
 pub async fn dispatch_event(
     ironshelf_db: &IronshelfDb,
     http_client: &reqwest::Client,

@@ -734,7 +734,7 @@ pub async fn list_downloads(
     Extension(_auth_user): Extension<AuthUser>,
     Query(query): Query<DownloadListQuery>,
 ) -> Result<Json<Vec<DownloadResponse>>, AppError> {
-    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
     let downloads = state
         .ironshelf_db

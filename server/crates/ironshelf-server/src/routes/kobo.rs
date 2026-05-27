@@ -96,7 +96,7 @@ struct KoboStatusInfo {
 /// A complete entitlement entry in the sync response.
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct KoboEntitlement {
+pub struct KoboEntitlement {
     book_entitlement: KoboBookEntitlement,
     status_info: KoboStatusInfo,
 }
@@ -129,7 +129,7 @@ struct KoboCurrentBookmark {
 struct KoboBookmarkLocation {
     value: Option<String>,
     #[serde(rename = "Type")]
-    location_type: Option<String>,
+    _location_type: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

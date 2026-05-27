@@ -27,9 +27,9 @@ impl ThumbnailParams {
     /// Create params with clamped dimensions and quality.
     pub fn new(width: u32, height: u32, quality: Option<u8>) -> Self {
         Self {
-            width: width.min(MAX_DIMENSION).max(1),
-            height: height.min(MAX_DIMENSION).max(1),
-            quality: quality.unwrap_or(DEFAULT_QUALITY).min(100).max(1),
+            width: width.clamp(1, MAX_DIMENSION),
+            height: height.clamp(1, MAX_DIMENSION),
+            quality: quality.unwrap_or(DEFAULT_QUALITY).clamp(1, 100),
         }
     }
 

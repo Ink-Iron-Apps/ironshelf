@@ -20,7 +20,7 @@ impl PaginationParams {
     }
 
     pub fn per_page(&self) -> u32 {
-        self.per_page.unwrap_or(50).min(200).max(1)
+        self.per_page.unwrap_or(50).clamp(1, 200)
     }
 
     /// Calculate the offset for slicing a collection.

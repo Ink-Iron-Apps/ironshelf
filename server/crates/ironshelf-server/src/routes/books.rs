@@ -93,10 +93,10 @@ pub async fn list_books(
 
     match sort_params.field() {
         Some("title") => {
-            books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            books.sort_by_key(|a| a.title.to_lowercase());
         }
         Some("sort_title") => {
-            books.sort_by(|a, b| a.sort_title.to_lowercase().cmp(&b.sort_title.to_lowercase()));
+            books.sort_by_key(|a| a.sort_title.to_lowercase());
         }
         Some("pubdate") => {
             books.sort_by_key(|book| book.pubdate);
@@ -116,7 +116,7 @@ pub async fn list_books(
         }
         _ => {
             // Default: sort by sort_title ascending
-            books.sort_by(|a, b| a.sort_title.to_lowercase().cmp(&b.sort_title.to_lowercase()));
+            books.sort_by_key(|a| a.sort_title.to_lowercase());
         }
     }
 
