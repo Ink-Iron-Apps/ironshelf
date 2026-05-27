@@ -330,6 +330,24 @@ impl FolderSource {
             .collect()
     }
 
+    /// Total number of books in the library (cheap count, no allocation).
+    pub fn book_count(&self) -> i64 {
+        self.books.len() as i64
+    }
+
+    /// Paginated books from the library by slicing the internal vec.
+    pub fn books_paginated(&self, offset: i64, limit: i64) -> Vec<Book> {
+        let start = (offset as usize).min(self.books.len());
+        let end = (start + limit as usize).min(self.books.len());
+        self.books[start..end]
+            .iter()
+            .enumerate()
+            .map(|(relative_index, scanned_book)| {
+                self.scanned_to_book(scanned_book, (start + relative_index) as i64)
+            })
+            .collect()
+    }
+
     pub fn book(&self, book_id: i64) -> Option<Book> {
         // SAFETY: Reject negative IDs — `as usize` on a negative i64 wraps to a huge value.
         let index: usize = book_id.try_into().ok()?;

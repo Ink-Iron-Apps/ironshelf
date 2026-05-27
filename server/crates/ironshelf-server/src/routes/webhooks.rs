@@ -290,7 +290,7 @@ pub async fn test_webhook(
     // Send directly to this specific webhook rather than broadcasting via
     // dispatch_event (which matches by event subscription and would never
     // find this webhook since "test" is not a subscribable event type).
-    webhook_dispatcher::dispatch_to_webhook(&state.ironshelf_db, &webhook, "test", &test_payload).await;
+    webhook_dispatcher::dispatch_to_webhook(&state.ironshelf_db, &state.http_client, &webhook, "test", &test_payload).await;
 
     Ok(Json(serde_json::json!({
         "sent": true,

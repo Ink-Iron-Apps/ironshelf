@@ -71,18 +71,33 @@ pub async fn server_stats(
     {
         let libraries = state.libraries.read().await;
         for library in libraries.iter() {
-            if let Ok(books) = library.source.all_books().await {
-                total_books += books.len() as i64;
+            // Use book_count() instead of all_books() to avoid loading every book into memory.
+            if let Ok(count) = library.source.book_count().await {
+                total_books += count;
+            }
 
-                // Collect file paths for later stat calls outside the lock.
-                for book in &books {
-                    for format in &book.formats {
-                        let file_path = library
-                            .source
-                            .format_path(&book.path, &format.file_name, &format.kind)
-                            .await;
-                        file_paths_to_stat.push(file_path);
+            // Collect file paths for storage size estimation using paginated iteration
+            // to avoid OOM on huge libraries.
+            const PAGE_SIZE: i64 = 500;
+            let mut page_offset: i64 = 0;
+            loop {
+                match library.source.books_paginated(page_offset, PAGE_SIZE).await {
+                    Ok(page_books) if !page_books.is_empty() => {
+                        for book in &page_books {
+                            for format in &book.formats {
+                                let file_path = library
+                                    .source
+                                    .format_path(&book.path, &format.file_name, &format.kind)
+                                    .await;
+                                file_paths_to_stat.push(file_path);
+                            }
+                        }
+                        if (page_books.len() as i64) < PAGE_SIZE {
+                            break;
+                        }
+                        page_offset += PAGE_SIZE;
                     }
+                    _ => break,
                 }
             }
 

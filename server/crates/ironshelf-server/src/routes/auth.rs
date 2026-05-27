@@ -179,6 +179,7 @@ pub async fn register(
 /// POST /api/v1/auth/login
 pub async fn login(
     State(state): State<AppState>,
+    request_headers: axum::http::HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let pool = state.ironshelf_db.pool();
@@ -215,12 +216,20 @@ pub async fn login(
         "session_id": session_id,
     });
 
-    // Set session cookie.
-    // TODO(security): Add `; Secure` flag when behind TLS (detect via X-Forwarded-Proto
-    // or a config flag). Currently omitted so HTTP-only dev setups work.
+    // Determine whether to set the Secure flag on the session cookie.
+    // Use the config flag, or detect TLS via X-Forwarded-Proto header from a reverse proxy.
+    let is_tls = state.config.tls_enabled
+        || request_headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .map(|proto| proto.eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
+
+    let secure_suffix = if is_tls { "; Secure" } else { "" };
+
     let cookie = format!(
-        "ironshelf_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
-        session_id
+        "ironshelf_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{}",
+        session_id, secure_suffix
     );
 
     let response = (

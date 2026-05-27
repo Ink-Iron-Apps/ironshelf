@@ -14,12 +14,14 @@ type HmacSha256 = Hmac<Sha256>;
 /// Spawns a background task so the caller is never blocked.
 pub async fn dispatch_to_webhook(
     ironshelf_db: &IronshelfDb,
+    http_client: &reqwest::Client,
     webhook: &ironshelf_core::db::StoredWebhook,
     event: &str,
     payload: &serde_json::Value,
 ) {
     let payload_string = serde_json::to_string(payload).unwrap_or_default();
     let database = ironshelf_db.clone();
+    let shared_client = http_client.clone();
     let event_name = event.to_string();
     let body = payload_string;
     let webhook_url = webhook.url.clone();
@@ -28,7 +30,7 @@ pub async fn dispatch_to_webhook(
 
     tokio::spawn(async move {
         let signature = compute_signature(&body, webhook_secret.as_deref());
-        let delivery_result = send_webhook_request(&webhook_url, &body, &signature).await;
+        let delivery_result = send_webhook_request(&shared_client, &webhook_url, &body, &signature).await;
 
         match delivery_result {
             Ok((status_code, response_body)) => {
@@ -65,6 +67,7 @@ pub async fn dispatch_to_webhook(
 /// Spawns a background task per webhook so the caller is never blocked.
 pub async fn dispatch_event(
     ironshelf_db: &IronshelfDb,
+    http_client: &reqwest::Client,
     event: &str,
     payload: &serde_json::Value,
 ) {
@@ -84,6 +87,7 @@ pub async fn dispatch_event(
 
     for webhook in webhooks {
         let database = ironshelf_db.clone();
+        let shared_client = http_client.clone();
         let event_name = event.to_string();
         let body = payload_string.clone();
         let webhook_url = webhook.url.clone();
@@ -92,7 +96,7 @@ pub async fn dispatch_event(
 
         tokio::spawn(async move {
             let signature = compute_signature(&body, webhook_secret.as_deref());
-            let delivery_result = send_webhook_request(&webhook_url, &body, &signature).await;
+            let delivery_result = send_webhook_request(&shared_client, &webhook_url, &body, &signature).await;
 
             match delivery_result {
                 Ok((status_code, response_body)) => {
@@ -112,7 +116,7 @@ pub async fn dispatch_event(
                         // Retry once after 5 seconds
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         let retry_result =
-                            send_webhook_request(&webhook_url, &body, &signature).await;
+                            send_webhook_request(&shared_client, &webhook_url, &body, &signature).await;
                         match retry_result {
                             Ok((retry_status, retry_body)) => {
                                 let retry_success = (200..300).contains(&retry_status);
@@ -157,7 +161,7 @@ pub async fn dispatch_event(
                     // Retry once after 5 seconds
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     let retry_result =
-                        send_webhook_request(&webhook_url, &body, &signature).await;
+                        send_webhook_request(&shared_client, &webhook_url, &body, &signature).await;
                     match retry_result {
                         Ok((retry_status, retry_body)) => {
                             let retry_success = (200..300).contains(&retry_status);
@@ -193,12 +197,11 @@ pub async fn dispatch_event(
 
 /// Send the HTTP POST to the webhook URL with signature header.
 async fn send_webhook_request(
+    client: &reqwest::Client,
     url: &str,
     body: &str,
     signature: &str,
 ) -> Result<(i32, String), String> {
-    let client = reqwest::Client::new();
-
     let response = client
         .post(url)
         .header("Content-Type", "application/json")

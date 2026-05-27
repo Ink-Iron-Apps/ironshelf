@@ -72,9 +72,9 @@ pub async fn search_metadata(
 
     let author_ref = author.as_deref();
 
-    // Query both providers concurrently.
-    let google_provider = GoogleBooksProvider::new();
-    let open_library_provider = OpenLibraryProvider::new();
+    // Query both providers concurrently using the shared HTTP client.
+    let google_provider = GoogleBooksProvider::with_client(&state.http_client);
+    let open_library_provider = OpenLibraryProvider::with_client(&state.http_client);
 
     let (google_result, open_library_result) = tokio::join!(
         google_provider.search(&title, author_ref),
@@ -293,8 +293,8 @@ pub async fn bulk_metadata_scan(
     let mut books_enriched: i64 = 0;
     let mut errors: Vec<BulkScanBookError> = Vec::new();
 
-    let google_provider = GoogleBooksProvider::new();
-    let open_library_provider = OpenLibraryProvider::new();
+    let google_provider = GoogleBooksProvider::with_client(&state.http_client);
+    let open_library_provider = OpenLibraryProvider::with_client(&state.http_client);
 
     for book in &books_needing_enrichment {
         let primary_author = book.author_ids.first()

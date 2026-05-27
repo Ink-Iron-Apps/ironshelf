@@ -123,7 +123,7 @@ pub async fn oidc_login(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     let oidc_config = get_oidc_config(&state)?;
-    let discovery = fetch_discovery(&oidc_config.issuer_url).await?;
+    let discovery = fetch_discovery(&state.http_client, &oidc_config.issuer_url).await?;
 
     // Generate PKCE challenge (S256)
     let pkce_verifier = generate_random_string(64);
@@ -171,10 +171,11 @@ pub async fn oidc_callback(
         .ok_or_else(|| AppError::BadRequest("Invalid or expired OAuth state".to_string()))?;
 
     // Fetch discovery for token endpoint
-    let discovery = fetch_discovery(&oidc_config.issuer_url).await?;
+    let discovery = fetch_discovery(&state.http_client, &oidc_config.issuer_url).await?;
 
     // Exchange authorization code for tokens
     let token_response = exchange_code(
+        &state.http_client,
         &discovery.token_endpoint,
         &params.code,
         &oidc_config.client_id,
@@ -244,13 +245,15 @@ fn get_oidc_config(state: &AppState) -> Result<&OidcConfig, AppError> {
         .ok_or_else(|| AppError::BadRequest("OIDC is not configured on this server".to_string()))
 }
 
-async fn fetch_discovery(issuer_url: &str) -> Result<OidcDiscovery, AppError> {
+async fn fetch_discovery(http_client: &reqwest::Client, issuer_url: &str) -> Result<OidcDiscovery, AppError> {
     let discovery_url = format!(
         "{}/.well-known/openid-configuration",
         issuer_url.trim_end_matches('/')
     );
 
-    let response = reqwest::get(&discovery_url)
+    let response = http_client
+        .get(&discovery_url)
+        .send()
         .await
         .map_err(|error| AppError::Internal(format!("Failed to fetch OIDC discovery: {error}")))?;
 
@@ -268,6 +271,7 @@ async fn fetch_discovery(issuer_url: &str) -> Result<OidcDiscovery, AppError> {
 }
 
 async fn exchange_code(
+    http_client: &reqwest::Client,
     token_endpoint: &str,
     code: &str,
     client_id: &str,
@@ -275,7 +279,6 @@ async fn exchange_code(
     redirect_uri: &str,
     pkce_verifier: &str,
 ) -> Result<TokenResponse, AppError> {
-    let client = reqwest::Client::new();
 
     let mut form_params = vec![
         ("grant_type", "authorization_code"),
@@ -292,7 +295,7 @@ async fn exchange_code(
         form_params.push(("client_secret", &secret_string));
     }
 
-    let response = client
+    let response = http_client
         .post(token_endpoint)
         .form(&form_params)
         .send()

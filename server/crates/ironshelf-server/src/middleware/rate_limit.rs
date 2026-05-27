@@ -79,6 +79,9 @@ pub struct RateLimiter {
     buckets: Arc<Mutex<HashMap<IpAddr, TokenBucket>>>,
     maximum_tokens: u32,
     refill_per_second: f64,
+    /// Whether to trust X-Forwarded-For / X-Real-Ip headers for client IP extraction.
+    /// When false, always uses the peer socket address to prevent spoofing.
+    trust_proxy_headers: bool,
 }
 
 impl RateLimiter {
@@ -88,7 +91,14 @@ impl RateLimiter {
             buckets: Arc::new(Mutex::new(HashMap::new())),
             maximum_tokens,
             refill_per_second,
+            trust_proxy_headers: false,
         }
+    }
+
+    /// Set whether this limiter trusts proxy headers for IP extraction.
+    pub fn with_trust_proxy_headers(mut self, trust_proxy_headers: bool) -> Self {
+        self.trust_proxy_headers = trust_proxy_headers;
+        self
     }
 
     /// API-tier limiter: 100 requests/minute (~1.67/s).
@@ -144,30 +154,30 @@ impl RateLimiter {
 
 /// Extract the client IP from the request.
 ///
-/// Checks `X-Forwarded-For` first (first IP in the chain), then `X-Real-Ip`,
-/// then falls back to the peer socket address.
+/// When `trust_proxy_headers` is true, checks `X-Forwarded-For` first (first IP
+/// in the chain), then `X-Real-Ip`, then falls back to the peer socket address.
 ///
-/// TODO(security): X-Forwarded-For is trivially spoofable by direct clients.
-/// When not behind a trusted reverse proxy, an attacker can bypass rate limiting
-/// by rotating the header value. Consider adding a config flag to disable header
-/// trust when the server is directly exposed, or use the rightmost non-private IP.
-fn extract_client_address<B>(request: &Request<B>) -> IpAddr {
-    // X-Forwarded-For: client, proxy1, proxy2 — take first.
-    if let Some(forwarded_for) = request.headers().get("x-forwarded-for") {
-        if let Ok(header_value) = forwarded_for.to_str() {
-            if let Some(first_address) = header_value.split(',').next() {
-                if let Ok(parsed_address) = first_address.trim().parse::<IpAddr>() {
-                    return parsed_address;
+/// When `trust_proxy_headers` is false, always uses the peer socket address to
+/// prevent attackers from spoofing their IP via headers to bypass rate limiting.
+fn extract_client_address<B>(request: &Request<B>, trust_proxy_headers: bool) -> IpAddr {
+    if trust_proxy_headers {
+        // X-Forwarded-For: client, proxy1, proxy2 — take first.
+        if let Some(forwarded_for) = request.headers().get("x-forwarded-for") {
+            if let Ok(header_value) = forwarded_for.to_str() {
+                if let Some(first_address) = header_value.split(',').next() {
+                    if let Ok(parsed_address) = first_address.trim().parse::<IpAddr>() {
+                        return parsed_address;
+                    }
                 }
             }
         }
-    }
 
-    // X-Real-Ip (common with nginx).
-    if let Some(real_ip) = request.headers().get("x-real-ip") {
-        if let Ok(header_value) = real_ip.to_str() {
-            if let Ok(parsed_address) = header_value.trim().parse::<IpAddr>() {
-                return parsed_address;
+        // X-Real-Ip (common with nginx).
+        if let Some(real_ip) = request.headers().get("x-real-ip") {
+            if let Ok(header_value) = real_ip.to_str() {
+                if let Ok(parsed_address) = header_value.trim().parse::<IpAddr>() {
+                    return parsed_address;
+                }
             }
         }
     }
@@ -205,7 +215,7 @@ pub async fn rate_limit_api(
     request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
-    let client_address = extract_client_address(&request);
+    let client_address = extract_client_address(&request, limiter.trust_proxy_headers);
 
     match limiter.check(client_address).await {
         Ok(()) => next.run(request).await,
@@ -225,7 +235,7 @@ pub async fn rate_limit_auth(
     request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
-    let client_address = extract_client_address(&request);
+    let client_address = extract_client_address(&request, limiter.trust_proxy_headers);
 
     match limiter.check(client_address).await {
         Ok(()) => next.run(request).await,

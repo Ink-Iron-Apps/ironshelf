@@ -260,6 +260,38 @@ impl CalibreSource {
         self.hydrate_books(rows).await
     }
 
+    /// Total number of books in the library (cheap count query, no hydration).
+    pub async fn book_count(&self) -> Result<i64, CalibreError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
+    /// Paginated books from the library using SQL-level LIMIT/OFFSET.
+    /// Returns hydrated books for the requested page.
+    pub async fn books_paginated(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Book>, CalibreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT b.id, b.title, b.sort, b.series_index, b.pubdate, b.timestamp,
+                   b.path, b.has_cover
+            FROM books b
+            ORDER BY b.sort
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        self.hydrate_books(rows).await
+    }
+
     /// Discover custom columns defined in this library.
     pub async fn custom_columns(&self) -> Result<Vec<CustomColumn>, CalibreError> {
         let rows = sqlx::query(

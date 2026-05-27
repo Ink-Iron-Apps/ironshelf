@@ -14,9 +14,14 @@ pub struct OpenLibraryProvider {
 }
 
 impl OpenLibraryProvider {
-    // TODO(security): This expect() will panic if TLS backend init fails at runtime.
-    // Consider making this fallible (return Result) and constructing once at startup
-    // rather than per-request in route handlers.
+    /// Create a provider using a shared HTTP client (preferred — reuses connection pool).
+    pub fn with_client(http_client: &Client) -> Self {
+        Self {
+            http_client: http_client.clone(),
+        }
+    }
+
+    /// Create a provider with its own HTTP client (fallback for standalone use).
     pub fn new() -> Self {
         Self {
             http_client: Client::builder()
