@@ -2,7 +2,7 @@
 
 use crate::db::{StoredIndexer, StoredWantedItem};
 use super::indexers::search_indexer;
-use super::{AcquisitionError, SearchResult};
+use super::SearchResult;
 
 /// Search all enabled indexers for the given query and optional author.
 /// Results are merged, deduplicated by download URL, and sorted by seeders descending.
@@ -117,11 +117,9 @@ pub fn match_wanted_item(wanted_item: &StoredWantedItem, result: &SearchResult) 
                     score -= 0.2; // Wrong format.
                 }
             }
-            "high_quality" => {
+            "high_quality" if result.seeders.unwrap_or(0) > 5 => {
                 // Prefer results with more seeders and reasonable size.
-                if result.seeders.unwrap_or(0) > 5 {
-                    score += 0.05;
-                }
+                score += 0.05;
             }
             _ => {} // "any" — no adjustment.
         }
@@ -159,10 +157,10 @@ pub async fn auto_search_wanted(
 
         for result in &results {
             let confidence = match_wanted_item(wanted_item, result);
-            if confidence >= confidence_threshold {
-                if best_result.is_none() || confidence > best_result.unwrap().0 {
-                    best_result = Some((confidence, result));
-                }
+            if confidence >= confidence_threshold
+                && (best_result.is_none() || confidence > best_result.unwrap().0)
+            {
+                best_result = Some((confidence, result));
             }
         }
 

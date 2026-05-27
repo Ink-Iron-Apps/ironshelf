@@ -7,7 +7,6 @@
 use reqwest::Client;
 use rusqlite::Connection;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Test fixture with a running server and HTTP client.
