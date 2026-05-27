@@ -32,6 +32,12 @@ impl OpenLibraryProvider {
     }
 }
 
+impl Default for OpenLibraryProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetadataProvider for OpenLibraryProvider {
     fn name(&self) -> &str {
         "open_library"

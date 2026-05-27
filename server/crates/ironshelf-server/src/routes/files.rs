@@ -184,12 +184,12 @@ pub async fn get_file(
                         .map_err(|_| AppError::not_found("book file"))?;
                     file.seek(SeekFrom::Start(range_start))
                         .await
-                        .map_err(|error| AppError::internal(error))?;
+                        .map_err(AppError::internal)?;
 
                     let mut buffer = vec![0u8; content_length as usize];
                     file.read_exact(&mut buffer)
                         .await
-                        .map_err(|error| AppError::internal(error))?;
+                        .map_err(AppError::internal)?;
 
                     let content_range = format!(
                         "bytes {}-{}/{}",

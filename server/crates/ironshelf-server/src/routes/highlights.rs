@@ -77,7 +77,7 @@ pub async fn list_book_highlights(
         .ironshelf_db
         .get_book_highlights(&auth_user.user_id, &book_id)
         .await
-        .map_err(|error| AppError::internal(error))?;
+        .map_err(AppError::internal)?;
 
     let response: Vec<HighlightResponse> = highlights
         .into_iter()
@@ -122,17 +122,17 @@ pub async fn create_highlight(
 
     let highlight_id = state
         .ironshelf_db
-        .create_highlight(
-            &auth_user.user_id,
-            &book_id,
-            &request.format,
-            &request.cfi_range,
-            request.text_content.as_deref(),
-            &request.color,
-            request.note.as_deref(),
-        )
+        .create_highlight(&ironshelf_core::db::CreateHighlightParams {
+            user_id: &auth_user.user_id,
+            book_id: &book_id,
+            format: &request.format,
+            cfi_range: &request.cfi_range,
+            text_content: request.text_content.as_deref(),
+            color: &request.color,
+            note: request.note.as_deref(),
+        })
         .await
-        .map_err(|error| AppError::internal(error))?;
+        .map_err(AppError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -220,7 +220,7 @@ pub async fn list_all_highlights(
             query.color.as_deref(),
         )
         .await
-        .map_err(|error| AppError::internal(error))?;
+        .map_err(AppError::internal)?;
 
     let response: Vec<HighlightResponse> = highlights
         .into_iter()

@@ -5,7 +5,7 @@ use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,11 +30,17 @@ struct OidcPendingAuth {
 
 const STATE_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
-impl OidcStateStore {
-    pub fn new() -> Self {
+impl Default for OidcStateStore {
+    fn default() -> Self {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+}
+
+impl OidcStateStore {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Maximum number of pending OIDC flows stored in memory at once.
@@ -82,8 +88,8 @@ impl OidcStateStore {
 struct OidcDiscovery {
     authorization_endpoint: String,
     token_endpoint: String,
-    #[serde(default)]
-    userinfo_endpoint: Option<String>,
+    #[serde(default, rename = "userinfo_endpoint")]
+    _userinfo_endpoint: Option<String>,
 }
 
 /// Token response from the provider.
@@ -91,8 +97,8 @@ struct OidcDiscovery {
 struct TokenResponse {
     access_token: String,
     id_token: Option<String>,
-    #[serde(default)]
-    token_type: String,
+    #[serde(default, rename = "token_type")]
+    _token_type: String,
 }
 
 /// Claims extracted from the ID token JWT payload.
@@ -111,11 +117,6 @@ struct IdTokenClaims {
 pub struct OidcCallbackParams {
     code: String,
     state: String,
-}
-
-#[derive(Serialize)]
-struct OidcLoginResponse {
-    redirect_url: String,
 }
 
 /// GET /api/v1/auth/oidc/login — returns redirect URL to identity provider.

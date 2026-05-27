@@ -32,6 +32,12 @@ impl GoogleBooksProvider {
     }
 }
 
+impl Default for GoogleBooksProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetadataProvider for GoogleBooksProvider {
     fn name(&self) -> &str {
         "google_books"
