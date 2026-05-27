@@ -16,7 +16,10 @@ pub fn start(application_state: AppState) {
 
     tokio::spawn(library_rescan_task(application_state.clone()));
     tokio::spawn(session_cleanup_task(application_state.clone()));
-    tokio::spawn(metadata_auto_enrich_task(application_state));
+    tokio::spawn(metadata_auto_enrich_task(application_state.clone()));
+    tokio::spawn(acquisition_wanted_search_task(application_state.clone()));
+    tokio::spawn(acquisition_download_monitor_task(application_state.clone()));
+    tokio::spawn(acquisition_stale_cleanup_task(application_state));
 }
 
 /// Every 30 minutes: rescan FolderSource libraries for new files.
@@ -340,5 +343,360 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
             "scheduler: metadata auto-enrich identified {} book(s) needing metadata",
             candidates.len()
         );
+    }
+}
+
+// =========================================================================
+// Acquisition engine scheduled tasks
+// =========================================================================
+
+/// Every 60 minutes: search indexers for unfulfilled wanted items.
+/// Auto-grabs results with confidence > 0.9.
+async fn acquisition_wanted_search_task(application_state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
+    // Skip the immediate first tick.
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+        tracing::info!("scheduler: running acquisition wanted item search");
+
+        let wanted_items = match application_state
+            .ironshelf_db
+            .list_all_active_wanted_items()
+            .await
+        {
+            Ok(items) => items,
+            Err(database_error) => {
+                tracing::error!(
+                    "scheduler: failed to list wanted items: {database_error}"
+                );
+                continue;
+            }
+        };
+
+        if wanted_items.is_empty() {
+            tracing::info!("scheduler: no active wanted items to search");
+            continue;
+        }
+
+        let indexers = match application_state
+            .ironshelf_db
+            .list_enabled_indexers()
+            .await
+        {
+            Ok(indexer_list) => indexer_list,
+            Err(database_error) => {
+                tracing::error!(
+                    "scheduler: failed to list indexers: {database_error}"
+                );
+                continue;
+            }
+        };
+
+        if indexers.is_empty() {
+            tracing::info!("scheduler: no enabled indexers for wanted item search");
+            continue;
+        }
+
+        let high_confidence_matches =
+            ironshelf_core::acquisition::search::auto_search_wanted(
+                &application_state.http_client,
+                &indexers,
+                &wanted_items,
+                0.9,
+            )
+            .await;
+
+        tracing::info!(
+            "scheduler: found {} high-confidence match(es) for wanted items",
+            high_confidence_matches.len()
+        );
+
+        for (wanted_item, search_result) in &high_confidence_matches {
+            // Find a download client.
+            let download_client = match application_state
+                .ironshelf_db
+                .get_default_download_client()
+                .await
+            {
+                Ok(Some(client)) => client,
+                _ => {
+                    tracing::warn!(
+                        "scheduler: no download client available, skipping auto-grab for '{}'",
+                        wanted_item.title
+                    );
+                    continue;
+                }
+            };
+
+            // Create download record.
+            let download_id = match application_state
+                .ironshelf_db
+                .create_download(&ironshelf_core::db::CreateDownloadParams {
+                    wanted_item_id: Some(&wanted_item.id),
+                    indexer_id: None,
+                    download_client_id: Some(&download_client.id),
+                    title: &search_result.title,
+                    download_url: &search_result.download_url,
+                    magnet_url: search_result.magnet_url.as_deref(),
+                    torrent_hash: search_result.info_hash.as_deref(),
+                    size_bytes: search_result.size_bytes,
+                    target_library_id: None,
+                })
+                .await
+            {
+                Ok(id) => id,
+                Err(database_error) => {
+                    tracing::error!(
+                        "scheduler: failed to create download for '{}': {database_error}",
+                        search_result.title
+                    );
+                    continue;
+                }
+            };
+
+            // Send to download client.
+            match ironshelf_core::acquisition::download_clients::add_download(
+                &application_state.http_client,
+                &download_client,
+                &search_result.download_url,
+                search_result.magnet_url.as_deref(),
+            )
+            .await
+            {
+                Ok(_external_identifier) => {
+                    let _ = application_state
+                        .ironshelf_db
+                        .update_download_status(&download_id, "downloading", 0.0, None)
+                        .await;
+
+                    tracing::info!(
+                        "scheduler: auto-grabbed '{}' for wanted item '{}'",
+                        search_result.title,
+                        wanted_item.title
+                    );
+                }
+                Err(client_error) => {
+                    let _ = application_state
+                        .ironshelf_db
+                        .update_download_status(
+                            &download_id,
+                            "failed",
+                            0.0,
+                            Some(&client_error.to_string()),
+                        )
+                        .await;
+
+                    tracing::error!(
+                        "scheduler: auto-grab failed for '{}': {client_error}",
+                        search_result.title
+                    );
+                }
+            }
+
+            // Update last_searched_at on the wanted item.
+            let _ = application_state
+                .ironshelf_db
+                .touch_wanted_item_searched(&wanted_item.id)
+                .await;
+        }
+
+        // Update last_searched_at on all indexers that were queried.
+        for indexer in &indexers {
+            let _ = application_state
+                .ironshelf_db
+                .touch_indexer_searched(&indexer.id)
+                .await;
+        }
+    }
+}
+
+/// Every 30 seconds: check download client status for active downloads,
+/// update progress in DB, trigger import on completion.
+async fn acquisition_download_monitor_task(application_state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    // Skip the immediate first tick.
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+
+        let active_downloads = match application_state
+            .ironshelf_db
+            .list_active_downloads()
+            .await
+        {
+            Ok(downloads) => downloads,
+            Err(database_error) => {
+                tracing::error!(
+                    "scheduler: failed to list active downloads: {database_error}"
+                );
+                continue;
+            }
+        };
+
+        if active_downloads.is_empty() {
+            continue;
+        }
+
+        for download in &active_downloads {
+            // Skip downloads without a client or hash.
+            let client_id = match &download.download_client_id {
+                Some(id) => id.clone(),
+                None => continue,
+            };
+
+            let torrent_hash = match &download.torrent_hash {
+                Some(hash) => hash.clone(),
+                None => {
+                    // For direct downloads, the torrent_hash is the file path.
+                    // Direct downloads complete immediately, so check if file exists.
+                    if let Some(ref file_path) = download.file_path {
+                        if std::path::Path::new(file_path).exists() {
+                            let _ = application_state
+                                .ironshelf_db
+                                .update_download_status(
+                                    &download.id,
+                                    "completed",
+                                    100.0,
+                                    None,
+                                )
+                                .await;
+                        }
+                    }
+                    continue;
+                }
+            };
+
+            let client_config = match application_state
+                .ironshelf_db
+                .get_download_client(&client_id)
+                .await
+            {
+                Ok(Some(config)) => config,
+                _ => continue,
+            };
+
+            // Check status from the download client.
+            match ironshelf_core::acquisition::download_clients::check_download_status(
+                &application_state.http_client,
+                &client_config,
+                &torrent_hash,
+            )
+            .await
+            {
+                Ok(status) => {
+                    let new_status = match status.state {
+                        ironshelf_core::acquisition::DownloadState::Downloading => "downloading",
+                        ironshelf_core::acquisition::DownloadState::Seeding
+                        | ironshelf_core::acquisition::DownloadState::Completed => "completed",
+                        ironshelf_core::acquisition::DownloadState::Paused => "downloading", // Still in progress.
+                        ironshelf_core::acquisition::DownloadState::Failed => "failed",
+                        ironshelf_core::acquisition::DownloadState::Unknown => "downloading",
+                    };
+
+                    let _ = application_state
+                        .ironshelf_db
+                        .update_download_status(
+                            &download.id,
+                            new_status,
+                            status.progress_percent,
+                            None,
+                        )
+                        .await;
+
+                    // If completed, try to get the file path.
+                    if new_status == "completed" {
+                        if let Ok(Some(file_path)) =
+                            ironshelf_core::acquisition::download_clients::get_download_file_path(
+                                &application_state.http_client,
+                                &client_config,
+                                &torrent_hash,
+                            )
+                            .await
+                        {
+                            let _ = application_state
+                                .ironshelf_db
+                                .update_download_file_path(&download.id, &file_path)
+                                .await;
+                        }
+
+                        // If there is a wanted_item_id, mark it as fulfilled.
+                        if let Some(ref wanted_item_id) = download.wanted_item_id {
+                            let _ = application_state
+                                .ironshelf_db
+                                .mark_wanted_item_fulfilled(wanted_item_id)
+                                .await;
+                        }
+
+                        // Notify users about the completed download.
+                        if let Ok(user_ids) =
+                            application_state.ironshelf_db.get_all_user_ids().await
+                        {
+                            for user_id in &user_ids {
+                                let _ = application_state
+                                    .ironshelf_db
+                                    .create_notification(
+                                        user_id,
+                                        "Download completed",
+                                        &format!(
+                                            "'{}' has finished downloading and is ready for import.",
+                                            download.title
+                                        ),
+                                        "download_completed",
+                                        None,
+                                    )
+                                    .await;
+                            }
+                        }
+
+                        tracing::info!(
+                            "scheduler: download completed: '{}'",
+                            download.title
+                        );
+                    }
+                }
+                Err(status_error) => {
+                    tracing::error!(
+                        "scheduler: failed to check download status for '{}': {status_error}",
+                        download.title
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Every 6 hours: mark downloads stuck in 'downloading' for >24 hours as failed.
+async fn acquisition_stale_cleanup_task(application_state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(6 * 60 * 60));
+    // Skip the immediate first tick.
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+        tracing::info!("scheduler: running stale download cleanup");
+
+        match application_state
+            .ironshelf_db
+            .mark_stale_downloads_failed(24)
+            .await
+        {
+            Ok(marked_count) => {
+                if marked_count > 0 {
+                    tracing::info!(
+                        "scheduler: marked {marked_count} stale download(s) as failed"
+                    );
+                } else {
+                    tracing::info!("scheduler: no stale downloads to clean up");
+                }
+            }
+            Err(database_error) => {
+                tracing::error!(
+                    "scheduler: stale download cleanup failed: {database_error}"
+                );
+            }
+        }
     }
 }

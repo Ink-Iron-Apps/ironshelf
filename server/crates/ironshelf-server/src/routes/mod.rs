@@ -1,5 +1,6 @@
 //! API route handlers.
 
+pub mod acquisition;
 pub mod auth;
 pub mod authors;
 pub mod books;
