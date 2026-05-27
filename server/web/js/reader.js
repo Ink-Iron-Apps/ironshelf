@@ -466,9 +466,12 @@ const IronshelfReader = (() => {
 
   // --- Core: Close ---
   function close() {
+    // Capture bookId before clearing state
+    const bookId = currentBookId;
+
     // Save final progress immediately
-    if (currentBookId && currentLocationData?.start?.cfi) {
-      saveProgress(currentBookId, currentLocationData.start.cfi, currentLocationData.start.percentage || 0);
+    if (bookId && currentLocationData?.start?.cfi) {
+      saveProgress(bookId, currentLocationData.start.cfi, currentLocationData.start.percentage || 0);
     }
 
     if (saveProgressTimer) clearTimeout(saveProgressTimer);
@@ -503,8 +506,8 @@ const IronshelfReader = (() => {
     document.body.style.overflow = '';
 
     // Navigate back to book detail
-    if (currentBookId) {
-      window.location.hash = `#/book/${currentBookId}`;
+    if (bookId) {
+      window.location.hash = `#/book/${bookId}`;
     }
   }
 
@@ -512,11 +515,9 @@ const IronshelfReader = (() => {
   function bindEvents() {
     if (!containerElement) return;
 
-    // Close button
+    // Close button (close() already navigates back to book detail)
     document.getElementById('reader-close-btn')?.addEventListener('click', () => {
-      const bookId = currentBookId;
       close();
-      window.location.hash = `#/book/${bookId}`;
     });
 
     // TOC toggle
@@ -608,9 +609,7 @@ const IronshelfReader = (() => {
           if (tocVisible) { closeToc(); }
           else if (settingsVisible) { closeSettings(); }
           else {
-            const bookId = currentBookId;
             close();
-            window.location.hash = `#/book/${bookId}`;
           }
           break;
         case 'f':

@@ -15,6 +15,16 @@
   let notificationPanelOpen = false;
   let activeScanLibraryId = null;
   let scanPollTimer = null;
+  let conversionPollTimer = null;
+
+  // --- Navigation Generation Counter (race condition guard) ---
+  // Incremented on every route change. Async render functions capture it
+  // before awaiting and bail out if it changed (user navigated elsewhere).
+  let navigationGeneration = 0;
+
+  function isStaleNavigation(capturedGeneration) {
+    return capturedGeneration !== navigationGeneration;
+  }
 
   // --- SVG Icons ---
   const Icons = {
@@ -79,6 +89,62 @@
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  /**
+   * Sanitize HTML description content from the API.
+   * Allows a safe subset of tags (p, br, em, strong, i, b, ul, ol, li, a, span)
+   * and strips everything else to prevent XSS from untrusted metadata.
+   */
+  function sanitizeDescription(html) {
+    if (!html) return '';
+    const allowedTags = new Set([
+      'p', 'br', 'em', 'strong', 'i', 'b', 'u', 'ul', 'ol', 'li',
+      'a', 'span', 'div', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    ]);
+    const allowedAttributes = { a: ['href', 'title'], span: ['class'], div: ['class'] };
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    function cleanNode(node) {
+      if (node.nodeType === Node.TEXT_NODE) return;
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tagName = node.tagName.toLowerCase();
+        if (!allowedTags.has(tagName)) {
+          // Replace with text content
+          const textNode = doc.createTextNode(node.textContent);
+          node.parentNode.replaceChild(textNode, node);
+          return;
+        }
+        // Strip disallowed attributes
+        const allowed = allowedAttributes[tagName] || [];
+        const attributeNames = [...node.getAttributeNames()];
+        for (const attributeName of attributeNames) {
+          if (!allowed.includes(attributeName)) {
+            node.removeAttribute(attributeName);
+          }
+        }
+        // Sanitize href to prevent javascript: URLs
+        if (tagName === 'a' && node.hasAttribute('href')) {
+          const href = node.getAttribute('href');
+          if (href && !href.match(/^https?:\/\//i) && !href.startsWith('/') && !href.startsWith('#')) {
+            node.removeAttribute('href');
+          }
+          // Force external links to open in new tab
+          node.setAttribute('target', '_blank');
+          node.setAttribute('rel', 'noopener noreferrer');
+        }
+        // Recurse into children (iterate in reverse since we may modify the list)
+        const children = [...node.childNodes];
+        for (const child of children) {
+          cleanNode(child);
+        }
+      }
+    }
+
+    cleanNode(doc.body);
+    return doc.body.innerHTML;
   }
 
   function debounce(fn, delay) {
@@ -538,11 +604,13 @@
     });
 
     // Focus trap and keyboard handling
-    const focusableElements = overlay.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])');
-    const firstFocusable = focusableElements[0];
-    const lastFocusable = focusableElements[focusableElements.length - 1];
+    // Query focusable elements dynamically since modal content may change
+    function getFocusableElements() {
+      return overlay.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])');
+    }
 
-    if (firstFocusable) firstFocusable.focus();
+    const initialFocusable = getFocusableElements();
+    if (initialFocusable[0]) initialFocusable[0].focus();
 
     overlay.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -550,6 +618,10 @@
         return;
       }
       if (e.key === 'Tab') {
+        const focusableElements = getFocusableElements();
+        const firstFocusable = focusableElements[0];
+        const lastFocusable = focusableElements[focusableElements.length - 1];
+        if (!firstFocusable) return;
         if (e.shiftKey && document.activeElement === firstFocusable) {
           e.preventDefault();
           lastFocusable.focus();
@@ -613,7 +685,15 @@
     const path = getHashPath();
     const parsed = parseRoute(path);
 
+    navigationGeneration++;
     closeSidebar();
+    closeNotificationPanel();
+
+    // Clear any active conversion poll from previous page
+    if (conversionPollTimer) {
+      clearInterval(conversionPollTimer);
+      conversionPollTimer = null;
+    }
 
     const handlers = {
       home: renderHome,
@@ -794,7 +874,7 @@
           <div class="toolbar-right">
             <div class="sort-controls">
               <select id="toolbar-sort" aria-label="Sort by">${sortOptionsHtml}</select>
-              <button class="sort-direction-btn" id="toolbar-sort-dir" aria-label="Toggle sort direction" title="${currentDirection === 'asc' ? 'Ascending' : 'Descending'}">
+              <button type="button" class="sort-direction-btn" id="toolbar-sort-dir" aria-label="Toggle sort direction" title="${currentDirection === 'asc' ? 'Ascending' : 'Descending'}">
                 ${currentDirection === 'asc' ? Icons.sortAsc : Icons.sortDesc}
               </button>
             </div>
@@ -1263,6 +1343,17 @@
         library_type: document.getElementById('lib-type').value,
       };
 
+      if (!payload.name) {
+        toast('Library name is required', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+      if (!payload.path) {
+        toast('Library path is required', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+
       try {
         if (isEdit) {
           await apiPatch(`/libraries/${editData.id}`, payload);
@@ -1289,6 +1380,7 @@
 
   async function renderLibrary(libraryId) {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
 
     breadcrumbTrail = [
       { label: 'Libraries', path: '/libraries' },
@@ -1313,6 +1405,8 @@
         apiGet(`/libraries/${libraryId}`),
         apiGet(`/libraries/${libraryId}/authors?${params}`),
       ]);
+
+      if (isStaleNavigation(thisGeneration)) return;
 
       setTitle([library.name]);
       breadcrumbTrail[1].label = library.name;
@@ -1449,6 +1543,7 @@
 
   async function renderAuthor(authorId) {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
 
     breadcrumbTrail = [
       { label: 'Libraries', path: '/libraries' },
@@ -1467,6 +1562,8 @@
         apiGet(`/authors/${authorId}/series`),
         apiGet(`/authors/${authorId}/standalone`),
       ]);
+
+      if (isStaleNavigation(thisGeneration)) return;
 
       setTitle([author.name]);
       breadcrumbTrail = [
@@ -1553,6 +1650,7 @@
 
   async function renderSeries(seriesId) {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
 
     breadcrumbTrail = [
       { label: 'Libraries', path: '/libraries' },
@@ -1566,6 +1664,9 @@
 
     try {
       const data = await apiGet(`/series/${seriesId}`);
+
+      if (isStaleNavigation(thisGeneration)) return;
+
       const books = data.books || [];
 
       setTitle([data.name]);
@@ -1615,6 +1716,7 @@
 
   async function renderBook(bookId) {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
 
     breadcrumbTrail = [
       { label: 'Libraries', path: '/libraries' },
@@ -1635,6 +1737,8 @@
 
     try {
       const book = await apiGet(`/books/${bookId}`);
+
+      if (isStaleNavigation(thisGeneration)) return;
 
       setTitle([book.title]);
       breadcrumbTrail = [
@@ -1740,7 +1844,7 @@
 
             ${book.description ? `
               <div class="book-detail-description">
-                ${book.description}
+                ${sanitizeDescription(book.description)}
               </div>
             ` : ''}
           </div>
@@ -2219,6 +2323,7 @@
 
   async function renderHome() {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
     setTitle(['Home']);
     breadcrumbTrail = [{ label: 'Home', path: '/' }];
 
@@ -2236,6 +2341,8 @@
         apiGet('/collections').catch(() => []),
         apiGet('/libraries').catch(() => []),
       ]);
+
+      if (isStaleNavigation(thisGeneration)) return;
 
       const continueBooks = Array.isArray(continueReading) ? continueReading : (continueReading?.items || []);
       const collectionsList = Array.isArray(collections) ? collections : (collections?.items || []);
@@ -2361,7 +2468,7 @@
           <input type="search" id="global-search-input" placeholder="Search books, authors, series..." autocomplete="off" autofocus>
           <span class="search-shortcut-hint">Esc</span>
         </div>
-        <div class="search-overlay-results" id="global-search-results"></div>
+        <div class="search-overlay-results" id="global-search-results" role="listbox" aria-label="Search results"></div>
       </div>
     `;
 
@@ -2439,6 +2546,9 @@
 
       try {
         const searchResults = await apiGet(`/search?q=${encodeURIComponent(query)}`);
+
+        // Guard: if search overlay was closed while request was in flight, bail out
+        if (!globalSearchOpen || !document.getElementById('global-search-overlay')) return;
 
         const authors = searchResults?.authors || [];
         const series = searchResults?.series || [];
@@ -2635,6 +2745,11 @@
           description: document.getElementById('collection-description').value.trim() || null,
           is_public: document.getElementById('collection-public').checked,
         };
+        if (!payload.name) {
+          toast('Collection name is required', 'error');
+          submitBtn.disabled = false;
+          return;
+        }
         await apiPost('/collections', payload);
         toast('Collection created!', 'success');
         close();
@@ -3557,6 +3672,12 @@
         is_spoiler: document.getElementById('review-spoiler-checkbox').checked,
       };
 
+      if (!payload.body && !payload.rating) {
+        toast('Please add a rating or write a review', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+
       try {
         if (isEditing) {
           await apiPatch(`/reviews/${existingReview.id}`, payload);
@@ -4253,6 +4374,7 @@
 
   async function renderGenreDetail(genreName) {
     if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
     const decodedGenreName = decodeURIComponent(genreName);
     setTitle([decodedGenreName]);
     breadcrumbTrail = [
@@ -4274,6 +4396,9 @@
       });
 
       const booksResponse = await apiGet(`/genres/${encodeURIComponent(decodedGenreName)}/books?${params}`);
+
+      if (isStaleNavigation(thisGeneration)) return;
+
       const books = Array.isArray(booksResponse) ? booksResponse : (booksResponse?.items || booksResponse?.data || []);
       const totalPages = booksResponse?.total_pages || 1;
 
@@ -4594,6 +4719,22 @@
         events: selectedEvents,
       };
 
+      if (!payload.name) {
+        toast('Webhook name is required', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+      if (!payload.url) {
+        toast('Webhook URL is required', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+      if (selectedEvents.length === 0) {
+        toast('Select at least one event', 'error');
+        submitBtn.disabled = false;
+        return;
+      }
+
       try {
         if (isEditing) {
           await apiPatch(`/webhooks/${existingWebhook.id}`, payload);
@@ -4799,23 +4940,24 @@
                 // Poll for completion
                 let conversionPollCount = 0;
                 const conversionPollMax = 60;
-                const conversionPollInterval = setInterval(async () => {
+                if (conversionPollTimer) clearInterval(conversionPollTimer);
+                conversionPollTimer = setInterval(async () => {
                   conversionPollCount++;
                   try {
                     const jobStatus = await apiGet(`/conversions/${jobId}`);
                     if (jobStatus?.status === 'completed' || jobStatus?.status === 'done') {
-                      clearInterval(conversionPollInterval);
+                      clearInterval(conversionPollTimer); conversionPollTimer = null;
                       statusEl.innerHTML = `
                         <span style="color:var(--color-success)">Conversion complete!</span>
                         <a href="${API}/books/${bookId}/file?format=${targetFormat}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
                       `;
                       toast('Format conversion complete', 'success');
                     } else if (jobStatus?.status === 'failed') {
-                      clearInterval(conversionPollInterval);
+                      clearInterval(conversionPollTimer); conversionPollTimer = null;
                       statusEl.innerHTML = `<span style="color:var(--color-danger)">Conversion failed: ${escapeHtml(jobStatus.error || 'Unknown error')}</span>`;
                     }
                     if (conversionPollCount >= conversionPollMax) {
-                      clearInterval(conversionPollInterval);
+                      clearInterval(conversionPollTimer); conversionPollTimer = null;
                       statusEl.innerHTML = `<span style="color:var(--color-warning)">Conversion timed out. Check back later.</span>`;
                     }
                   } catch {
