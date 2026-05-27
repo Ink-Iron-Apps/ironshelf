@@ -53,8 +53,12 @@ if ($ExistingRule) {
 # --- Remove binary directory ---
 
 if (Test-Path $InstallDir) {
-    Write-Info "Removing install directory: $InstallDir"
-    Remove-Item -Path $InstallDir -Recurse -Force
+    if (Confirm-Removal "install directory ($InstallDir)") {
+        Write-Info "Removing install directory..."
+        Remove-Item -Path $InstallDir -Recurse -Force
+    } else {
+        Write-Info "Keeping install directory."
+    }
 } else {
     Write-Info "Install directory not found, skipping."
 }

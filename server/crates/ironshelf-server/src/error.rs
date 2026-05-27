@@ -18,6 +18,8 @@ pub enum AppError {
     Forbidden(String),
     /// 400 — malformed request, validation failure.
     BadRequest(String),
+    /// 409 — resource already exists or conflicting state.
+    Conflict(String),
     /// 422 — semantically invalid (path doesn't exist, etc).
     UnprocessableEntity(String),
     /// 500 — unexpected internal failure.
@@ -43,6 +45,7 @@ impl IntoResponse for AppError {
             Self::Unauthorized(message) => (StatusCode::UNAUTHORIZED, "unauthorized", message),
             Self::Forbidden(message) => (StatusCode::FORBIDDEN, "forbidden", message),
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, "bad_request", message),
+            Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
             Self::UnprocessableEntity(message) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable_entity", message)
             }

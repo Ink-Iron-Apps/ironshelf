@@ -103,10 +103,7 @@ class ServerConfigNotifier extends StateNotifier<ServerConfig?> {
     await prefs.remove('api_key');
 
     if (state != null) {
-      state = ServerConfig(
-        serverUrl: state!.serverUrl,
-        customHeaders: state!.customHeaders,
-      );
+      state = state!.copyWith(sessionId: null, apiKey: null);
       final apiService = _ref.read(apiServiceProvider);
       apiService.configure(state!, onUnauthorized: () {
         clearAuth();

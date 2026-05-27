@@ -28,11 +28,12 @@ class CollectionsScreen extends ConsumerWidget {
         ),
         data: (collections) {
           if (collections.isEmpty) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.collections_bookmark_outlined,
               title: 'No collections yet',
               subtitle: 'Create a collection to organize your books.',
               actionLabel: 'Create collection',
+              onAction: () => _showCreateDialog(context, ref),
             );
           }
 
@@ -162,6 +163,9 @@ class CollectionsScreen extends ConsumerWidget {
           ],
         );
       },
-    );
+    ).then((_) {
+      nameController.dispose();
+      descriptionController.dispose();
+    });
   }
 }

@@ -17,18 +17,19 @@ class BookDetailScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final bookAsync = ref.watch(bookDetailProvider(bookId));
 
-    return Scaffold(
-      body: bookAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Scaffold(
-          appBar: AppBar(),
-          body: ErrorState(
-            message: 'Could not load book details',
-            onRetry: () => ref.invalidate(bookDetailProvider(bookId)),
-          ),
-        ),
-        data: (book) => _BookDetailContent(book: book),
+    return bookAsync.when(
+      loading: () => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
       ),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(),
+        body: ErrorState(
+          message: 'Could not load book details',
+          onRetry: () => ref.invalidate(bookDetailProvider(bookId)),
+        ),
+      ),
+      data: (book) => Scaffold(body: _BookDetailContent(book: book)),
     );
   }
 }

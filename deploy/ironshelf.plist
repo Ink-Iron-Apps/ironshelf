@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Ironshelf launchd plist for macOS.
+
+  IMPORTANT: Replace /Users/YOURNAME with your actual home directory path.
+  Launchd does NOT expand shell variables like ${HOME}.
+
+  The install.sh script generates this file with correct paths automatically.
+  This file is a reference template for manual installation only.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -13,7 +22,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>IRONSHELF_CONFIG</key>
-        <string>${HOME}/.config/ironshelf/config.toml</string>
+        <string>/Users/YOURNAME/.config/ironshelf/config.toml</string>
         <key>RUST_LOG</key>
         <string>ironshelf_server=info</string>
     </dict>
@@ -25,9 +34,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>${HOME}/Library/Logs/ironshelf.log</string>
+    <string>/Users/YOURNAME/Library/Logs/ironshelf.log</string>
 
     <key>StandardErrorPath</key>
-    <string>${HOME}/Library/Logs/ironshelf.log</string>
+    <string>/Users/YOURNAME/Library/Logs/ironshelf.log</string>
 </dict>
 </plist>

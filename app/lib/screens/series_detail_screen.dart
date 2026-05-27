@@ -16,22 +16,23 @@ class SeriesDetailScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final seriesAsync = ref.watch(seriesDetailProvider(seriesId));
 
-    return Scaffold(
-      body: seriesAsync.when(
-        loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+    return seriesAsync.when(
+      loading: () => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(),
+        body: ErrorState(
+          message: 'Could not load series',
+          onRetry: () => ref.invalidate(seriesDetailProvider(seriesId)),
         ),
-        error: (error, stack) => Scaffold(
-          appBar: AppBar(),
-          body: ErrorState(
-            message: 'Could not load series',
-            onRetry: () => ref.invalidate(seriesDetailProvider(seriesId)),
-          ),
-        ),
-        data: (seriesDetail) {
-          final books = seriesDetail.books;
+      ),
+      data: (seriesDetail) {
+        final books = seriesDetail.books;
 
-          return CustomScrollView(
+        return Scaffold(
+          body: CustomScrollView(
             slivers: [
               SliverAppBar(
                 floating: true,
@@ -99,9 +100,9 @@ class SeriesDetailScreen extends ConsumerWidget {
 
               const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

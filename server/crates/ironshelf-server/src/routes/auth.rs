@@ -56,41 +56,37 @@ pub struct ApiKeySummary {
 pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<AuthResponse>), AppError> {
     let pool = state.ironshelf_db.pool();
 
     // SAFETY: Enforce minimum password length to prevent trivially guessable passwords.
     // Use .chars().count() to count Unicode characters, not bytes.
     let password_char_count = request.password.chars().count();
     if password_char_count < 8 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Password must be at least 8 characters", "code": "password_too_short"})),
+        return Err(AppError::BadRequest(
+            "Password must be at least 8 characters".to_string(),
         ));
     }
 
     // SAFETY: Cap password length to prevent argon2 DoS with extremely long inputs.
     if password_char_count > 1024 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Password must not exceed 1024 characters", "code": "password_too_long"})),
+        return Err(AppError::BadRequest(
+            "Password must not exceed 1024 characters".to_string(),
         ));
     }
 
     // SAFETY: Enforce username length limits and character restrictions.
     let trimmed_username = request.username.trim();
     if trimmed_username.is_empty() || trimmed_username.len() > 64 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Username must be 1-64 characters", "code": "invalid_username"})),
+        return Err(AppError::BadRequest(
+            "Username must be 1-64 characters".to_string(),
         ));
     }
 
     // Reject control characters (newlines, tabs, null bytes, etc.) in usernames.
     if trimmed_username.chars().any(|character| character.is_control()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Username must not contain control characters", "code": "invalid_username"})),
+        return Err(AppError::BadRequest(
+            "Username must not contain control characters".to_string(),
         ));
     }
 
@@ -98,7 +94,7 @@ pub async fn register(
     let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await
-        .map_err(|_| server_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     let is_owner = user_count == 0;
 
@@ -106,9 +102,8 @@ pub async fn register(
     if !is_owner {
         let invite_code = request.invite_code.as_deref().unwrap_or("");
         if invite_code.is_empty() {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "Invite code required", "code": "invite_required"})),
+            return Err(AppError::Forbidden(
+                "Invite code required".to_string(),
             ));
         }
         // We'll consume the invite after user creation (need user_id)
@@ -120,17 +115,16 @@ pub async fn register(
             .bind(trimmed_username)
             .fetch_optional(pool)
             .await
-            .map_err(|_| server_error("db_error"))?;
+            .map_err(AppError::internal)?;
 
     if existing.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "Username already taken", "code": "username_taken"})),
+        return Err(AppError::Conflict(
+            "Username already taken".to_string(),
         ));
     }
 
     let password_hash = hash_password(&request.password)
-        .map_err(|_| server_error("hash_error"))?;
+        .map_err(|error| AppError::Internal(format!("password hash failed: {error}")))?;
 
     let user_id = uuid::Uuid::new_v4().to_string();
 
@@ -141,7 +135,7 @@ pub async fn register(
         .bind(is_owner as i32)
         .execute(pool)
         .await
-        .map_err(|_| server_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
     // Consume invite code (if not first user)
     if !is_owner {
@@ -154,7 +148,7 @@ pub async fn register(
         .bind(invite_code)
         .execute(pool)
         .await
-        .map_err(|_| server_error("db_error"))?;
+        .map_err(AppError::internal)?;
 
         if consumed.rows_affected() == 0 {
             // Rollback: delete the user we just created
@@ -162,9 +156,8 @@ pub async fn register(
                 .bind(&user_id)
                 .execute(pool)
                 .await;
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "Invalid or already used invite code", "code": "invalid_invite"})),
+            return Err(AppError::Forbidden(
+                "Invalid or already used invite code".to_string(),
             ));
         }
 
@@ -181,7 +174,7 @@ pub async fn register(
 
     // Create session
     let session_id = create_session(pool, &user_id).await
-        .map_err(|_| server_error("session_error"))?;
+        .map_err(AppError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -199,24 +192,22 @@ pub async fn login(
     State(state): State<AppState>,
     request_headers: axum::http::HeaderMap,
     Json(request): Json<LoginRequest>,
-) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Response, AppError> {
     let pool = state.ironshelf_db.pool();
 
     let row = sqlx::query("SELECT id, username, password_hash, is_owner FROM users WHERE username = ?")
         .bind(&request.username)
         .fetch_optional(pool)
         .await
-        .map_err(|_| server_error("db_error"))?
-        .ok_or_else(|| (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "Invalid credentials", "code": "invalid_credentials"})),
+        .map_err(AppError::internal)?
+        .ok_or_else(|| AppError::Unauthorized(
+            "Invalid credentials".to_string(),
         ))?;
 
     let password_hash: String = row.get("password_hash");
     if !verify_password(&request.password, &password_hash) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "Invalid credentials", "code": "invalid_credentials"})),
+        return Err(AppError::Unauthorized(
+            "Invalid credentials".to_string(),
         ));
     }
 
@@ -225,7 +216,7 @@ pub async fn login(
     let is_owner: bool = row.get::<i32, _>("is_owner") != 0;
 
     let session_id = create_session(pool, &user_id).await
-        .map_err(|_| server_error("session_error"))?;
+        .map_err(AppError::internal)?;
 
     let body = serde_json::json!({
         "user_id": user_id,
@@ -304,7 +295,7 @@ pub async fn create_api_key(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
     Json(request): Json<CreateApiKeyRequest>,
-) -> Result<(StatusCode, Json<ApiKeyResponse>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<ApiKeyResponse>), AppError> {
     let pool = state.ironshelf_db.pool();
 
     // Generate prefix (8 chars) + secret (32 chars)
@@ -313,7 +304,7 @@ pub async fn create_api_key(
     let full_key = format!("irs_{prefix}.{secret}");
 
     let secret_hash = hash_password(&secret)
-        .map_err(|_| server_error("hash_error"))?;
+        .map_err(|error| AppError::Internal(format!("key hash failed: {error}")))?;
 
     let key_id = uuid::Uuid::new_v4().to_string();
 
@@ -327,7 +318,7 @@ pub async fn create_api_key(
     .bind(&request.label)
     .execute(pool)
     .await
-    .map_err(|_| server_error("db_error"))?;
+    .map_err(AppError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -420,9 +411,3 @@ fn generate_random_string(len: usize) -> String {
         .collect()
 }
 
-fn server_error(code: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({"error": "Internal server error", "code": code})),
-    )
-}

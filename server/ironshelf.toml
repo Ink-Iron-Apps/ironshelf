@@ -4,3 +4,26 @@
 port = 10810
 host = "0.0.0.0"
 database_path = "ironshelf.db"
+
+# Path to the tantivy full-text search index directory (created automatically).
+# search_index_path = "./ironshelf-search-index/"
+
+# Path to the thumbnail cache directory for resized cover images (created automatically).
+# thumbnail_cache_path = "./ironshelf-thumbnail-cache/"
+
+# Set to true if the server is behind TLS (direct or via reverse proxy).
+# When true, session cookies include the Secure flag.
+# tls_enabled = false
+
+# Set to true ONLY when behind a trusted reverse proxy.
+# When true, the rate limiter reads X-Forwarded-For / X-Real-Ip for client IP.
+# trust_proxy_headers = false
+
+# Optional: OIDC/SSO login (Authelia, Authentik, Keycloak, Google, etc.)
+# [oidc]
+# issuer_url = "https://auth.example.com"
+# client_id = "ironshelf"
+# client_secret = "your-secret"
+# redirect_uri = "https://books.example.com/api/v1/auth/oidc/callback"
+# scopes = ["openid", "profile", "email"]
+# auto_register = true

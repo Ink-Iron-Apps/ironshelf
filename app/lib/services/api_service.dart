@@ -101,12 +101,12 @@ class AuthorSearchResult {
 
   factory AuthorSearchResult.fromJson(Map<String, dynamic> json) {
     return AuthorSearchResult(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      sortName: json['sort_name'] as String,
-      bookCount: json['book_count'] as int,
-      seriesCount: json['series_count'] as int,
-      libraryId: json['library_id'] as String,
+      id: (json['id'] as num).toInt(),
+      name: json['name'] as String? ?? '',
+      sortName: json['sort_name'] as String? ?? '',
+      bookCount: (json['book_count'] as num?)?.toInt() ?? 0,
+      seriesCount: (json['series_count'] as num?)?.toInt() ?? 0,
+      libraryId: json['library_id']?.toString() ?? '',
     );
   }
 }
@@ -128,11 +128,11 @@ class SeriesSearchResult {
 
   factory SeriesSearchResult.fromJson(Map<String, dynamic> json) {
     return SeriesSearchResult(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      sortName: json['sort_name'] as String,
-      bookCount: json['book_count'] as int,
-      libraryId: json['library_id'] as String,
+      id: (json['id'] as num).toInt(),
+      name: json['name'] as String? ?? '',
+      sortName: json['sort_name'] as String? ?? '',
+      bookCount: (json['book_count'] as num?)?.toInt() ?? 0,
+      libraryId: json['library_id']?.toString() ?? '',
     );
   }
 }
@@ -158,12 +158,15 @@ class BookSearchResult {
 
   factory BookSearchResult.fromJson(Map<String, dynamic> json) {
     return BookSearchResult(
-      id: json['id'] as int,
-      title: json['title'] as String,
+      id: (json['id'] as num).toInt(),
+      title: json['title'] as String? ?? '',
       sortTitle: json['sort_title'] as String? ?? '',
       hasCover: json['has_cover'] as bool? ?? false,
-      tags: (json['tags'] as List? ?? []).cast<String>(),
-      libraryId: json['library_id'] as String,
+      tags: (json['tags'] as List?)
+              ?.map((element) => element.toString())
+              .toList() ??
+          [],
+      libraryId: json['library_id']?.toString() ?? '',
       score: (json['score'] as num?)?.toDouble(),
     );
   }
@@ -189,7 +192,9 @@ class ServerInfo {
     return ServerInfo(
       name: json['name'] as String? ?? 'Ironshelf',
       version: json['version'] as String? ?? '0.0.0',
-      features: (json['features'] as List? ?? []).cast<String>(),
+      features: (json['features'] as List? ?? [])
+          .map((element) => element.toString())
+          .toList(),
       registrationOpen: json['registration_open'] as bool? ?? false,
       inviteRequired: json['invite_required'] as bool? ?? true,
     );
@@ -212,10 +217,10 @@ class AuthResponse {
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
     return AuthResponse(
-      userId: json['user_id'] as String,
-      username: json['username'] as String,
+      userId: json['user_id']?.toString() ?? '',
+      username: json['username'] as String? ?? '',
       isOwner: json['is_owner'] as bool? ?? false,
-      sessionId: json['session_id'] as String,
+      sessionId: json['session_id']?.toString() ?? '',
     );
   }
 }
@@ -234,8 +239,8 @@ class UserInfo {
 
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     return UserInfo(
-      userId: json['user_id'] as String,
-      username: json['username'] as String,
+      userId: json['user_id']?.toString() ?? '',
+      username: json['username'] as String? ?? '',
       isOwner: json['is_owner'] as bool? ?? false,
     );
   }
@@ -257,10 +262,10 @@ class ApiKeySummary {
 
   factory ApiKeySummary.fromJson(Map<String, dynamic> json) {
     return ApiKeySummary(
-      id: json['id'] as String,
-      prefix: json['prefix'] as String,
-      label: json['label'] as String,
-      createdAt: json['created_at'] as String,
+      id: json['id']?.toString() ?? '',
+      prefix: json['prefix'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
     );
   }
 }
@@ -287,13 +292,13 @@ class CollectionSummary {
 
   factory CollectionSummary.fromJson(Map<String, dynamic> json) {
     return CollectionSummary(
-      id: json['id'] as String,
-      userId: json['user_id'] as String,
-      name: json['name'] as String,
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString() ?? '',
+      name: json['name'] as String? ?? '',
       description: json['description'] as String?,
       isPublic: json['is_public'] as bool? ?? false,
-      createdAt: json['created_at'] as String,
-      updatedAt: json['updated_at'] as String,
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
     );
   }
 }
@@ -329,9 +334,9 @@ class CollectionBookEntry {
 
   factory CollectionBookEntry.fromJson(Map<String, dynamic> json) {
     return CollectionBookEntry(
-      bookId: json['book_id'] as String,
-      position: json['position'] as int,
-      addedAt: json['added_at'] as String,
+      bookId: json['book_id']?.toString() ?? '',
+      position: (json['position'] as num?)?.toInt() ?? 0,
+      addedAt: json['added_at'] as String? ?? '',
     );
   }
 }
@@ -354,11 +359,11 @@ class ReadingProgress {
 
   factory ReadingProgress.fromJson(Map<String, dynamic> json) {
     return ReadingProgress(
-      bookId: json['book_id'] as String,
-      format: json['format'] as String,
+      bookId: json['book_id']?.toString() ?? '',
+      format: json['format'] as String? ?? '',
       locator: json['locator'] as String?,
-      percent: (json['percent'] as num).toDouble(),
-      updatedAt: json['updated_at'] as String,
+      percent: (json['percent'] as num?)?.toDouble() ?? 0.0,
+      updatedAt: json['updated_at'] as String? ?? '',
     );
   }
 }
@@ -381,11 +386,11 @@ class BookmarkEntry {
 
   factory BookmarkEntry.fromJson(Map<String, dynamic> json) {
     return BookmarkEntry(
-      id: json['id'] as String,
-      bookId: json['book_id'] as String,
-      locator: json['locator'] as String,
+      id: json['id']?.toString() ?? '',
+      bookId: json['book_id']?.toString() ?? '',
+      locator: json['locator'] as String? ?? '',
       note: json['note'] as String?,
-      createdAt: json['created_at'] as String,
+      createdAt: json['created_at'] as String? ?? '',
     );
   }
 }
@@ -419,9 +424,9 @@ class ProgressSummary {
 
   factory ProgressSummary.fromJson(Map<String, dynamic> json) {
     return ProgressSummary(
-      format: json['format'] as String,
-      percent: (json['percent'] as num).toDouble(),
-      updatedAt: json['updated_at'] as String,
+      format: json['format'] as String? ?? '',
+      percent: (json['percent'] as num?)?.toDouble() ?? 0.0,
+      updatedAt: json['updated_at'] as String? ?? '',
     );
   }
 }
@@ -435,8 +440,8 @@ class GenreEntry {
 
   factory GenreEntry.fromJson(Map<String, dynamic> json) {
     return GenreEntry(
-      name: json['name'] as String,
-      bookCount: json['book_count'] as int,
+      name: json['name'] as String? ?? '',
+      bookCount: (json['book_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -457,9 +462,10 @@ class AuthorDetail {
     return AuthorDetail(
       author: Author.fromJson(json),
       series: (json['series'] as List? ?? [])
-          .map((seriesJson) => Series.fromJson(seriesJson as Map<String, dynamic>))
+          .map((seriesJson) =>
+              Series.fromJson(seriesJson as Map<String, dynamic>))
           .toList(),
-      standaloneCount: json['standalone_count'] as int? ?? 0,
+      standaloneCount: (json['standalone_count'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -509,16 +515,16 @@ class HighlightEntry {
 
   factory HighlightEntry.fromJson(Map<String, dynamic> json) {
     return HighlightEntry(
-      id: json['id'] as String,
-      userId: json['user_id'] as String,
-      bookId: json['book_id'] as String,
-      format: json['format'] as String,
-      cfiRange: json['cfi_range'] as String,
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString() ?? '',
+      bookId: json['book_id']?.toString() ?? '',
+      format: json['format'] as String? ?? '',
+      cfiRange: json['cfi_range'] as String? ?? '',
       textContent: json['text_content'] as String?,
-      color: json['color'] as String,
+      color: json['color'] as String? ?? 'yellow',
       note: json['note'] as String?,
-      createdAt: json['created_at'] as String,
-      updatedAt: json['updated_at'] as String,
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
     );
   }
 }

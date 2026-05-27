@@ -25,6 +25,9 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
 ReadWritePaths=/opt/ironshelf
 
 # Calibre library directories (add your paths here)

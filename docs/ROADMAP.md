@@ -5,41 +5,57 @@ Caveman ultra. Build order = milestones. Each = shippable slice.
 ## M0 — scaffold (DONE)
 Folders, docs, Cargo workspace stubs, Flutter stub, git init.
 
-## M1 — server core: Calibre read + hierarchy API
+## M1 — server core: Calibre read + hierarchy API (DONE)
 - ironshelf-core: CalibreSource RO reader (authors/series/books/formats/cover/custom cols)
 - Ironshelf DB schema + migrations (sqlx)
 - axum: `/health`, `/api/v1/libraries`, authors/series/books hierarchy endpoints (read)
 - config (TOML/env): calibre lib path(s), ironshelf db path, port
-- DELIVER: curl the author→series→book tree from a real Calibre lib
 
-## M2 — auth + files + progress
+## M2 — auth + files + progress (DONE)
 - login/session + API key Bearer; argon2; perms
 - cover + file stream (Range), epub bytes
 - reading_progress + bookmarks
 - custom-header passthrough confirmed (CF Access)
 
-## M3 — folder/embedded source + custom columns
-- FolderSource: scan + epub OPF parse; AO3 fandom/author heuristic (port organize.py)
+## M3 — folder/embedded source + custom columns (DONE)
+- FolderSource: scan + epub OPF parse; AO3 fandom/author heuristic
 - custom columns: read, expose, sort, filter
 - library types + per-user sort prefs
 
-## M4 — Flutter app (Android first)
+## M4 — Flutter app (DONE)
 - server connect (URL + custom headers field for CF Access)
 - browse Author→Series→Book; sort controls; book detail (incl custom cols)
 - epub reader + progress sync
-- Ink & Iron brand + standard Settings cards (update/version/review/whatsnew/legal/theme/feedback/onboarding)
+- Ink & Iron brand + standard Settings cards
 
-## M5 — polish + deploy
+## M5 — polish + deploy (DONE)
 - OPDS feed (KOReader compat)
-- multiuser admin UI (web minimal or in-app)
-- CI: cargo build/test + flutter build (per global CI/CD patterns); systemd unit; cloudflare tunnel host
-- in-app update (sideload/GitHub-mirror pipeline per global rules)
+- multiuser admin UI (web + API)
+- CI: cargo build/test + release builds; systemd unit; deploy scripts
+- rate limiting, security headers, graceful shutdown
 
-## Later
-- iOS build · web reader · metadata fetch · Kobo sync · search across libs
+## M5+ — extended features (DONE)
+- web EPUB/PDF/CBZ readers
+- full-text search (tantivy)
+- Kobo eReader sync
+- WebDAV (KOReader sync)
+- metadata enrichment (Google Books + Open Library)
+- collections (reading lists)
+- notifications + background scheduler
+- import/export for data portability
+- stats dashboard + activity feed
+- genres/tag browsing
+- highlights/annotations
+- ratings + reviews
+- reading queue + goals
+- webhooks (outbound)
+- per-library access control
+- OIDC/SSO login
+- cover thumbnail cache
 
-## Open decisions (revisit in clean session)
-- REST vs GraphQL (default REST; GraphQL if hierarchy/sort queries get gnarly)
-- epub reader lib (Flutter): epub_view / vocsy / folioreader / custom — eval
-- search engine: SQL LIKE first, tantivy later
-- thumbnail cache strategy
+## Future
+- iOS Flutter build
+- Audiobook support (M4A/MP3 streaming)
+- Reading challenges / social features
+- Plugin/extension system
+- OPDS 2.0

@@ -24,6 +24,7 @@ const IronshelfCbzReader = (() => {
   let saveProgressTimer = null;
   let preloadedImages = new Map();
   let thumbnailStripVisible = true;
+  let continuousScrollObserver = null;
 
   // --- Settings Persistence ---
   function getStoredFit() {
@@ -292,6 +293,12 @@ const IronshelfCbzReader = (() => {
   }
 
   function setupContinuousScrollObserver() {
+    // Disconnect previous observer if any
+    if (continuousScrollObserver) {
+      continuousScrollObserver.disconnect();
+      continuousScrollObserver = null;
+    }
+
     const viewport = document.getElementById('cbz-viewport');
     if (!viewport) return;
 
@@ -314,6 +321,9 @@ const IronshelfCbzReader = (() => {
 
     const pages = document.querySelectorAll('.cbz-continuous-page');
     pages.forEach(page => observer.observe(page));
+
+    // Store for cleanup
+    continuousScrollObserver = observer;
   }
 
   function createPageImage(index) {
@@ -709,6 +719,10 @@ const IronshelfCbzReader = (() => {
     }
 
     if (saveProgressTimer) clearTimeout(saveProgressTimer);
+    if (continuousScrollObserver) {
+      continuousScrollObserver.disconnect();
+      continuousScrollObserver = null;
+    }
 
     // Revoke object URLs
     for (const url of imageUrls) {

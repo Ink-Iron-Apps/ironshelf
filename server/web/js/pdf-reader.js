@@ -32,6 +32,7 @@ const IronshelfPdfReader = (() => {
   let renderQueue = [];
   let pinchStartDistance = 0;
   let pinchStartZoom = 1.0;
+  let boundResizeHandler = null;
 
   // --- Settings Persistence ---
   function getStoredZoom() {
@@ -645,13 +646,13 @@ const IronshelfPdfReader = (() => {
       }, { passive: true });
     }
 
-    // Resize handler
-    const resizeHandler = debounce(() => {
+    // Resize handler (stored for cleanup on close)
+    boundResizeHandler = debounce(() => {
       if (zoomMode === 'fit-width' || zoomMode === 'fit-page') {
         setZoom(null, zoomMode);
       }
     }, 250);
-    window.addEventListener('resize', resizeHandler);
+    window.addEventListener('resize', boundResizeHandler);
   }
 
   function debounce(fn, delay) {
@@ -780,6 +781,10 @@ const IronshelfPdfReader = (() => {
 
     if (saveProgressTimer) clearTimeout(saveProgressTimer);
     if (pageObserver) pageObserver.disconnect();
+    if (boundResizeHandler) {
+      window.removeEventListener('resize', boundResizeHandler);
+      boundResizeHandler = null;
+    }
 
     if (currentDocument) {
       currentDocument.destroy();

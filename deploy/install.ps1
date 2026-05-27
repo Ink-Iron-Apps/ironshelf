@@ -59,25 +59,27 @@ if (-not (Test-Path $ConfigPath)) {
 
     $ConfigContent = @"
 # Ironshelf Configuration
+# See https://github.com/LightWraith8268/ironshelf for documentation.
 
-[server]
 host = "0.0.0.0"
 port = $DefaultPort
+database_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf.db"
 
-# Add library sources below.
-# Each [[library]] entry defines one library.
+# search_index_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf-search-index\\"
+# thumbnail_cache_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf-thumbnail-cache\\"
+# tls_enabled = false
+# trust_proxy_headers = false
 
-# Example: Calibre library
-# [[library]]
-# name = "Main Library"
-# source = "calibre"
-# path = "C:\\Users\\YourName\\Calibre Library"
+# Libraries are managed through the web UI, not this file.
 
-# Example: Folder scan
-# [[library]]
-# name = "Unsorted Books"
-# source = "folder"
-# path = "D:\\Ebooks"
+# Optional: OIDC/SSO login (Authelia, Authentik, Keycloak, etc.)
+# [oidc]
+# issuer_url = "https://auth.example.com"
+# client_id = "ironshelf"
+# client_secret = "your-secret"
+# redirect_uri = "https://books.example.com/api/v1/auth/oidc/callback"
+# scopes = ["openid", "profile", "email"]
+# auto_register = true
 "@
     Set-Content -Path $ConfigPath -Value $ConfigContent -Encoding UTF8
 } else {
@@ -97,20 +99,20 @@ if ($ExistingService) {
     Start-Sleep -Seconds 2
 }
 
-# Create the service using sc.exe
-# The binary path includes the config environment variable via a wrapper approach.
-# Since sc.exe cannot set env vars directly, we use a wrapper cmd.
-$WrapperScript = "$InstallDir\start-ironshelf.cmd"
-$WrapperContent = @"
-@echo off
-set IRONSHELF_CONFIG=$ConfigPath
-set RUST_LOG=ironshelf_server=info
-"$BinaryPath"
-"@
-Set-Content -Path $WrapperScript -Value $WrapperContent -Encoding ASCII
-
-sc.exe create $ServiceName binPath= "`"$WrapperScript`"" start= auto DisplayName= "$ServiceDisplayName" | Out-Null
+# Create the service using sc.exe with the binary directly.
+# Environment variables are set via the service registry key since sc.exe
+# cannot set them and .cmd wrappers are not valid service executables.
+sc.exe create $ServiceName binPath= "`"$BinaryPath`"" start= auto DisplayName= "$ServiceDisplayName" | Out-Null
 sc.exe description $ServiceName "Self-hosted ebook server with Calibre integration" | Out-Null
+
+# Set environment variables for the service via registry.
+# The "Environment" multi-string value is read by the Service Control Manager.
+$RegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+$EnvValues = @(
+    "IRONSHELF_CONFIG=$ConfigPath",
+    "RUST_LOG=ironshelf_server=info"
+)
+Set-ItemProperty -Path $RegPath -Name "Environment" -Value $EnvValues -Type MultiString
 
 # Start the service
 Write-Info "Starting service..."
