@@ -32,6 +32,7 @@ hex = { workspace = true }
 jsonwebtoken = { workspace = true }
 sqlx = { workspace = true }
 image = { workspace = true }
+urlencoding = { workspace = true }
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "cookies"] }
