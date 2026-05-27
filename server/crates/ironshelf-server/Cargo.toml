@@ -30,7 +30,6 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 jsonwebtoken = { workspace = true }
-strsim = { workspace = true }
 sqlx = { workspace = true }
 image = { workspace = true }
 
@@ -39,12 +38,3 @@ reqwest = { version = "0.12", features = ["json", "cookies"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rusqlite = "0.31"
 tempfile = "3"
-ironshelf-core = { path = "../ironshelf-core" }
-axum = { workspace = true }
-tower-http = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
-chrono = { workspace = true }
-argon2 = { workspace = true }
-sqlx = { workspace = true }
