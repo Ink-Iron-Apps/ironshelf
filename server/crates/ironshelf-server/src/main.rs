@@ -100,6 +100,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
         .route("/api/v1/auth/oidc/login", get(routes::oidc::oidc_login))
         .route("/api/v1/auth/oidc/callback", get(routes::oidc::oidc_callback))
+        .with_state(app_state.clone())
         .layer(axum::middleware::from_fn_with_state(
             auth_rate_limiter,
             middleware::rate_limit::rate_limit_auth,
@@ -110,7 +111,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/ready", get(readiness))
         .route("/alive", get(liveness))
-        .route("/api/v1/server/info", get(routes::server_info::server_info));
+        .route("/api/v1/server/info", get(routes::server_info::server_info))
+        .with_state(app_state.clone());
 
     // Protected routes (auth required).
     // Split into sub-routers and merged to keep the type tree shallow enough
@@ -343,6 +345,9 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::post(routes::acquisition::acquisition_grab),
         );
 
+    // Resolve state on each sub-router before applying the auth middleware layer.
+    // This converts each `Router<AppState>` to `Router<()>`, keeping the type tree
+    // shallow enough for the compiler's trait solver to verify the FromFn Service bounds.
     let protected_routes = Router::new()
         .merge(auth_management_routes)
         .merge(library_routes)
@@ -350,6 +355,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(data_routes)
         .merge(genre_webhook_routes)
         .merge(acquisition_routes)
+        .with_state(app_state.clone())
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
@@ -364,6 +370,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/opds/series/{id}", get(routes::opds::series_feed))
         .route("/opds/recent", get(routes::opds::recent_feed))
         .route("/opds/search", get(routes::opds::search_feed))
+        .with_state(app_state.clone())
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
@@ -394,7 +401,8 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/kobo/{auth_token}/v1/library/{book_id}/state",
             axum::routing::put(routes::kobo::update_reading_state),
-        );
+        )
+        .with_state(app_state.clone());
 
     // WebDAV routes for KOReader sync (auth is via path token, no session middleware).
     // Uses `any()` because WebDAV methods (PROPFIND, MKCOL) are not in axum's MethodFilter.
@@ -411,14 +419,18 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/webdav/{auth_token}/{*path}",
             axum::routing::any(routes::webdav::webdav_dispatch_path),
-        );
+        )
+        .with_state(app_state.clone());
 
-    // Web UI (embedded static files)
+    // Web UI (embedded static files — no state needed, but resolve for type consistency)
     let web_routes = Router::new()
         .route("/", get(web::serve_index))
         .route("/{*path}", get(web::serve_web));
 
-    let app = Router::new()
+    // All sub-routers above have been resolved to `Router<()>` via `.with_state()`.
+    // The final app router is also `Router<()>` — global middleware layers use
+    // `from_fn_with_state` for their own state, independent of the router state.
+    let app: Router = Router::new()
         .merge(public_routes)
         .merge(auth_routes)
         .merge(protected_routes)
@@ -441,8 +453,7 @@ async fn main() -> anyhow::Result<()> {
             middleware::security_headers::security_headers,
         ))
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
-        .with_state(app_state);
+        .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind((config.host.as_str(), config.port)).await?;
     tracing::info!("ironshelf-server listening on {}:{}", config.host, config.port);
