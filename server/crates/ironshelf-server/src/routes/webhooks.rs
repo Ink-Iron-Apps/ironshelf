@@ -14,6 +14,9 @@ use crate::webhook_dispatcher;
 const VALID_EVENTS: &[&str] = &[
     "book.added",
     "book.completed",
+    "book.imported",
+    "download.completed",
+    "download.failed",
     "library.scanned",
     "user.registered",
     "collection.updated",

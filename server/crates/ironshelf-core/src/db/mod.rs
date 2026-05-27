@@ -133,6 +133,175 @@ pub struct StoredWebhook {
     pub created_at: String,
 }
 
+/// An indexer source as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredIndexer {
+    pub id: String,
+    pub name: String,
+    pub indexer_type: String,
+    pub url: String,
+    pub api_key: Option<String>,
+    pub categories: Option<String>,
+    pub is_enabled: bool,
+    pub priority: i32,
+    pub search_interval_minutes: i32,
+    pub last_searched_at: Option<String>,
+    pub created_at: String,
+}
+
+/// A download client as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredDownloadClient {
+    pub id: String,
+    pub name: String,
+    pub client_type: String,
+    pub host: String,
+    pub port: i32,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub use_ssl: bool,
+    pub download_directory: Option<String>,
+    pub category: Option<String>,
+    pub is_enabled: bool,
+    pub priority: i32,
+    pub created_at: String,
+}
+
+/// A wanted item (book/author/series to track) as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredWantedItem {
+    pub id: String,
+    pub user_id: String,
+    pub item_type: String,
+    pub title: String,
+    pub author_name: Option<String>,
+    pub isbn: Option<String>,
+    pub year: Option<String>,
+    pub preferred_format: Option<String>,
+    pub quality_profile: Option<String>,
+    pub is_active: bool,
+    pub is_fulfilled: bool,
+    pub fulfilled_at: Option<String>,
+    pub last_searched_at: Option<String>,
+    pub created_at: String,
+}
+
+/// A download queue entry as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredDownload {
+    pub id: String,
+    pub wanted_item_id: Option<String>,
+    pub indexer_id: Option<String>,
+    pub download_client_id: Option<String>,
+    pub title: String,
+    pub download_url: String,
+    pub magnet_url: Option<String>,
+    pub torrent_hash: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub status: String,
+    pub progress_percent: f64,
+    pub error_message: Option<String>,
+    pub file_path: Option<String>,
+    pub target_library_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Parameters for creating a new indexer.
+#[derive(Debug)]
+pub struct CreateIndexerParams<'a> {
+    pub name: &'a str,
+    pub indexer_type: &'a str,
+    pub url: &'a str,
+    pub api_key: Option<&'a str>,
+    pub categories: Option<&'a str>,
+    pub priority: Option<i32>,
+    pub search_interval_minutes: Option<i32>,
+}
+
+/// Parameters for updating an indexer.
+#[derive(Debug)]
+pub struct UpdateIndexerParams<'a> {
+    pub indexer_id: &'a str,
+    pub name: Option<&'a str>,
+    pub url: Option<&'a str>,
+    pub api_key: Option<&'a str>,
+    pub categories: Option<&'a str>,
+    pub is_enabled: Option<bool>,
+    pub priority: Option<i32>,
+    pub search_interval_minutes: Option<i32>,
+}
+
+/// Parameters for creating a new download client.
+#[derive(Debug)]
+pub struct CreateDownloadClientParams<'a> {
+    pub name: &'a str,
+    pub client_type: &'a str,
+    pub host: &'a str,
+    pub port: i32,
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
+    pub use_ssl: bool,
+    pub download_directory: Option<&'a str>,
+    pub category: Option<&'a str>,
+}
+
+/// Parameters for updating a download client.
+#[derive(Debug)]
+pub struct UpdateDownloadClientParams<'a> {
+    pub client_id: &'a str,
+    pub name: Option<&'a str>,
+    pub host: Option<&'a str>,
+    pub port: Option<i32>,
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
+    pub use_ssl: Option<bool>,
+    pub download_directory: Option<&'a str>,
+    pub category: Option<&'a str>,
+    pub is_enabled: Option<bool>,
+    pub priority: Option<i32>,
+}
+
+/// Parameters for creating a new wanted item.
+#[derive(Debug)]
+pub struct CreateWantedItemParams<'a> {
+    pub user_id: &'a str,
+    pub item_type: &'a str,
+    pub title: &'a str,
+    pub author_name: Option<&'a str>,
+    pub isbn: Option<&'a str>,
+    pub year: Option<&'a str>,
+    pub preferred_format: Option<&'a str>,
+    pub quality_profile: Option<&'a str>,
+}
+
+/// Parameters for updating a wanted item.
+#[derive(Debug)]
+pub struct UpdateWantedItemParams<'a> {
+    pub wanted_item_id: &'a str,
+    pub title: Option<&'a str>,
+    pub author_name: Option<&'a str>,
+    pub isbn: Option<&'a str>,
+    pub year: Option<&'a str>,
+    pub preferred_format: Option<&'a str>,
+    pub quality_profile: Option<&'a str>,
+    pub is_active: Option<bool>,
+}
+
+/// Parameters for creating a download entry.
+#[derive(Debug)]
+pub struct CreateDownloadParams<'a> {
+    pub wanted_item_id: Option<&'a str>,
+    pub indexer_id: Option<&'a str>,
+    pub download_client_id: Option<&'a str>,
+    pub title: &'a str,
+    pub download_url: &'a str,
+    pub magnet_url: Option<&'a str>,
+    pub torrent_hash: Option<&'a str>,
+    pub size_bytes: Option<i64>,
+    pub target_library_id: Option<&'a str>,
+}
+
 /// A webhook delivery log entry.
 #[derive(Debug, Clone)]
 pub struct StoredWebhookDelivery {
@@ -254,6 +423,9 @@ impl IronshelfDb {
 
         let migration_015 = include_str!("migrations/015_oidc_and_conversions.sql");
         sqlx::raw_sql(migration_015).execute(&self.pool).await?;
+
+        let migration_016 = include_str!("migrations/016_acquisition.sql");
+        sqlx::raw_sql(migration_016).execute(&self.pool).await?;
 
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
@@ -1936,5 +2108,812 @@ impl IronshelfDb {
             .iter()
             .map(|row| (row.get::<i32, _>("month_number"), row.get::<i64, _>("book_count")))
             .collect())
+    }
+
+    // =========================================================================
+    // Acquisition engine — Indexers
+    // =========================================================================
+
+    /// List all indexers, ordered by priority (lower = higher priority).
+    pub async fn list_indexers(&self) -> Result<Vec<StoredIndexer>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, name, indexer_type, url, api_key, categories, is_enabled, \
+                    priority, search_interval_minutes, last_searched_at, created_at \
+             FROM indexers ORDER BY priority ASC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredIndexer {
+                id: row.get("id"),
+                name: row.get("name"),
+                indexer_type: row.get("indexer_type"),
+                url: row.get("url"),
+                api_key: row.get("api_key"),
+                categories: row.get("categories"),
+                is_enabled: row.get::<i32, _>("is_enabled") != 0,
+                priority: row.get("priority"),
+                search_interval_minutes: row.get("search_interval_minutes"),
+                last_searched_at: row.get("last_searched_at"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Get a single indexer by ID.
+    pub async fn get_indexer(&self, indexer_id: &str) -> Result<Option<StoredIndexer>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, name, indexer_type, url, api_key, categories, is_enabled, \
+                    priority, search_interval_minutes, last_searched_at, created_at \
+             FROM indexers WHERE id = ?",
+        )
+        .bind(indexer_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredIndexer {
+            id: row.get("id"),
+            name: row.get("name"),
+            indexer_type: row.get("indexer_type"),
+            url: row.get("url"),
+            api_key: row.get("api_key"),
+            categories: row.get("categories"),
+            is_enabled: row.get::<i32, _>("is_enabled") != 0,
+            priority: row.get("priority"),
+            search_interval_minutes: row.get("search_interval_minutes"),
+            last_searched_at: row.get("last_searched_at"),
+            created_at: row.get("created_at"),
+        }))
+    }
+
+    /// List only enabled indexers, ordered by priority.
+    pub async fn list_enabled_indexers(&self) -> Result<Vec<StoredIndexer>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, name, indexer_type, url, api_key, categories, is_enabled, \
+                    priority, search_interval_minutes, last_searched_at, created_at \
+             FROM indexers WHERE is_enabled = 1 ORDER BY priority ASC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredIndexer {
+                id: row.get("id"),
+                name: row.get("name"),
+                indexer_type: row.get("indexer_type"),
+                url: row.get("url"),
+                api_key: row.get("api_key"),
+                categories: row.get("categories"),
+                is_enabled: true,
+                priority: row.get("priority"),
+                search_interval_minutes: row.get("search_interval_minutes"),
+                last_searched_at: row.get("last_searched_at"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Create a new indexer. Returns the generated ID.
+    pub async fn create_indexer(
+        &self,
+        params: &CreateIndexerParams<'_>,
+    ) -> Result<String, DbError> {
+        let indexer_id = uuid::Uuid::new_v4().to_string();
+        let priority = params.priority.unwrap_or(50);
+        let search_interval = params.search_interval_minutes.unwrap_or(60);
+
+        sqlx::query(
+            "INSERT INTO indexers (id, name, indexer_type, url, api_key, categories, priority, search_interval_minutes) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&indexer_id)
+        .bind(params.name)
+        .bind(params.indexer_type)
+        .bind(params.url)
+        .bind(params.api_key)
+        .bind(params.categories)
+        .bind(priority)
+        .bind(search_interval)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(indexer_id)
+    }
+
+    /// Update an indexer's mutable fields.
+    pub async fn update_indexer(
+        &self,
+        params: &UpdateIndexerParams<'_>,
+    ) -> Result<(), DbError> {
+        if let Some(name) = params.name {
+            sqlx::query("UPDATE indexers SET name = ? WHERE id = ?")
+                .bind(name)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(url) = params.url {
+            sqlx::query("UPDATE indexers SET url = ? WHERE id = ?")
+                .bind(url)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(api_key) = params.api_key {
+            sqlx::query("UPDATE indexers SET api_key = ? WHERE id = ?")
+                .bind(api_key)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(categories) = params.categories {
+            sqlx::query("UPDATE indexers SET categories = ? WHERE id = ?")
+                .bind(categories)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(is_enabled) = params.is_enabled {
+            sqlx::query("UPDATE indexers SET is_enabled = ? WHERE id = ?")
+                .bind(is_enabled as i32)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(priority) = params.priority {
+            sqlx::query("UPDATE indexers SET priority = ? WHERE id = ?")
+                .bind(priority)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(search_interval) = params.search_interval_minutes {
+            sqlx::query("UPDATE indexers SET search_interval_minutes = ? WHERE id = ?")
+                .bind(search_interval)
+                .bind(params.indexer_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete an indexer.
+    pub async fn delete_indexer(&self, indexer_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM indexers WHERE id = ?")
+            .bind(indexer_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Update the last_searched_at timestamp for an indexer.
+    pub async fn touch_indexer_searched(&self, indexer_id: &str) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE indexers SET last_searched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(indexer_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Acquisition engine — Download Clients
+    // =========================================================================
+
+    /// List all download clients, ordered by priority.
+    pub async fn list_download_clients(&self) -> Result<Vec<StoredDownloadClient>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, name, client_type, host, port, username, password, use_ssl, \
+                    download_directory, category, is_enabled, priority, created_at \
+             FROM download_clients ORDER BY priority ASC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredDownloadClient {
+                id: row.get("id"),
+                name: row.get("name"),
+                client_type: row.get("client_type"),
+                host: row.get("host"),
+                port: row.get("port"),
+                username: row.get("username"),
+                password: row.get("password"),
+                use_ssl: row.get::<i32, _>("use_ssl") != 0,
+                download_directory: row.get("download_directory"),
+                category: row.get("category"),
+                is_enabled: row.get::<i32, _>("is_enabled") != 0,
+                priority: row.get("priority"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    /// Get a single download client by ID.
+    pub async fn get_download_client(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<StoredDownloadClient>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, name, client_type, host, port, username, password, use_ssl, \
+                    download_directory, category, is_enabled, priority, created_at \
+             FROM download_clients WHERE id = ?",
+        )
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredDownloadClient {
+            id: row.get("id"),
+            name: row.get("name"),
+            client_type: row.get("client_type"),
+            host: row.get("host"),
+            port: row.get("port"),
+            username: row.get("username"),
+            password: row.get("password"),
+            use_ssl: row.get::<i32, _>("use_ssl") != 0,
+            download_directory: row.get("download_directory"),
+            category: row.get("category"),
+            is_enabled: row.get::<i32, _>("is_enabled") != 0,
+            priority: row.get("priority"),
+            created_at: row.get("created_at"),
+        }))
+    }
+
+    /// Get the first enabled download client (by priority).
+    pub async fn get_default_download_client(
+        &self,
+    ) -> Result<Option<StoredDownloadClient>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, name, client_type, host, port, username, password, use_ssl, \
+                    download_directory, category, is_enabled, priority, created_at \
+             FROM download_clients WHERE is_enabled = 1 ORDER BY priority ASC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredDownloadClient {
+            id: row.get("id"),
+            name: row.get("name"),
+            client_type: row.get("client_type"),
+            host: row.get("host"),
+            port: row.get("port"),
+            username: row.get("username"),
+            password: row.get("password"),
+            use_ssl: row.get::<i32, _>("use_ssl") != 0,
+            download_directory: row.get("download_directory"),
+            category: row.get("category"),
+            is_enabled: true,
+            priority: row.get("priority"),
+            created_at: row.get("created_at"),
+        }))
+    }
+
+    /// Create a new download client. Returns the generated ID.
+    pub async fn create_download_client(
+        &self,
+        params: &CreateDownloadClientParams<'_>,
+    ) -> Result<String, DbError> {
+        let client_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO download_clients (id, name, client_type, host, port, username, password, use_ssl, download_directory, category) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&client_id)
+        .bind(params.name)
+        .bind(params.client_type)
+        .bind(params.host)
+        .bind(params.port)
+        .bind(params.username)
+        .bind(params.password)
+        .bind(params.use_ssl as i32)
+        .bind(params.download_directory)
+        .bind(params.category)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(client_id)
+    }
+
+    /// Update a download client's mutable fields.
+    pub async fn update_download_client(
+        &self,
+        params: &UpdateDownloadClientParams<'_>,
+    ) -> Result<(), DbError> {
+        if let Some(name) = params.name {
+            sqlx::query("UPDATE download_clients SET name = ? WHERE id = ?")
+                .bind(name)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(host) = params.host {
+            sqlx::query("UPDATE download_clients SET host = ? WHERE id = ?")
+                .bind(host)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(port) = params.port {
+            sqlx::query("UPDATE download_clients SET port = ? WHERE id = ?")
+                .bind(port)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(username) = params.username {
+            sqlx::query("UPDATE download_clients SET username = ? WHERE id = ?")
+                .bind(username)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(password) = params.password {
+            sqlx::query("UPDATE download_clients SET password = ? WHERE id = ?")
+                .bind(password)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(use_ssl) = params.use_ssl {
+            sqlx::query("UPDATE download_clients SET use_ssl = ? WHERE id = ?")
+                .bind(use_ssl as i32)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(download_directory) = params.download_directory {
+            sqlx::query("UPDATE download_clients SET download_directory = ? WHERE id = ?")
+                .bind(download_directory)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(category) = params.category {
+            sqlx::query("UPDATE download_clients SET category = ? WHERE id = ?")
+                .bind(category)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(is_enabled) = params.is_enabled {
+            sqlx::query("UPDATE download_clients SET is_enabled = ? WHERE id = ?")
+                .bind(is_enabled as i32)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(priority) = params.priority {
+            sqlx::query("UPDATE download_clients SET priority = ? WHERE id = ?")
+                .bind(priority)
+                .bind(params.client_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a download client.
+    pub async fn delete_download_client(&self, client_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM download_clients WHERE id = ?")
+            .bind(client_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Acquisition engine — Wanted Items
+    // =========================================================================
+
+    /// List wanted items for a user. Optionally filter to active/unfulfilled only.
+    pub async fn list_wanted_items(
+        &self,
+        user_id: &str,
+        active_only: bool,
+    ) -> Result<Vec<StoredWantedItem>, DbError> {
+        let query_string = if active_only {
+            "SELECT id, user_id, item_type, title, author_name, isbn, year, \
+                    preferred_format, quality_profile, is_active, is_fulfilled, \
+                    fulfilled_at, last_searched_at, created_at \
+             FROM wanted_items WHERE user_id = ? AND is_active = 1 AND is_fulfilled = 0 \
+             ORDER BY created_at DESC"
+        } else {
+            "SELECT id, user_id, item_type, title, author_name, isbn, year, \
+                    preferred_format, quality_profile, is_active, is_fulfilled, \
+                    fulfilled_at, last_searched_at, created_at \
+             FROM wanted_items WHERE user_id = ? \
+             ORDER BY created_at DESC"
+        };
+
+        let rows = sqlx::query(query_string)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows.iter().map(Self::map_wanted_item_row).collect())
+    }
+
+    /// List all active unfulfilled wanted items across all users (for scheduler).
+    pub async fn list_all_active_wanted_items(&self) -> Result<Vec<StoredWantedItem>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, item_type, title, author_name, isbn, year, \
+                    preferred_format, quality_profile, is_active, is_fulfilled, \
+                    fulfilled_at, last_searched_at, created_at \
+             FROM wanted_items WHERE is_active = 1 AND is_fulfilled = 0 \
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(Self::map_wanted_item_row).collect())
+    }
+
+    /// Get a single wanted item by ID.
+    pub async fn get_wanted_item(
+        &self,
+        wanted_item_id: &str,
+    ) -> Result<Option<StoredWantedItem>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, user_id, item_type, title, author_name, isbn, year, \
+                    preferred_format, quality_profile, is_active, is_fulfilled, \
+                    fulfilled_at, last_searched_at, created_at \
+             FROM wanted_items WHERE id = ?",
+        )
+        .bind(wanted_item_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_wanted_item_row))
+    }
+
+    /// Create a new wanted item. Returns the generated ID.
+    pub async fn create_wanted_item(
+        &self,
+        params: &CreateWantedItemParams<'_>,
+    ) -> Result<String, DbError> {
+        let wanted_item_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO wanted_items (id, user_id, item_type, title, author_name, isbn, year, preferred_format, quality_profile) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&wanted_item_id)
+        .bind(params.user_id)
+        .bind(params.item_type)
+        .bind(params.title)
+        .bind(params.author_name)
+        .bind(params.isbn)
+        .bind(params.year)
+        .bind(params.preferred_format)
+        .bind(params.quality_profile)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(wanted_item_id)
+    }
+
+    /// Update a wanted item's mutable fields.
+    pub async fn update_wanted_item(
+        &self,
+        params: &UpdateWantedItemParams<'_>,
+    ) -> Result<(), DbError> {
+        if let Some(title) = params.title {
+            sqlx::query("UPDATE wanted_items SET title = ? WHERE id = ?")
+                .bind(title)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(author_name) = params.author_name {
+            sqlx::query("UPDATE wanted_items SET author_name = ? WHERE id = ?")
+                .bind(author_name)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(isbn) = params.isbn {
+            sqlx::query("UPDATE wanted_items SET isbn = ? WHERE id = ?")
+                .bind(isbn)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(year) = params.year {
+            sqlx::query("UPDATE wanted_items SET year = ? WHERE id = ?")
+                .bind(year)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(preferred_format) = params.preferred_format {
+            sqlx::query("UPDATE wanted_items SET preferred_format = ? WHERE id = ?")
+                .bind(preferred_format)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(quality_profile) = params.quality_profile {
+            sqlx::query("UPDATE wanted_items SET quality_profile = ? WHERE id = ?")
+                .bind(quality_profile)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(is_active) = params.is_active {
+            sqlx::query("UPDATE wanted_items SET is_active = ? WHERE id = ?")
+                .bind(is_active as i32)
+                .bind(params.wanted_item_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a wanted item.
+    pub async fn delete_wanted_item(&self, wanted_item_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM wanted_items WHERE id = ?")
+            .bind(wanted_item_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Mark a wanted item as fulfilled.
+    pub async fn mark_wanted_item_fulfilled(
+        &self,
+        wanted_item_id: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE wanted_items SET is_fulfilled = 1, \
+             fulfilled_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(wanted_item_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update the last_searched_at timestamp for a wanted item.
+    pub async fn touch_wanted_item_searched(
+        &self,
+        wanted_item_id: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE wanted_items SET last_searched_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(wanted_item_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Helper to map a wanted_items row to StoredWantedItem.
+    fn map_wanted_item_row(row: &sqlx::sqlite::SqliteRow) -> StoredWantedItem {
+        StoredWantedItem {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            item_type: row.get("item_type"),
+            title: row.get("title"),
+            author_name: row.get("author_name"),
+            isbn: row.get("isbn"),
+            year: row.get("year"),
+            preferred_format: row.get("preferred_format"),
+            quality_profile: row.get("quality_profile"),
+            is_active: row.get::<i32, _>("is_active") != 0,
+            is_fulfilled: row.get::<i32, _>("is_fulfilled") != 0,
+            fulfilled_at: row.get("fulfilled_at"),
+            last_searched_at: row.get("last_searched_at"),
+            created_at: row.get("created_at"),
+        }
+    }
+
+    // =========================================================================
+    // Acquisition engine — Downloads
+    // =========================================================================
+
+    /// List downloads, optionally filtered by status.
+    pub async fn list_downloads(
+        &self,
+        status_filter: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<StoredDownload>, DbError> {
+        let rows = if let Some(status) = status_filter {
+            sqlx::query(
+                "SELECT id, wanted_item_id, indexer_id, download_client_id, title, download_url, \
+                        magnet_url, torrent_hash, size_bytes, status, progress_percent, \
+                        error_message, file_path, target_library_id, created_at, updated_at \
+                 FROM downloads WHERE status = ? \
+                 ORDER BY created_at DESC LIMIT ?",
+            )
+            .bind(status)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT id, wanted_item_id, indexer_id, download_client_id, title, download_url, \
+                        magnet_url, torrent_hash, size_bytes, status, progress_percent, \
+                        error_message, file_path, target_library_id, created_at, updated_at \
+                 FROM downloads ORDER BY created_at DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(rows.iter().map(Self::map_download_row).collect())
+    }
+
+    /// Get a single download by ID.
+    pub async fn get_download(
+        &self,
+        download_id: &str,
+    ) -> Result<Option<StoredDownload>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, wanted_item_id, indexer_id, download_client_id, title, download_url, \
+                    magnet_url, torrent_hash, size_bytes, status, progress_percent, \
+                    error_message, file_path, target_library_id, created_at, updated_at \
+             FROM downloads WHERE id = ?",
+        )
+        .bind(download_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_download_row))
+    }
+
+    /// List active downloads (pending, downloading, importing).
+    pub async fn list_active_downloads(&self) -> Result<Vec<StoredDownload>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, wanted_item_id, indexer_id, download_client_id, title, download_url, \
+                    magnet_url, torrent_hash, size_bytes, status, progress_percent, \
+                    error_message, file_path, target_library_id, created_at, updated_at \
+             FROM downloads WHERE status IN ('pending', 'downloading', 'importing') \
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(Self::map_download_row).collect())
+    }
+
+    /// Create a new download entry. Returns the generated ID.
+    pub async fn create_download(
+        &self,
+        params: &CreateDownloadParams<'_>,
+    ) -> Result<String, DbError> {
+        let download_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO downloads (id, wanted_item_id, indexer_id, download_client_id, title, \
+                                    download_url, magnet_url, torrent_hash, size_bytes, target_library_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&download_id)
+        .bind(params.wanted_item_id)
+        .bind(params.indexer_id)
+        .bind(params.download_client_id)
+        .bind(params.title)
+        .bind(params.download_url)
+        .bind(params.magnet_url)
+        .bind(params.torrent_hash)
+        .bind(params.size_bytes)
+        .bind(params.target_library_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(download_id)
+    }
+
+    /// Update a download's status and progress.
+    pub async fn update_download_status(
+        &self,
+        download_id: &str,
+        status: &str,
+        progress_percent: f64,
+        error_message: Option<&str>,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE downloads SET status = ?, progress_percent = ?, error_message = ?, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(status)
+        .bind(progress_percent)
+        .bind(error_message)
+        .bind(download_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Update a download's file path (set when import finds the file).
+    pub async fn update_download_file_path(
+        &self,
+        download_id: &str,
+        file_path: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE downloads SET file_path = ?, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(file_path)
+        .bind(download_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a download entry.
+    pub async fn delete_download(&self, download_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM downloads WHERE id = ?")
+            .bind(download_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Mark stale downloads (stuck in downloading state for more than the given duration)
+    /// as failed. Returns the number of downloads marked as failed.
+    pub async fn mark_stale_downloads_failed(
+        &self,
+        stale_threshold_hours: i64,
+    ) -> Result<u64, DbError> {
+        let result = sqlx::query(
+            "UPDATE downloads SET status = 'failed', \
+             error_message = 'Download timed out (stale)', \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') \
+             WHERE status = 'downloading' \
+             AND updated_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' hours')",
+        )
+        .bind(format!("-{stale_threshold_hours}"))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Helper to map a downloads row to StoredDownload.
+    fn map_download_row(row: &sqlx::sqlite::SqliteRow) -> StoredDownload {
+        StoredDownload {
+            id: row.get("id"),
+            wanted_item_id: row.get("wanted_item_id"),
+            indexer_id: row.get("indexer_id"),
+            download_client_id: row.get("download_client_id"),
+            title: row.get("title"),
+            download_url: row.get("download_url"),
+            magnet_url: row.get("magnet_url"),
+            torrent_hash: row.get("torrent_hash"),
+            size_bytes: row.get("size_bytes"),
+            status: row.get("status"),
+            progress_percent: row.get("progress_percent"),
+            error_message: row.get("error_message"),
+            file_path: row.get("file_path"),
+            target_library_id: row.get("target_library_id"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
     }
 }

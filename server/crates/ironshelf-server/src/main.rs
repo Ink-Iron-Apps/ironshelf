@@ -281,6 +281,78 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/webhooks/{id}/test",
             axum::routing::post(routes::webhooks::test_webhook),
         )
+        // Acquisition engine — Indexers
+        .route(
+            "/api/v1/indexers",
+            get(routes::acquisition::list_indexers)
+                .post(routes::acquisition::create_indexer),
+        )
+        .route(
+            "/api/v1/indexers/{id}",
+            axum::routing::patch(routes::acquisition::update_indexer)
+                .delete(routes::acquisition::delete_indexer),
+        )
+        .route(
+            "/api/v1/indexers/{id}/test",
+            axum::routing::post(routes::acquisition::test_indexer),
+        )
+        // Acquisition engine — Download Clients
+        .route(
+            "/api/v1/download-clients",
+            get(routes::acquisition::list_download_clients)
+                .post(routes::acquisition::create_download_client),
+        )
+        .route(
+            "/api/v1/download-clients/{id}",
+            axum::routing::patch(routes::acquisition::update_download_client)
+                .delete(routes::acquisition::delete_download_client),
+        )
+        .route(
+            "/api/v1/download-clients/{id}/test",
+            axum::routing::post(routes::acquisition::test_download_client),
+        )
+        // Acquisition engine — Wanted List
+        .route(
+            "/api/v1/wanted",
+            get(routes::acquisition::list_wanted)
+                .post(routes::acquisition::create_wanted),
+        )
+        .route(
+            "/api/v1/wanted/{id}",
+            axum::routing::patch(routes::acquisition::update_wanted)
+                .delete(routes::acquisition::delete_wanted),
+        )
+        .route(
+            "/api/v1/wanted/{id}/search",
+            axum::routing::post(routes::acquisition::search_wanted_item),
+        )
+        .route(
+            "/api/v1/wanted/{id}/grab",
+            axum::routing::post(routes::acquisition::grab_wanted_item),
+        )
+        // Acquisition engine — Downloads
+        .route(
+            "/api/v1/downloads",
+            get(routes::acquisition::list_downloads),
+        )
+        .route(
+            "/api/v1/downloads/{id}",
+            get(routes::acquisition::get_download)
+                .delete(routes::acquisition::delete_download),
+        )
+        .route(
+            "/api/v1/downloads/{id}/retry",
+            axum::routing::post(routes::acquisition::retry_download),
+        )
+        // Acquisition engine — Global search + grab
+        .route(
+            "/api/v1/acquisition/search",
+            get(routes::acquisition::acquisition_search),
+        )
+        .route(
+            "/api/v1/acquisition/grab",
+            axum::routing::post(routes::acquisition::acquisition_grab),
+        )
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
