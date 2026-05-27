@@ -124,4 +124,6 @@ pub struct AppState {
     pub started_at: std::time::Instant,
     /// Full-text search index (tantivy). `None` if index failed to initialize.
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
+    /// Path to the thumbnail cache directory for resized cover images.
+    pub thumbnail_cache_path: PathBuf,
 }

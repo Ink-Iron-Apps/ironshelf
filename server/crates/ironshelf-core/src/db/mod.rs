@@ -117,6 +117,27 @@ impl IronshelfDb {
         let migration_008 = include_str!("migrations/008_webdav_files.sql");
         sqlx::raw_sql(migration_008).execute(&self.pool).await?;
 
+        let migration_009 = include_str!("migrations/009_ratings_reviews.sql");
+        sqlx::raw_sql(migration_009).execute(&self.pool).await?;
+
+        let migration_010 = include_str!("migrations/010_reading_queue.sql");
+        sqlx::raw_sql(migration_010).execute(&self.pool).await?;
+
+        let migration_011 = include_str!("migrations/011_reading_goals.sql");
+        sqlx::raw_sql(migration_011).execute(&self.pool).await?;
+
+        let migration_012 = include_str!("migrations/012_highlights.sql");
+        sqlx::raw_sql(migration_012).execute(&self.pool).await?;
+
+        let migration_013 = include_str!("migrations/013_webhooks.sql");
+        sqlx::raw_sql(migration_013).execute(&self.pool).await?;
+
+        let migration_014 = include_str!("migrations/014_library_access.sql");
+        sqlx::raw_sql(migration_014).execute(&self.pool).await?;
+
+        let migration_015 = include_str!("migrations/015_oidc_and_conversions.sql");
+        sqlx::raw_sql(migration_015).execute(&self.pool).await?;
+
         Ok(())
     }
 
@@ -1070,7 +1091,690 @@ impl IronshelfDb {
 
         Ok(())
     }
+
+    // --- Highlights / Annotations ---
+
+    /// Create a new highlight for a user on a book. Returns the generated ID.
+    pub async fn create_highlight(
+        &self,
+        user_id: &str,
+        book_id: &str,
+        format: &str,
+        cfi_range: &str,
+        text_content: Option<&str>,
+        color: &str,
+        note: Option<&str>,
+    ) -> Result<String, DbError> {
+        let highlight_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO highlights (id, user_id, book_id, format, cfi_range, text_content, color, note) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&highlight_id)
+        .bind(user_id)
+        .bind(book_id)
+        .bind(format)
+        .bind(cfi_range)
+        .bind(text_content)
+        .bind(color)
+        .bind(note)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(highlight_id)
+    }
+
+    /// Update a highlight's note or color. Returns error if not found or not owned by user.
+    pub async fn update_highlight(
+        &self,
+        highlight_id: &str,
+        user_id: &str,
+        color: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<(), DbError> {
+        // Verify ownership
+        let existing = sqlx::query("SELECT id FROM highlights WHERE id = ? AND user_id = ?")
+            .bind(highlight_id)
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        if existing.is_none() {
+            return Err(DbError::NotFound);
+        }
+
+        if let Some(color) = color {
+            sqlx::query(
+                "UPDATE highlights SET color = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            )
+            .bind(color)
+            .bind(highlight_id)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        if let Some(note) = note {
+            sqlx::query(
+                "UPDATE highlights SET note = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            )
+            .bind(note)
+            .bind(highlight_id)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Delete a highlight. Returns error if not found or not owned by user.
+    pub async fn delete_highlight(
+        &self,
+        highlight_id: &str,
+        user_id: &str,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM highlights WHERE id = ? AND user_id = ?")
+            .bind(highlight_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Get all highlights for a specific book by a user.
+    pub async fn get_book_highlights(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<Vec<StoredHighlight>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, book_id, format, cfi_range, text_content, color, note, created_at, updated_at \
+             FROM highlights \
+             WHERE user_id = ? AND book_id = ? \
+             ORDER BY created_at ASC",
+        )
+        .bind(user_id)
+        .bind(book_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredHighlight {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                book_id: row.get("book_id"),
+                format: row.get("format"),
+                cfi_range: row.get("cfi_range"),
+                text_content: row.get("text_content"),
+                color: row.get("color"),
+                note: row.get("note"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// Get all highlights for a user, with optional filters by book_id and color.
+    pub async fn get_all_highlights(
+        &self,
+        user_id: &str,
+        book_id_filter: Option<&str>,
+        color_filter: Option<&str>,
+    ) -> Result<Vec<StoredHighlight>, DbError> {
+        let mut query_string =
+            "SELECT id, user_id, book_id, format, cfi_range, text_content, color, note, created_at, updated_at \
+             FROM highlights WHERE user_id = ?".to_string();
+
+        let mut bindings: Vec<String> = vec![user_id.to_string()];
+
+        if let Some(book_id) = book_id_filter {
+            query_string.push_str(" AND book_id = ?");
+            bindings.push(book_id.to_string());
+        }
+        if let Some(color) = color_filter {
+            query_string.push_str(" AND color = ?");
+            bindings.push(color.to_string());
+        }
+
+        query_string.push_str(" ORDER BY created_at DESC");
+
+        let mut sql_query = sqlx::query(&query_string);
+        for binding in &bindings {
+            sql_query = sql_query.bind(binding);
+        }
+
+        let rows = sql_query.fetch_all(&self.pool).await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredHighlight {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                book_id: row.get("book_id"),
+                format: row.get("format"),
+                cfi_range: row.get("cfi_range"),
+                text_content: row.get("text_content"),
+                color: row.get("color"),
+                note: row.get("note"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect())
+    }
+
+    // --- Webhooks ---
+
+    /// Create a new webhook. Returns the generated ID.
+    pub async fn create_webhook(
+        &self,
+        user_id: &str,
+        name: &str,
+        url: &str,
+        secret: Option<&str>,
+        events: &[String],
+    ) -> Result<String, DbError> {
+        let webhook_id = uuid::Uuid::new_v4().to_string();
+        let events_joined = events.join(",");
+
+        sqlx::query(
+            "INSERT INTO webhooks (id, user_id, name, url, secret, events) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&webhook_id)
+        .bind(user_id)
+        .bind(name)
+        .bind(url)
+        .bind(secret)
+        .bind(&events_joined)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(webhook_id)
+    }
+
+    /// List all webhooks for a user.
+    pub async fn list_webhooks(&self, user_id: &str) -> Result<Vec<StoredWebhook>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, name, url, secret, events, is_active, created_at \
+             FROM webhooks WHERE user_id = ? ORDER BY created_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let events_str: String = row.get("events");
+                StoredWebhook {
+                    id: row.get("id"),
+                    user_id: row.get("user_id"),
+                    name: row.get("name"),
+                    url: row.get("url"),
+                    secret: row.get("secret"),
+                    events: events_str.split(',').map(|s| s.to_string()).collect(),
+                    is_active: row.get::<i32, _>("is_active") != 0,
+                    created_at: row.get("created_at"),
+                }
+            })
+            .collect())
+    }
+
+    /// Update a webhook's mutable fields.
+    pub async fn update_webhook(
+        &self,
+        webhook_id: &str,
+        user_id: &str,
+        name: Option<&str>,
+        url: Option<&str>,
+        secret: Option<&str>,
+        events: Option<&[String]>,
+        is_active: Option<bool>,
+    ) -> Result<(), DbError> {
+        if let Some(name) = name {
+            sqlx::query("UPDATE webhooks SET name = ? WHERE id = ? AND user_id = ?")
+                .bind(name)
+                .bind(webhook_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(url) = url {
+            sqlx::query("UPDATE webhooks SET url = ? WHERE id = ? AND user_id = ?")
+                .bind(url)
+                .bind(webhook_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(secret) = secret {
+            sqlx::query("UPDATE webhooks SET secret = ? WHERE id = ? AND user_id = ?")
+                .bind(secret)
+                .bind(webhook_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(events) = events {
+            let events_joined = events.join(",");
+            sqlx::query("UPDATE webhooks SET events = ? WHERE id = ? AND user_id = ?")
+                .bind(&events_joined)
+                .bind(webhook_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(is_active) = is_active {
+            sqlx::query("UPDATE webhooks SET is_active = ? WHERE id = ? AND user_id = ?")
+                .bind(is_active as i32)
+                .bind(webhook_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete a webhook owned by the given user.
+    pub async fn delete_webhook(&self, webhook_id: &str, user_id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM webhooks WHERE id = ? AND user_id = ?")
+            .bind(webhook_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Get all active webhooks subscribed to a given event.
+    pub async fn get_webhooks_for_event(
+        &self,
+        event: &str,
+    ) -> Result<Vec<StoredWebhook>, DbError> {
+        // SQLite LIKE to match comma-separated events containing the target event.
+        let rows = sqlx::query(
+            "SELECT id, user_id, name, url, secret, events, is_active, created_at \
+             FROM webhooks WHERE is_active = 1 AND (',' || events || ',') LIKE '%,' || ? || ',%'",
+        )
+        .bind(event)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let events_str: String = row.get("events");
+                StoredWebhook {
+                    id: row.get("id"),
+                    user_id: row.get("user_id"),
+                    name: row.get("name"),
+                    url: row.get("url"),
+                    secret: row.get("secret"),
+                    events: events_str.split(',').map(|s| s.to_string()).collect(),
+                    is_active: true,
+                    created_at: row.get("created_at"),
+                }
+            })
+            .collect())
+    }
+
+    /// Log a webhook delivery attempt.
+    pub async fn log_webhook_delivery(
+        &self,
+        webhook_id: &str,
+        event: &str,
+        payload_json: &str,
+        response_status: Option<i32>,
+        response_body: Option<&str>,
+        is_success: bool,
+    ) -> Result<String, DbError> {
+        let delivery_id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            "INSERT INTO webhook_deliveries (id, webhook_id, event, payload_json, response_status, response_body, is_success) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&delivery_id)
+        .bind(webhook_id)
+        .bind(event)
+        .bind(payload_json)
+        .bind(response_status)
+        .bind(response_body)
+        .bind(is_success as i32)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(delivery_id)
+    }
+
+    /// Get delivery history for a webhook.
+    pub async fn get_webhook_deliveries(
+        &self,
+        webhook_id: &str,
+        limit: i64,
+    ) -> Result<Vec<StoredWebhookDelivery>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, webhook_id, event, payload_json, response_status, response_body, delivered_at, is_success \
+             FROM webhook_deliveries WHERE webhook_id = ? ORDER BY delivered_at DESC LIMIT ?",
+        )
+        .bind(webhook_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredWebhookDelivery {
+                id: row.get("id"),
+                webhook_id: row.get("webhook_id"),
+                event: row.get("event"),
+                payload_json: row.get("payload_json"),
+                response_status: row.get("response_status"),
+                response_body: row.get("response_body"),
+                delivered_at: row.get("delivered_at"),
+                is_success: row.get::<i32, _>("is_success") != 0,
+            })
+            .collect())
+    }
+
+    /// Get a single webhook by ID (for ownership check).
+    pub async fn get_webhook(&self, webhook_id: &str) -> Result<Option<StoredWebhook>, DbError> {
+        let row = sqlx::query(
+            "SELECT id, user_id, name, url, secret, events, is_active, created_at \
+             FROM webhooks WHERE id = ?",
+        )
+        .bind(webhook_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let events_str: String = row.get("events");
+            StoredWebhook {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                name: row.get("name"),
+                url: row.get("url"),
+                secret: row.get("secret"),
+                events: events_str.split(',').map(|s| s.to_string()).collect(),
+                is_active: row.get::<i32, _>("is_active") != 0,
+                created_at: row.get("created_at"),
+            }
+        }))
+    }
+
+    // --- Library access control ---
+
+    /// Set the library access list for a user. Pass empty vec to clear (grant access to all).
+    pub async fn set_library_access(
+        &self,
+        user_id: &str,
+        library_ids: &[String],
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM library_access WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        for library_id in library_ids {
+            sqlx::query("INSERT INTO library_access (user_id, library_id) VALUES (?, ?)")
+                .bind(user_id)
+                .bind(library_id)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the list of accessible library IDs for a user.
+    /// Returns None if no restrictions (user sees all libraries).
+    /// Returns Some(vec) if the user is restricted to specific libraries.
+    pub async fn get_accessible_libraries(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<Vec<String>>, DbError> {
+        let rows = sqlx::query("SELECT library_id FROM library_access WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+        if rows.is_empty() {
+            Ok(None) // No restrictions — user sees all
+        } else {
+            Ok(Some(rows.iter().map(|row| row.get("library_id")).collect()))
+        }
+    }
+
+    /// Clear all library access restrictions for a user (grant access to all).
+    pub async fn clear_library_access(&self, user_id: &str) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM library_access WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
+
+    // --- Reading goals ---
+
+    /// Set (upsert) a reading goal for a user in a given year.
+    pub async fn set_reading_goal(
+        &self,
+        user_id: &str,
+        year: i32,
+        target_books: i32,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO reading_goals (user_id, year, target_books) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(user_id, year) DO UPDATE SET target_books = excluded.target_books",
+        )
+        .bind(user_id)
+        .bind(year)
+        .bind(target_books)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get the reading goal for a user in a given year.
+    pub async fn get_reading_goal(
+        &self,
+        user_id: &str,
+        year: i32,
+    ) -> Result<Option<StoredReadingGoal>, DbError> {
+        let row = sqlx::query(
+            "SELECT user_id, year, target_books, created_at \
+             FROM reading_goals WHERE user_id = ? AND year = ?",
+        )
+        .bind(user_id)
+        .bind(year)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| StoredReadingGoal {
+            user_id: row.get("user_id"),
+            year: row.get("year"),
+            target_books: row.get("target_books"),
+            created_at: row.get("created_at"),
+        }))
+    }
+
+    /// Mark a book as completed for a user. Idempotent (ignores if already exists).
+    pub async fn mark_book_completed(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO completed_books (user_id, book_id) \
+             VALUES (?, ?) \
+             ON CONFLICT(user_id, book_id) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(book_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Unmark a book as completed for a user.
+    pub async fn unmark_book_completed(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM completed_books WHERE user_id = ? AND book_id = ?")
+            .bind(user_id)
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get completed books for a user in a given year (by completed_at timestamp).
+    pub async fn get_completed_books(
+        &self,
+        user_id: &str,
+        year: i32,
+    ) -> Result<Vec<StoredCompletedBook>, DbError> {
+        let year_start = format!("{year}-01-01T00:00:00Z");
+        let year_end = format!("{}-01-01T00:00:00Z", year + 1);
+
+        let rows = sqlx::query(
+            "SELECT user_id, book_id, completed_at \
+             FROM completed_books \
+             WHERE user_id = ? AND completed_at >= ? AND completed_at < ? \
+             ORDER BY completed_at ASC",
+        )
+        .bind(user_id)
+        .bind(&year_start)
+        .bind(&year_end)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredCompletedBook {
+                user_id: row.get("user_id"),
+                book_id: row.get("book_id"),
+                completed_at: row.get("completed_at"),
+            })
+            .collect())
+    }
+
+    /// Get total count of completed books for a user in a given year.
+    pub async fn get_completed_count(
+        &self,
+        user_id: &str,
+        year: i32,
+    ) -> Result<i64, DbError> {
+        let year_start = format!("{year}-01-01T00:00:00Z");
+        let year_end = format!("{}-01-01T00:00:00Z", year + 1);
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM completed_books \
+             WHERE user_id = ? AND completed_at >= ? AND completed_at < ?",
+        )
+        .bind(user_id)
+        .bind(&year_start)
+        .bind(&year_end)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    /// Get total count of all completed books for a user (all time).
+    pub async fn get_total_completed_count(&self, user_id: &str) -> Result<i64, DbError> {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM completed_books WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+        Ok(count)
+    }
+
+    /// Get distinct dates (YYYY-MM-DD) on which a user had activity (book_opened or progress_updated).
+    /// Used for streak calculation.
+    pub async fn get_activity_dates(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT date(created_at) AS activity_date \
+             FROM activity_log \
+             WHERE user_id = ? AND action IN ('book_opened', 'progress_updated') \
+             ORDER BY activity_date DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(|row| row.get("activity_date")).collect())
+    }
+
+    /// Get completed books by month for a user in a given year.
+    /// Returns Vec of (month_number, count) tuples.
+    pub async fn get_completed_by_month(
+        &self,
+        user_id: &str,
+        year: i32,
+    ) -> Result<Vec<(i32, i64)>, DbError> {
+        let year_start = format!("{year}-01-01T00:00:00Z");
+        let year_end = format!("{}-01-01T00:00:00Z", year + 1);
+
+        let rows = sqlx::query(
+            "SELECT CAST(strftime('%m', completed_at) AS INTEGER) AS month_number, \
+                    COUNT(*) AS book_count \
+             FROM completed_books \
+             WHERE user_id = ? AND completed_at >= ? AND completed_at < ? \
+             GROUP BY month_number \
+             ORDER BY month_number",
+        )
+        .bind(user_id)
+        .bind(&year_start)
+        .bind(&year_end)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| (row.get::<i32, _>("month_number"), row.get::<i64, _>("book_count")))
+            .collect())
+    }
+
+
+}
+/// A reading goal as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredReadingGoal {
+    pub user_id: String,
+    pub year: i32,
+    pub target_books: i32,
+    pub created_at: String,
+}
+
+/// A completed book entry as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredCompletedBook {
+    pub user_id: String,
+    pub book_id: String,
+    pub completed_at: String,
+}
+
 
 /// A notification as stored in the database.
 #[derive(Debug, Clone)]
@@ -1105,4 +1809,45 @@ pub struct StoredBookOverride {
     pub cover_url: Option<String>,
     pub tags_json: Option<String>,
     pub applied_at: String,
+}
+
+/// A highlight/annotation as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredHighlight {
+    pub id: String,
+    pub user_id: String,
+    pub book_id: String,
+    pub format: String,
+    pub cfi_range: String,
+    pub text_content: Option<String>,
+    pub color: String,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A webhook as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredWebhook {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub url: String,
+    pub secret: Option<String>,
+    pub events: Vec<String>,
+    pub is_active: bool,
+    pub created_at: String,
+}
+
+/// A webhook delivery log entry.
+#[derive(Debug, Clone)]
+pub struct StoredWebhookDelivery {
+    pub id: String,
+    pub webhook_id: String,
+    pub event: String,
+    pub payload_json: String,
+    pub response_status: Option<i32>,
+    pub response_body: Option<String>,
+    pub delivered_at: String,
+    pub is_success: bool,
 }

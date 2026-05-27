@@ -8,6 +8,7 @@ mod pagination;
 mod routes;
 mod scheduler;
 mod state;
+pub mod thumbnail;
 mod web;
 
 use axum::extract::State;
@@ -66,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         ironshelf_db,
         started_at: Instant::now(),
         search_index,
+        thumbnail_cache_path: config.thumbnail_cache_path.clone(),
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
@@ -165,6 +167,21 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/books/{id}/bookmarks/{bookmark_id}",
             axum::routing::delete(routes::progress::delete_bookmark),
+        )
+        // Highlights / annotations
+        .route(
+            "/api/v1/books/{id}/highlights",
+            get(routes::highlights::list_book_highlights)
+                .post(routes::highlights::create_highlight),
+        )
+        .route(
+            "/api/v1/highlights/{id}",
+            axum::routing::patch(routes::highlights::update_highlight)
+                .delete(routes::highlights::delete_highlight),
+        )
+        .route(
+            "/api/v1/me/highlights",
+            get(routes::highlights::list_all_highlights),
         )
         // Collections (reading lists)
         .route(

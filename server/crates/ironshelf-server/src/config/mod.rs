@@ -4,6 +4,28 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// OIDC/SSO configuration for external identity provider login.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OidcConfig {
+    pub issuer_url: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub redirect_uri: String,
+    #[serde(default = "default_oidc_scopes")]
+    pub scopes: Vec<String>,
+    /// Auto-create user on first SSO login if true.
+    #[serde(default)]
+    pub auto_register: bool,
+}
+
+fn default_oidc_scopes() -> Vec<String> {
+    vec![
+        "openid".to_string(),
+        "profile".to_string(),
+        "email".to_string(),
+    ]
+}
+
 /// Server bootstrap config. Libraries NOT here — they live in the DB.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -20,6 +42,14 @@ pub struct Config {
     /// Path to the tantivy full-text search index directory.
     #[serde(default = "default_search_index_path")]
     pub search_index_path: PathBuf,
+
+    /// Path to the thumbnail cache directory for resized cover images.
+    #[serde(default = "default_thumbnail_cache_path")]
+    pub thumbnail_cache_path: PathBuf,
+
+    /// Optional OIDC/SSO configuration for external identity provider login.
+    #[serde(default)]
+    pub oidc: Option<OidcConfig>,
 }
 
 fn default_port() -> u16 {
@@ -36,6 +66,10 @@ fn default_ironshelf_db() -> PathBuf {
 
 fn default_search_index_path() -> PathBuf {
     PathBuf::from("./ironshelf-search-index/")
+}
+
+fn default_thumbnail_cache_path() -> PathBuf {
+    PathBuf::from("./ironshelf-thumbnail-cache/")
 }
 
 impl Config {
@@ -71,6 +105,8 @@ impl Config {
                 host: default_host(),
                 database_path: default_ironshelf_db(),
                 search_index_path: default_search_index_path(),
+                thumbnail_cache_path: default_thumbnail_cache_path(),
+                oidc: None,
             }
         };
 
@@ -88,6 +124,9 @@ impl Config {
         }
         if let Ok(search_index_path) = std::env::var("IRONSHELF_SEARCH_INDEX") {
             config.search_index_path = PathBuf::from(search_index_path);
+        }
+        if let Ok(thumbnail_cache_path) = std::env::var("IRONSHELF_THUMBNAIL_CACHE") {
+            config.thumbnail_cache_path = PathBuf::from(thumbnail_cache_path);
         }
 
         Ok(config)
