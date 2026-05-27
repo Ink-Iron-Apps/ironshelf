@@ -18,20 +18,21 @@ class AuthorDetailScreen extends ConsumerWidget {
     final authorDetailAsync = ref.watch(authorDetailProvider(authorId));
     final standaloneAsync = ref.watch(authorStandaloneBooksProvider(authorId));
 
-    return Scaffold(
-      body: authorDetailAsync.when(
-        loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+    return authorDetailAsync.when(
+      loading: () => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(),
+        body: ErrorState(
+          message: 'Could not load author',
+          onRetry: () => ref.invalidate(authorDetailProvider(authorId)),
         ),
-        error: (error, stack) => Scaffold(
-          appBar: AppBar(),
-          body: ErrorState(
-            message: 'Could not load author',
-            onRetry: () => ref.invalidate(authorDetailProvider(authorId)),
-          ),
-        ),
-        data: (authorDetail) {
-          return CustomScrollView(
+      ),
+      data: (authorDetail) {
+        return Scaffold(
+          body: CustomScrollView(
             slivers: [
               SliverAppBar(
                 floating: true,
@@ -157,17 +158,19 @@ class AuthorDetailScreen extends ConsumerWidget {
 
               const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
   String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '?';
+    final parts = trimmed.split(RegExp(r'\s+'));
     if (parts.length >= 2) {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return trimmed[0].toUpperCase();
   }
 }

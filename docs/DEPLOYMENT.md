@@ -13,14 +13,11 @@ This guide covers installing and running Ironshelf on a Linux server.
 
 ### Option A: Automated Install Script
 
-1. Download the latest release from GitHub:
+1. Download the install script from the latest release:
 
 ```bash
-# Download the binary and deployment files
-curl -LO https://github.com/LightWraith8268/ironshelf/releases/latest/download/ironshelf-server
-curl -LO https://github.com/LightWraith8268/ironshelf/releases/latest/download/ironshelf.service
 curl -LO https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh
-chmod +x install.sh ironshelf-server
+chmod +x install.sh
 ```
 
 2. Run the install script:
@@ -65,20 +62,12 @@ sudo systemctl enable --now ironshelf
 Ironshelf reads its configuration from `/opt/ironshelf/config.toml`. A minimal example:
 
 ```toml
-[server]
 host = "0.0.0.0"
 port = 10810
-
-[[library]]
-name = "Main Library"
-source = "calibre"
-path = "/mnt/books/Calibre Library"
-
-[[library]]
-name = "Unsorted"
-source = "folder"
-path = "/mnt/books/unsorted"
+database_path = "/opt/ironshelf/ironshelf.db"
 ```
+
+Libraries are managed through the web UI (Settings → Libraries → Add Library), not the configuration file.
 
 ### Environment Variables
 

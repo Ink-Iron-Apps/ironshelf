@@ -21,7 +21,7 @@ detect_platform() {
 
     case "$os" in
         Linux)  PLATFORM="linux" ;;
-        Darwin) PLATFORM="darwin" ;;
+        Darwin) PLATFORM="macos" ;;
         *)      error "Unsupported OS: $os" ;;
     esac
 
@@ -69,33 +69,36 @@ download_binary() {
 
 write_default_config() {
     local config_path="$1"
+    local data_dir="$2"
     if [[ -f "$config_path" ]]; then
         info "Config already exists at $config_path, not overwriting."
         return
     fi
 
     mkdir -p "$(dirname "$config_path")"
-    cat > "$config_path" << 'EOF'
+    cat > "$config_path" << EOF
 # Ironshelf Configuration
+# See https://github.com/LightWraith8268/ironshelf for documentation.
 
-[server]
 host = "0.0.0.0"
 port = 10810
+database_path = "${data_dir}/ironshelf.db"
 
-# Add library sources below.
-# Each [[library]] entry defines one library.
+# search_index_path = "${data_dir}/ironshelf-search-index/"
+# thumbnail_cache_path = "${data_dir}/ironshelf-thumbnail-cache/"
+# tls_enabled = false
+# trust_proxy_headers = false
 
-# Example: Calibre library
-# [[library]]
-# name = "Main Library"
-# source = "calibre"
-# path = "/path/to/calibre/library"
+# Libraries are managed through the web UI, not this file.
 
-# Example: Folder scan
-# [[library]]
-# name = "Unsorted Books"
-# source = "folder"
-# path = "/path/to/ebooks"
+# Optional: OIDC/SSO login (Authelia, Authentik, Keycloak, etc.)
+# [oidc]
+# issuer_url = "https://auth.example.com"
+# client_id = "ironshelf"
+# client_secret = "your-secret"
+# redirect_uri = "https://books.example.com/api/v1/auth/oidc/callback"
+# scopes = ["openid", "profile", "email"]
+# auto_register = true
 EOF
     info "Default config written to $config_path"
 }
@@ -124,7 +127,7 @@ install_linux() {
     download_binary "$binary_path"
 
     # Config
-    write_default_config "$config_path"
+    write_default_config "$config_path" "$install_dir"
 
     # Ownership
     chown -R "$SERVICE_NAME":"$SERVICE_NAME" "$install_dir"
@@ -159,6 +162,9 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
 ReadWritePaths=/opt/ironshelf
 
 # Calibre library directories (add your paths here)
@@ -177,13 +183,16 @@ EOF
     echo ""
     systemctl status "$SERVICE_NAME" --no-pager || true
     echo ""
-    echo "Running at: http://$(hostname -I | awk '{print $1}'):${DEFAULT_PORT}"
+    local server_ip
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+    echo "Running at: http://${server_ip}:${DEFAULT_PORT}"
     echo "Config:     ${config_path}"
     echo "Logs:       journalctl -u ${SERVICE_NAME} -f"
     echo ""
     echo "Next steps:"
-    echo "  1. Edit ${config_path} to add your library paths"
-    echo "  2. Restart after config changes: systemctl restart ironshelf"
+    echo "  1. Open http://localhost:${DEFAULT_PORT} and register your admin account"
+    echo "  2. Add libraries via Settings → Libraries in the web UI"
+    echo "  3. Config file: ${config_path}"
 }
 
 # --- macOS installation ---
@@ -206,7 +215,7 @@ install_macos() {
     download_binary "$binary_path"
 
     # Config
-    write_default_config "$config_path"
+    write_default_config "$config_path" "$config_dir"
 
     # Install launchd plist
     mkdir -p "$plist_dir"
@@ -260,8 +269,10 @@ EOF
     echo "Plist:      ${plist_path}"
     echo ""
     echo "Next steps:"
-    echo "  1. Edit ${config_path} to add your library paths"
-    echo "  2. Restart after config changes:"
+    echo "  1. Open http://localhost:${DEFAULT_PORT} and register your admin account"
+    echo "  2. Add libraries via Settings → Libraries in the web UI"
+    echo "  3. Config file: ${config_path}"
+    echo "  4. Restart after config changes:"
     echo "     launchctl unload ${plist_path} && launchctl load ${plist_path}"
 }
 

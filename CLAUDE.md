@@ -81,7 +81,7 @@ Embedded SPA in `server/web/` — vanilla JS + CSS, no framework, no build step.
 
 ## Current state
 
-**M0 (scaffold) complete.** Next = M1 (Calibre read + hierarchy API). See `docs/ROADMAP.md` for full milestone plan.
+**All milestones (M0–M5+) complete.** Server fully functional: Calibre RO reader, folder scan, hierarchy API, auth (session + API key + OIDC/SSO), file streaming, progress sync, full-text search (tantivy), OPDS, Kobo sync, WebDAV, webhooks, notifications, highlights, collections, genres, ratings/reviews, reading goals/queue, metadata enrichment, import/export, stats, rate limiting, security headers, graceful shutdown, embedded web UI w/ EPUB/PDF/CBZ readers. Flutter app scaffolded w/ all screens. See `docs/ROADMAP.md` for milestone history.
 
 ## Settings screens (global app rules apply)
 

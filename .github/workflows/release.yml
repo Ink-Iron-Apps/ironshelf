@@ -123,12 +123,22 @@ jobs:
             CURRENT_VERSION="${LAST_TAG#v}"
           fi
 
-          # Determine bump type from conventional commits
-          BUMP="patch"
+          # Determine bump type from conventional commits.
+          # If all commits are non-bumping types (chore, ci, docs, style, build),
+          # skip the release entirely.
+          BUMP="none"
           if echo "$COMMITS" | grep -qiE "^feat(\(.*\))?!:|BREAKING CHANGE"; then
             BUMP="major"
           elif echo "$COMMITS" | grep -qiE "^feat(\(.*\))?:"; then
             BUMP="minor"
+          elif echo "$COMMITS" | grep -qiE "^(fix|perf|refactor)(\(.*\))?:"; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "No version-bumping commits found (only chore/ci/docs/style/build). Skipping release."
+            exit 0
           fi
 
           # Calculate new version
@@ -183,11 +193,12 @@ jobs:
           # Make unix binaries executable
           chmod +x release-assets/ironshelf-server-linux-* 2>/dev/null || true
           chmod +x release-assets/ironshelf-server-macos-* 2>/dev/null || true
-          # Include install scripts
+          # Include install scripts and make shell scripts executable
           cp deploy/install.sh release-assets/
           cp deploy/install.ps1 release-assets/
           cp deploy/uninstall.sh release-assets/
           cp deploy/uninstall.ps1 release-assets/
+          chmod +x release-assets/install.sh release-assets/uninstall.sh
           ls -la release-assets/
 
       - name: Create GitHub Release

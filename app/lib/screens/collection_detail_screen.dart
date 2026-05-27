@@ -17,21 +17,22 @@ class CollectionDetailScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final detailAsync = ref.watch(collectionDetailProvider(collectionId));
 
-    return Scaffold(
-      body: detailAsync.when(
-        loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+    return detailAsync.when(
+      loading: () => Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(),
+        body: ErrorState(
+          message: 'Could not load collection',
+          onRetry: () =>
+              ref.invalidate(collectionDetailProvider(collectionId)),
         ),
-        error: (error, stack) => Scaffold(
-          appBar: AppBar(),
-          body: ErrorState(
-            message: 'Could not load collection',
-            onRetry: () =>
-                ref.invalidate(collectionDetailProvider(collectionId)),
-          ),
-        ),
-        data: (detail) {
-          return CustomScrollView(
+      ),
+      data: (detail) {
+        return Scaffold(
+          body: CustomScrollView(
             slivers: [
               SliverAppBar(
                 floating: true,
@@ -142,9 +143,9 @@ class CollectionDetailScreen extends ConsumerWidget {
                   ),
                 ),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

@@ -150,21 +150,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/author/:id',
         builder: (context, state) {
-          final authorId = int.parse(state.pathParameters['id']!);
+          final authorId =
+              int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
           return AuthorDetailScreen(authorId: authorId);
         },
       ),
       GoRoute(
         path: '/series/:id',
         builder: (context, state) {
-          final seriesId = int.parse(state.pathParameters['id']!);
+          final seriesId =
+              int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
           return SeriesDetailScreen(seriesId: seriesId);
         },
       ),
       GoRoute(
         path: '/book/:id',
         builder: (context, state) {
-          final bookId = int.parse(state.pathParameters['id']!);
+          final bookId =
+              int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
           return BookDetailScreen(bookId: bookId);
         },
       ),

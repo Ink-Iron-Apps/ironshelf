@@ -1,3 +1,7 @@
+/// Sentinel value used by [ServerConfig.copyWith] to explicitly clear a
+/// nullable field to null (since passing `null` normally means "keep current").
+const _sentinel = Object();
+
 /// Server connection configuration.
 /// Stores URL + optional custom headers (e.g. CF-Access tokens).
 class ServerConfig {
@@ -13,17 +17,21 @@ class ServerConfig {
     this.apiKey,
   });
 
+  /// Copy with optional overrides. Pass explicit `null` wrapped via the named
+  /// parameters to clear nullable fields. Use the default (omit the argument)
+  /// to keep the current value.
   ServerConfig copyWith({
     String? serverUrl,
     Map<String, String>? customHeaders,
-    String? sessionId,
-    String? apiKey,
+    Object? sessionId = _sentinel,
+    Object? apiKey = _sentinel,
   }) {
     return ServerConfig(
       serverUrl: serverUrl ?? this.serverUrl,
       customHeaders: customHeaders ?? this.customHeaders,
-      sessionId: sessionId ?? this.sessionId,
-      apiKey: apiKey ?? this.apiKey,
+      sessionId:
+          identical(sessionId, _sentinel) ? this.sessionId : sessionId as String?,
+      apiKey: identical(apiKey, _sentinel) ? this.apiKey : apiKey as String?,
     );
   }
 

@@ -7,6 +7,8 @@ server/target/
 *.db-journal
 *.db-wal
 *.db-shm
+ironshelf-search-index/
+ironshelf-thumbnail-cache/
 !server/crates/ironshelf-core/src/db/migrations/*.sql
 
 # Flutter

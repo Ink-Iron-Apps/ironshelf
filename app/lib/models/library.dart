@@ -14,10 +14,10 @@ class Library {
 
   factory Library.fromJson(Map<String, dynamic> json) {
     return Library(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      libraryType: json['library_type'] as String,
-      sourceKind: json['source_kind'] as String,
+      id: json['id']?.toString() ?? '',
+      name: json['name'] as String? ?? '',
+      libraryType: json['library_type'] as String? ?? 'book',
+      sourceKind: json['source_kind'] as String? ?? 'unknown',
     );
   }
 }

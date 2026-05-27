@@ -62,4 +62,4 @@ Expose name as `#name` (Calibre convention). Make sortable + filterable.
 - Re-read on change: watch metadata.db mtime OR manual rescan endpoint.
 
 ## Hybrid w/ folder/embedded
-Non-Calibre libs: FolderSource scans dirs, reads epub OPF (dc:creator→author, calibre:series + series_index, dc:title, dc:subject→tags/fandom). Same domain model. AO3 fanfic heuristic = port from existing `/home/riley/stump/organize.py` (fandom from subjects, author from creators, skip noise tags).
+Non-Calibre libs: FolderSource scans dirs, reads epub OPF (dc:creator→author, calibre:series + series_index, dc:title, dc:subject→tags/fandom). Same domain model. AO3 fanfic heuristic implemented in scan module (fandom from subjects, author from creators, skip noise tags).
