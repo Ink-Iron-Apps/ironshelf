@@ -12,6 +12,7 @@ use serde::Deserialize;
 use crate::state::AppState;
 
 const OPDS_CONTENT_TYPE: &str = "application/atom+xml;profile=opds-catalog;charset=utf-8";
+#[allow(dead_code)]
 const OPDS_ACQUISITION_TYPE: &str = "application/atom+xml;profile=opds-catalog;kind=acquisition";
 const OPDS_NAVIGATION_TYPE: &str = "application/atom+xml;profile=opds-catalog;kind=navigation";
 
@@ -203,7 +204,7 @@ pub async fn series_list_feed(
         }
     }
 
-    all_series.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+    all_series.sort_by_key(|a| a.sort_name.clone());
 
     let mut xml = feed_header("Series", "urn:ironshelf:series", "/opds/series");
 
@@ -239,7 +240,7 @@ pub async fn authors_feed(
         }
     }
 
-    all_authors.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+    all_authors.sort_by_key(|a| a.sort_name.clone());
 
     let mut xml = feed_header("Authors", "urn:ironshelf:authors", "/opds/authors");
 

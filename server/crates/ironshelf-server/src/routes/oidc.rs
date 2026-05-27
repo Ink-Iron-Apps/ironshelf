@@ -95,7 +95,8 @@ struct OidcDiscovery {
 /// Token response from the provider.
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
-    access_token: String,
+    #[serde(rename = "access_token")]
+    _access_token: String,
     id_token: Option<String>,
     #[serde(default, rename = "token_type")]
     _token_type: String,
@@ -110,7 +111,7 @@ struct IdTokenClaims {
     #[serde(default)]
     preferred_username: Option<String>,
     #[serde(default)]
-    name: Option<String>,
+    _name: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -180,6 +180,7 @@ pub struct AppState {
     /// Full-text search index (tantivy). `None` if index failed to initialize.
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     /// Path to the thumbnail cache directory for resized cover images.
+    #[allow(dead_code)]
     pub thumbnail_cache_path: PathBuf,
     /// Server configuration (needed for OIDC config access in route handlers).
     pub config: Config,

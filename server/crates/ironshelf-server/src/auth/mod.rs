@@ -167,6 +167,7 @@ pub fn require_owner(user: &AuthUser) -> Result<(), AppError> {
 }
 
 /// Require that the authenticated user has a specific permission (or is owner).
+#[allow(dead_code)]
 pub async fn require_permission(
     user: &AuthUser,
     permission: &str,

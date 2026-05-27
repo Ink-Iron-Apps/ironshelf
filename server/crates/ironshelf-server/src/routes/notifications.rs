@@ -48,7 +48,7 @@ pub async fn list_notifications(
         .ironshelf_db
         .get_notifications(&current_user.user_id, unread_only, limit)
         .await
-        .map_err(|database_error| AppError::internal(database_error))?;
+        .map_err(AppError::internal)?;
 
     let entries: Vec<NotificationEntry> = notifications
         .into_iter()
@@ -75,7 +75,7 @@ pub async fn unread_count(
         .ironshelf_db
         .get_unread_count(&current_user.user_id)
         .await
-        .map_err(|database_error| AppError::internal(database_error))?;
+        .map_err(AppError::internal)?;
 
     Ok(Json(UnreadCountResponse { unread }))
 }
@@ -107,7 +107,7 @@ pub async fn mark_all_read(
         .ironshelf_db
         .mark_all_notifications_read(&current_user.user_id)
         .await
-        .map_err(|database_error| AppError::internal(database_error))?;
+        .map_err(AppError::internal)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

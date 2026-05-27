@@ -64,6 +64,7 @@ impl FolderSource {
     }
 
     /// Walk directory recursively, collecting ebook files.
+    #[allow(clippy::ptr_arg)]
     fn walk_directory<'a>(
         &'a self,
         dir: &'a Path,
@@ -227,7 +228,7 @@ impl FolderSource {
             })
             .collect();
 
-        authors.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+        authors.sort_by_key(|a| a.sort_name.clone());
         authors
     }
 
@@ -267,7 +268,7 @@ impl FolderSource {
             })
             .collect();
 
-        series.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+        series.sort_by_key(|a| a.sort_name.clone());
         series
     }
 
@@ -457,7 +458,7 @@ fn extract_dc_element(opf: &str, element: &str) -> Option<String> {
     ];
 
     for pattern in &patterns {
-        if let Some(start) = opf.find(&**pattern) {
+        if let Some(start) = opf.find(pattern.as_str()) {
             let after_tag = &opf[start..];
             let content_start = after_tag.find('>').map(|i| i + 1)?;
             let close_tag = format!("</dc:{element}>");
@@ -484,7 +485,7 @@ fn extract_dc_elements(opf: &str, element: &str) -> Vec<String> {
 
     loop {
         let found = open_patterns.iter().filter_map(|pattern| {
-            opf[search_from..].find(&**pattern).map(|pos| search_from + pos)
+            opf[search_from..].find(pattern.as_str()).map(|pos| search_from + pos)
         }).min();
 
         match found {

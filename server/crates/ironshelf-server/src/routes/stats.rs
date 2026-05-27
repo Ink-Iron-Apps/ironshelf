@@ -232,13 +232,13 @@ pub async fn user_activity(
     axum::Extension(current_user): axum::Extension<AuthUser>,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<Vec<ActivityLogEntry>>, AppError> {
-    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
     let activity_entries = state
         .ironshelf_db
         .get_recent_activity(&current_user.user_id, limit)
         .await
-        .map_err(|database_error| AppError::internal(database_error))?;
+        .map_err(AppError::internal)?;
 
     let entries: Vec<ActivityLogEntry> = activity_entries
         .into_iter()
@@ -267,13 +267,13 @@ pub async fn server_activity(
 ) -> Result<Json<Vec<ActivityLogEntry>>, AppError> {
     require_owner(&current_user)?;
 
-    let limit = query.limit.unwrap_or(50).max(1).min(200);
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
     let activity_entries = state
         .ironshelf_db
         .get_server_activity(limit)
         .await
-        .map_err(|database_error| AppError::internal(database_error))?;
+        .map_err(AppError::internal)?;
 
     let entries: Vec<ActivityLogEntry> = activity_entries
         .into_iter()

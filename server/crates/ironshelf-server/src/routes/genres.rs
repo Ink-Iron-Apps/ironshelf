@@ -103,7 +103,7 @@ pub async fn list_all_genres(
         .map(|(name, book_count)| GenreEntry { name, book_count })
         .collect();
 
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|a| a.name.to_lowercase());
 
     Ok(Json(entries))
 }
@@ -180,7 +180,7 @@ pub async fn genre_authors(
         }
     }
 
-    genre_authors_list.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+    genre_authors_list.sort_by_key(|a| a.sort_name.clone());
 
     Ok(Json(genre_authors_list))
 }
@@ -224,7 +224,7 @@ pub async fn genre_series(
         }
     }
 
-    genre_series_list.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
+    genre_series_list.sort_by_key(|a| a.sort_name.clone());
 
     Ok(Json(genre_series_list))
 }
@@ -240,10 +240,10 @@ fn sort_books(books: &mut Vec<ironshelf_core::model::Book>, sort_field: &Option<
 
     match sort_params.field() {
         Some("title") => {
-            books.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            books.sort_by_key(|a| a.title.to_lowercase());
         }
         Some("author") => {
-            books.sort_by(|a, b| a.sort_title.to_lowercase().cmp(&b.sort_title.to_lowercase()));
+            books.sort_by_key(|a| a.sort_title.to_lowercase());
         }
         Some("pubdate") => {
             books.sort_by_key(|book| book.pubdate);
@@ -263,7 +263,7 @@ fn sort_books(books: &mut Vec<ironshelf_core::model::Book>, sort_field: &Option<
         }
         _ => {
             // Default: sort by title ascending
-            books.sort_by(|a, b| a.sort_title.to_lowercase().cmp(&b.sort_title.to_lowercase()));
+            books.sort_by_key(|a| a.sort_title.to_lowercase());
         }
     }
 

@@ -263,7 +263,7 @@ pub async fn list_deliveries(
         ));
     }
 
-    let limit = query.limit.unwrap_or(20).max(1).min(100);
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
 
     let deliveries = state
         .ironshelf_db
