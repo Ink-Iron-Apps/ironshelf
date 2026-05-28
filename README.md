@@ -46,9 +46,19 @@ Ironshelf is a self-hosted ebook management server that finally gets library bro
 
 ## Quick Start
 
-### 1. Download
+### 1. Install
 
-Grab the latest binary for your platform from the [Releases](https://github.com/LightWraith8268/ironshelf/releases) page.
+**Linux/macOS:**
+```bash
+curl -fsSL https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh | bash
+```
+
+**Windows (PowerShell as Admin):**
+```powershell
+irm https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.ps1 | iex
+```
+
+**Or download manually** from the [Releases](https://github.com/LightWraith8268/ironshelf/releases) page.
 
 ### 2. Create a configuration file
 
@@ -77,10 +87,6 @@ database_path = "./ironshelf.db"
 
 That's it. Ironshelf indexes your collection and you can start browsing immediately.
 
-> **Windows note:** If you see a script signing error when running `install.ps1`, run:
-> ```powershell
-> powershell -ExecutionPolicy Bypass -File .\install.ps1
-> ```
 
 For production deployments with systemd, reverse proxies, and TLS, see the [Deployment Guide](docs/DEPLOYMENT.md).
 
