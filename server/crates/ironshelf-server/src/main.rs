@@ -418,7 +418,7 @@ async fn main() -> anyhow::Result<()> {
     // Web UI (embedded static files — no state needed, but resolve for type consistency)
     let web_routes = Router::new()
         .route("/", get(web::serve_index))
-        .route("/{*path}", get(web::serve_web));
+        .fallback(get(web::serve_web));
 
     // All sub-routers above have been resolved to `Router<()>` via `.with_state()`.
     // The final app router is also `Router<()>` — global middleware layers use
