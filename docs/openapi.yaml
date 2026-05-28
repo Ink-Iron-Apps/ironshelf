@@ -1,0 +1,4745 @@
+openapi: 3.0.3
+info:
+  title: Ironshelf API
+  description: |
+    Self-hosted ebook server and reader. Reads Calibre metadata.db and plain folder
+    scans as library sources. Provides Author -> Series -> Book hierarchy browsing,
+    reading progress sync, full-text search, collections, highlights, metadata
+    enrichment, acquisition engine, webhooks, OPDS, Kobo sync, and WebDAV.
+
+    Authentication uses either session cookies (web UI) or Bearer API keys (apps).
+    The first registered user becomes the server owner with full admin privileges.
+  version: 0.1.0
+  contact:
+    name: Ink & Iron Apps
+    email: support@inknironapps.com
+    url: https://inknironapps.com
+  license:
+    name: AGPL-3.0
+
+servers:
+  - url: "{protocol}://{host}:{port}"
+    description: Ironshelf server instance
+    variables:
+      protocol:
+        default: http
+        enum: [http, https]
+      host:
+        default: localhost
+      port:
+        default: "10810"
+
+tags:
+  - name: Health
+    description: Health check and readiness probes (no auth required)
+  - name: Server
+    description: Server info and capabilities
+  - name: Auth
+    description: Authentication, sessions, API keys, OIDC/SSO
+  - name: Users
+    description: User management and invites (admin)
+  - name: Libraries
+    description: Library CRUD and scanning
+  - name: Authors
+    description: Author browsing and detail
+  - name: Series
+    description: Series browsing and detail
+  - name: Books
+    description: Book browsing and detail
+  - name: Genres
+    description: Genre/tag-based browsing
+  - name: Files
+    description: Cover images and book file downloads
+  - name: Progress
+    description: Reading progress and bookmarks
+  - name: Highlights
+    description: Text highlights and annotations
+  - name: Collections
+    description: User-created reading lists
+  - name: Search
+    description: Full-text search across libraries
+  - name: Metadata
+    description: External metadata enrichment
+  - name: Import/Export
+    description: Data portability (progress, bookmarks, collections, library config)
+  - name: Notifications
+    description: User notification management
+  - name: Stats
+    description: Server statistics and activity logs
+  - name: Webhooks
+    description: Webhook management and delivery history
+  - name: Acquisition
+    description: Indexers, download clients, wanted list, and downloads
+  - name: OPDS
+    description: OPDS catalog feeds for e-reader apps
+  - name: Kobo
+    description: Kobo device sync endpoints
+  - name: WebDAV
+    description: WebDAV file access for KOReader sync
+
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+
+paths:
+  # ===========================================================================
+  # Health (no auth)
+  # ===========================================================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns server health status including uptime and library state.
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, uptime_seconds, libraries_loaded, database]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: "0.1.0"
+                  uptime_seconds:
+                    type: integer
+                    format: int64
+                  libraries_loaded:
+                    type: integer
+                  database:
+                    type: string
+                    example: ok
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Returns 200 when the server is ready to accept requests, 503 otherwise.
+      operationId: readinessProbe
+      security: []
+      responses:
+        "200":
+          description: Server is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ready, database, libraries_loaded]
+                properties:
+                  ready:
+                    type: boolean
+                  database:
+                    type: string
+                  libraries_loaded:
+                    type: boolean
+        "503":
+          description: Server is not ready
+
+  /alive:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Always returns 200 if the server process is running.
+      operationId: livenessProbe
+      security: []
+      responses:
+        "200":
+          description: Server is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alive]
+                properties:
+                  alive:
+                    type: boolean
+                    example: true
+
+  # ===========================================================================
+  # Server Info
+  # ===========================================================================
+  /api/v1/server/info:
+    get:
+      tags: [Server]
+      summary: Server info and capabilities
+      description: Public endpoint describing server name, version, enabled features, and registration state.
+      operationId: getServerInfo
+      security: []
+      responses:
+        "200":
+          description: Server info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerInfo"
+
+  # ===========================================================================
+  # Auth
+  # ===========================================================================
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Register a new account. The first user registered becomes the server owner
+        with full admin privileges. Subsequent registrations require a valid invite code.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created and session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Username already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: Authenticate with username and password. Returns a session cookie and JSON response.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          headers:
+            Set-Cookie:
+              description: Session cookie (ironshelf_session)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Invalidate the current session. If authenticated via API key, deletes all sessions for the user.
+      operationId: logout
+      responses:
+        "204":
+          description: Logged out successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user info
+      description: Returns the authenticated user's ID, username, and owner status.
+      operationId: getCurrentUser
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, username, is_owner]
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  username:
+                    type: string
+                  is_owner:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/api-keys:
+    get:
+      tags: [Auth]
+      summary: List API keys
+      description: Returns all API keys belonging to the authenticated user. Secret values are not returned.
+      operationId: listApiKeys
+      responses:
+        "200":
+          description: List of API key summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKeySummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Auth]
+      summary: Create API key
+      description: |
+        Generate a new API key. The full key (irs_<prefix>.<secret>) is returned only once
+        in the response. Store it securely; it cannot be retrieved again.
+      operationId: createApiKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: API key created (shown once)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/api-keys/{keyId}:
+    delete:
+      tags: [Auth]
+      summary: Delete API key
+      description: Revoke and delete an API key belonging to the authenticated user.
+      operationId: deleteApiKey
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: API key deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/auth/oidc/login:
+    get:
+      tags: [Auth]
+      summary: Start OIDC/SSO login
+      description: Returns a redirect URL to the configured OIDC identity provider. Initiates PKCE flow.
+      operationId: oidcLogin
+      security: []
+      responses:
+        "200":
+          description: Redirect URL to identity provider
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redirect_url]
+                properties:
+                  redirect_url:
+                    type: string
+                    format: uri
+        "400":
+          description: OIDC is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [Auth]
+      summary: OIDC callback
+      description: |
+        Handles the callback from the OIDC identity provider after user authorization.
+        Exchanges the authorization code for tokens, finds or creates a user, and
+        sets a session cookie. Redirects to the web UI on success.
+      operationId: oidcCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Authorization code from the identity provider
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: OAuth state parameter for CSRF protection
+      responses:
+        "302":
+          description: Redirect to web UI with session cookie set
+          headers:
+            Set-Cookie:
+              description: Session cookie (ironshelf_session)
+              schema:
+                type: string
+            Location:
+              description: Redirect target
+              schema:
+                type: string
+                example: "/#/"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ===========================================================================
+  # Users
+  # ===========================================================================
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: List all users
+      description: Returns all users with their permissions. Requires owner status or manage_users permission.
+      operationId: listUsers
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserListEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/users/invite:
+    post:
+      tags: [Users]
+      summary: Create invite code
+      description: Generate a single-use invite code for new user registration. Requires owner or manage_users permission.
+      operationId: createInvite
+      responses:
+        "201":
+          description: Invite code created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/users/{userId}:
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      description: Remove a user and all their data. Owner only. Cannot delete yourself.
+      operationId: deleteUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: User deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/users/{userId}/permissions:
+    patch:
+      tags: [Users]
+      summary: Set user permissions
+      description: |
+        Replace all permissions for a user. Cannot modify owner permissions.
+        Valid permissions: read, download, manage_library, manage_users.
+      operationId: setPermissions
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPermissionsRequest"
+      responses:
+        "204":
+          description: Permissions updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Libraries
+  # ===========================================================================
+  /api/v1/libraries:
+    get:
+      tags: [Libraries]
+      summary: List libraries
+      description: Returns all configured libraries with their type and source kind.
+      operationId: listLibraries
+      responses:
+        "200":
+          description: List of libraries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibrarySummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Libraries]
+      summary: Create a library
+      description: Create a new library pointing to a directory on disk. Requires admin privileges. Validates path existence and Calibre metadata.db for Calibre sources.
+      operationId: createLibrary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLibraryRequest"
+      responses:
+        "201":
+          description: Library created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLibraryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/libraries/{libraryId}:
+    get:
+      tags: [Libraries]
+      summary: Get library detail
+      description: Returns library details including custom column definitions.
+      operationId: getLibrary
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      responses:
+        "200":
+          description: Library detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Libraries]
+      summary: Update a library
+      description: Update library name, type, or options. Admin only.
+      operationId: updateLibrary
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLibraryRequest"
+      responses:
+        "204":
+          description: Library updated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Libraries]
+      summary: Delete a library
+      description: Remove a library configuration. Does not delete files on disk. Admin only.
+      operationId: deleteLibrary
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      responses:
+        "204":
+          description: Library deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/libraries/{libraryId}/scan:
+    post:
+      tags: [Libraries]
+      summary: Rescan library
+      description: Trigger a rescan/reindex of the library. For folder sources, re-reads the directory tree. For Calibre sources, metadata.db is always current so this is a no-op. Admin only.
+      operationId: scanLibrary
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      responses:
+        "202":
+          description: Scan initiated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/libraries/{libraryId}/metadata/scan:
+    post:
+      tags: [Metadata]
+      summary: Bulk metadata enrichment
+      description: |
+        Scan all books in a library that are missing descriptions, then attempt
+        enrichment from Google Books and Open Library. Auto-applies the best composite
+        result for each book. Admin only.
+      operationId: bulkMetadataScan
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      responses:
+        "200":
+          description: Bulk scan results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkScanResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Authors
+  # ===========================================================================
+  /api/v1/libraries/{libraryId}/authors:
+    get:
+      tags: [Authors]
+      summary: List authors in a library
+      description: Returns paginated and sortable list of authors in the specified library.
+      operationId: listAuthors
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [name, sort_name, book_count, series_count]
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Paginated list of authors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAuthors"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/authors/{authorId}:
+    get:
+      tags: [Authors]
+      summary: Get author detail
+      description: Returns the author with their series list and standalone book count.
+      operationId: getAuthor
+      parameters:
+        - name: authorId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Author detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/authors/{authorId}/series:
+    get:
+      tags: [Authors]
+      summary: Author's series
+      description: Returns all series by this author.
+      operationId: getAuthorSeries
+      parameters:
+        - name: authorId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: List of series
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Series"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/authors/{authorId}/standalone:
+    get:
+      tags: [Authors]
+      summary: Author's standalone books
+      description: Returns books by this author that do not belong to any series.
+      operationId: getAuthorStandalone
+      parameters:
+        - name: authorId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: List of standalone books
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Book"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Series
+  # ===========================================================================
+  /api/v1/series/{seriesId}:
+    get:
+      tags: [Series]
+      summary: Get series detail
+      description: Returns the series with all its books sorted by series_index.
+      operationId: getSeries
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Series detail with books
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeriesDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Books
+  # ===========================================================================
+  /api/v1/books/{bookId}:
+    get:
+      tags: [Books]
+      summary: Get book detail
+      description: Returns full book detail including formats, tags, custom column values, and identifiers.
+      operationId: getBook
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: Book detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/libraries/{libraryId}/books:
+    get:
+      tags: [Books]
+      summary: List books in a library
+      description: Returns paginated, sortable, and filterable list of books in the specified library.
+      operationId: listBooks
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [title, sort_title, pubdate, added_at, rating, series_index]
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: q
+          in: query
+          description: Full-text search by title (case-insensitive contains)
+          schema:
+            type: string
+        - name: tag
+          in: query
+          description: Filter by tag name (exact, case-insensitive)
+          schema:
+            type: string
+        - name: language
+          in: query
+          description: Filter by language code (exact, case-insensitive)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of books
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedBooks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/books/continue:
+    get:
+      tags: [Books]
+      summary: Continue reading
+      description: Returns the user's in-progress books (0% < progress < 100%) sorted by most recently read. Limited to 20 results.
+      operationId: continueReading
+      responses:
+        "200":
+          description: In-progress books with progress info
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContinueReadingEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Genres
+  # ===========================================================================
+  /api/v1/genres:
+    get:
+      tags: [Genres]
+      summary: List all genres
+      description: Returns all genres/tags across all libraries with aggregate book counts, sorted alphabetically.
+      operationId: listAllGenres
+      responses:
+        "200":
+          description: List of genres
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GenreEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/genres/{genreName}:
+    get:
+      tags: [Genres]
+      summary: Books in a genre
+      description: Returns paginated books tagged with this genre across all libraries.
+      operationId: getGenreBooks
+      parameters:
+        - name: genreName
+          in: path
+          required: true
+          schema:
+            type: string
+          description: URL-encoded genre name
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [title, author, pubdate, added_at, rating, series_index]
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Paginated books in genre
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedBooks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/genres/{genreName}/authors:
+    get:
+      tags: [Genres]
+      summary: Authors in a genre
+      description: Returns authors who have books tagged with this genre across all libraries.
+      operationId: getGenreAuthors
+      parameters:
+        - name: genreName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authors in genre
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Author"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/genres/{genreName}/series:
+    get:
+      tags: [Genres]
+      summary: Series in a genre
+      description: Returns series that contain books tagged with this genre across all libraries.
+      operationId: getGenreSeries
+      parameters:
+        - name: genreName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Series in genre
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Series"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/libraries/{libraryId}/genres:
+    get:
+      tags: [Genres]
+      summary: Genres in a library
+      description: Returns all genres/tags within a specific library with book counts.
+      operationId: listLibraryGenres
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+      responses:
+        "200":
+          description: Genres in library
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GenreEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/libraries/{libraryId}/genres/{genreName}/books:
+    get:
+      tags: [Genres]
+      summary: Books in a genre within a library
+      description: Returns paginated books tagged with this genre in a specific library.
+      operationId: listLibraryGenreBooks
+      parameters:
+        - $ref: "#/components/parameters/libraryId"
+        - name: genreName
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [title, author, pubdate, added_at, rating, series_index]
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Paginated books in genre
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedBooks"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Files / Reading
+  # ===========================================================================
+  /api/v1/books/{bookId}/cover:
+    get:
+      tags: [Files]
+      summary: Get book cover image
+      description: Returns the cover image for a book as JPEG. Cached for 24 hours.
+      operationId: getBookCover
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: Cover image
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=86400"
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/books/{bookId}/file:
+    get:
+      tags: [Files]
+      summary: Download book file
+      description: |
+        Download the book file in the specified format. Supports HTTP Range requests
+        for partial content (206). If no format is specified, returns the first available.
+        Range responses are capped at 100 MB per request.
+      operationId: getBookFile
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+        - name: format
+          in: query
+          description: Desired format (EPUB, PDF, CBZ, MOBI). Case-insensitive.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full file
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/epub+zip:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/x-cbz:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Partial content (range request)
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                example: "bytes 0-999/5000"
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          description: Range not satisfiable
+
+  # ===========================================================================
+  # Progress & Bookmarks
+  # ===========================================================================
+  /api/v1/books/{bookId}/progress:
+    get:
+      tags: [Progress]
+      summary: Get reading progress
+      description: Returns reading progress entries for a book (one per format).
+      operationId: getProgress
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: Reading progress entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReadingProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Progress]
+      summary: Update reading progress
+      description: |
+        Upsert reading progress for a book in a specific format. Percent must be
+        between 0.0 and 1.0. When progress reaches 1.0, the book is automatically
+        marked as completed.
+      operationId: updateProgress
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgressRequest"
+      responses:
+        "204":
+          description: Progress updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/books/{bookId}/bookmarks:
+    get:
+      tags: [Progress]
+      summary: List bookmarks
+      description: Returns all bookmarks for a book, ordered by creation time.
+      operationId: listBookmarks
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: List of bookmarks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bookmark"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Progress]
+      summary: Create bookmark
+      description: Add a bookmark at a specific locator position in a book.
+      operationId: createBookmark
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBookmarkRequest"
+      responses:
+        "201":
+          description: Bookmark created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bookmark"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/books/{bookId}/bookmarks/{bookmarkId}:
+    delete:
+      tags: [Progress]
+      summary: Delete bookmark
+      operationId: deleteBookmark
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+        - name: bookmarkId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Bookmark deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Highlights
+  # ===========================================================================
+  /api/v1/books/{bookId}/highlights:
+    get:
+      tags: [Highlights]
+      summary: List highlights for a book
+      description: Returns all highlights and annotations the user has created on a book.
+      operationId: listBookHighlights
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: Highlights for this book
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Highlight"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Highlights]
+      summary: Create a highlight
+      description: Create a new text highlight or annotation on a book.
+      operationId: createHighlight
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHighlightRequest"
+      responses:
+        "201":
+          description: Highlight created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/highlights/{highlightId}:
+    patch:
+      tags: [Highlights]
+      summary: Update a highlight
+      description: Update the color or note of an existing highlight.
+      operationId: updateHighlight
+      parameters:
+        - name: highlightId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateHighlightRequest"
+      responses:
+        "204":
+          description: Highlight updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Highlights]
+      summary: Delete a highlight
+      operationId: deleteHighlight
+      parameters:
+        - name: highlightId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Highlight deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/me/highlights:
+    get:
+      tags: [Highlights]
+      summary: List all user highlights
+      description: Returns all highlights for the authenticated user with optional filtering by book or color.
+      operationId: listAllHighlights
+      parameters:
+        - name: book_id
+          in: query
+          description: Filter by book ID
+          schema:
+            type: string
+        - name: color
+          in: query
+          description: Filter by highlight color
+          schema:
+            type: string
+            enum: [yellow, green, blue, pink, purple]
+      responses:
+        "200":
+          description: User's highlights
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Highlight"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # Collections
+  # ===========================================================================
+  /api/v1/collections:
+    get:
+      tags: [Collections]
+      summary: List collections
+      description: Returns the user's own collections plus other users' public collections.
+      operationId: listCollections
+      responses:
+        "200":
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollectionSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Collections]
+      summary: Create a collection
+      description: Create a new reading list / collection.
+      operationId: createCollection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCollectionRequest"
+      responses:
+        "201":
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCollectionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/collections/{collectionId}:
+    get:
+      tags: [Collections]
+      summary: Get collection detail
+      description: Returns the collection with its book entries. Non-owners can only view public collections.
+      operationId: getCollection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      responses:
+        "200":
+          description: Collection detail with books
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Collections]
+      summary: Update a collection
+      description: Update name, description, or public visibility. Owner only.
+      operationId: updateCollection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCollectionRequest"
+      responses:
+        "204":
+          description: Collection updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Collections]
+      summary: Delete a collection
+      description: Delete a collection. Owner only.
+      operationId: deleteCollection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      responses:
+        "204":
+          description: Collection deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/collections/{collectionId}/books:
+    post:
+      tags: [Collections]
+      summary: Add book to collection
+      description: Add a book to the collection at a specific position (or appended at end).
+      operationId: addBookToCollection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddBookToCollectionRequest"
+      responses:
+        "201":
+          description: Book added to collection
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/collections/{collectionId}/books/{bookId}:
+    delete:
+      tags: [Collections]
+      summary: Remove book from collection
+      description: Remove a book from the collection. Owner only.
+      operationId: removeBookFromCollection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "204":
+          description: Book removed from collection
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Search
+  # ===========================================================================
+  /api/v1/search:
+    get:
+      tags: [Search]
+      summary: Global search
+      description: |
+        Search across all libraries for authors, series, and books. Uses tantivy
+        full-text index for books when available, falls back to in-memory substring
+        matching. Results are ranked by relevance.
+      operationId: globalSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query (max 500 characters)
+          schema:
+            type: string
+            maxLength: 500
+        - name: type
+          in: query
+          description: Filter results by content type
+          schema:
+            type: string
+            enum: [all, author, series, book]
+            default: all
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perPage"
+      responses:
+        "200":
+          description: Search results grouped by type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/search/rebuild:
+    post:
+      tags: [Search]
+      summary: Rebuild search index
+      description: Triggers a full rebuild of the tantivy search index from all books across all libraries. Owner only.
+      operationId: rebuildSearchIndex
+      responses:
+        "200":
+          description: Index rebuilt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RebuildResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ===========================================================================
+  # Metadata
+  # ===========================================================================
+  /api/v1/books/{bookId}/metadata/search:
+    get:
+      tags: [Metadata]
+      summary: Search external metadata
+      description: Query Google Books and Open Library for metadata matching a book's title and author. Returns ranked matches and a best-composite merge.
+      operationId: searchMetadata
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: Metadata search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataSearchResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/books/{bookId}/metadata/apply:
+    post:
+      tags: [Metadata]
+      summary: Apply metadata
+      description: |
+        Apply external metadata to a book. Can apply a specific match by index,
+        the best composite from all cached results, or direct override fields.
+        Stores overrides in the Ironshelf database; never mutates Calibre data.
+      operationId: applyMetadata
+      parameters:
+        - $ref: "#/components/parameters/bookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyMetadataRequest"
+      responses:
+        "200":
+          description: Metadata applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyMetadataResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Import / Export
+  # ===========================================================================
+  /api/v1/export/reading-progress:
+    get:
+      tags: [Import/Export]
+      summary: Export reading progress
+      description: Export all reading progress entries for the authenticated user as JSON.
+      operationId: exportReadingProgress
+      responses:
+        "200":
+          description: Reading progress entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExportedReadingProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/export/bookmarks:
+    get:
+      tags: [Import/Export]
+      summary: Export bookmarks
+      description: Export all bookmarks for the authenticated user as JSON.
+      operationId: exportBookmarks
+      responses:
+        "200":
+          description: Bookmark entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExportedBookmark"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/export/collections:
+    get:
+      tags: [Import/Export]
+      summary: Export collections
+      description: Export all collections owned by the authenticated user (with book references).
+      operationId: exportCollections
+      responses:
+        "200":
+          description: Collection entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExportedCollection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/export/all:
+    get:
+      tags: [Import/Export]
+      summary: Export all user data
+      description: Combined export of reading progress, bookmarks, and collections as a single JSON document with Content-Disposition attachment header.
+      operationId: exportAll
+      responses:
+        "200":
+          description: Combined export document
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="ironshelf-export-2025-01-01.json"'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportDocument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/import:
+    post:
+      tags: [Import/Export]
+      summary: Import user data
+      description: |
+        Import an export document and merge into the authenticated user's data.
+        Reading progress is upserted (newer wins). Bookmarks skip duplicates.
+        Collections are created or merged by name.
+      operationId: importUserData
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportDocument"
+      responses:
+        "200":
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/export/library-config:
+    get:
+      tags: [Import/Export]
+      summary: Export library configuration
+      description: Export all library configurations as a backup document. Owner only.
+      operationId: exportLibraryConfig
+      responses:
+        "200":
+          description: Library config backup
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryConfigExport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/import/library-config:
+    post:
+      tags: [Import/Export]
+      summary: Import library configuration
+      description: |
+        Restore library configurations from a backup. Creates library entries in the
+        database but does not copy files or open sources. Libraries become available
+        after server restart or manual scan. Owner only.
+      operationId: importLibraryConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LibraryConfigExport"
+      responses:
+        "200":
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryConfigImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ===========================================================================
+  # Notifications
+  # ===========================================================================
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      description: Returns user notifications with optional filtering for unread only.
+      operationId: listNotifications
+      parameters:
+        - name: unread
+          in: query
+          description: If true, return only unread notifications
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          description: Maximum number of notifications to return (max 200)
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/notifications/count:
+    get:
+      tags: [Notifications]
+      summary: Unread notification count
+      operationId: getUnreadCount
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unread]
+                properties:
+                  unread:
+                    type: integer
+                    format: int64
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/notifications/{notificationId}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification as read
+      operationId: markNotificationRead
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Marked as read
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      operationId: markAllNotificationsRead
+      responses:
+        "204":
+          description: All notifications marked read
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/notifications/{notificationId}:
+    delete:
+      tags: [Notifications]
+      summary: Delete a notification
+      operationId: deleteNotification
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Notification deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Stats & Activity
+  # ===========================================================================
+  /api/v1/stats:
+    get:
+      tags: [Stats]
+      summary: Server statistics
+      description: Returns server-wide statistics including counts, storage, popular books, and recent activity. Owner only.
+      operationId: getServerStats
+      responses:
+        "200":
+          description: Server statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/activity:
+    get:
+      tags: [Stats]
+      summary: User activity log
+      description: Returns the authenticated user's recent activity.
+      operationId: getUserActivity
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Activity entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityLogEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/activity/all:
+    get:
+      tags: [Stats]
+      summary: Server-wide activity log
+      description: Returns activity across all users. Owner only.
+      operationId: getServerActivity
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Activity entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityLogEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ===========================================================================
+  # Webhooks
+  # ===========================================================================
+  /api/v1/webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhooks
+      description: Returns all webhooks belonging to the authenticated user.
+      operationId: listWebhooks
+      responses:
+        "200":
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Webhook"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook
+      description: Register a new webhook to receive event notifications via HTTP POST.
+      operationId: createWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+      responses:
+        "201":
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/webhooks/{webhookId}:
+    patch:
+      tags: [Webhooks]
+      summary: Update a webhook
+      description: Update webhook properties. Must be the webhook owner.
+      operationId: updateWebhook
+      parameters:
+        - $ref: "#/components/parameters/webhookId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWebhookRequest"
+      responses:
+        "204":
+          description: Webhook updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook
+      operationId: deleteWebhook
+      parameters:
+        - $ref: "#/components/parameters/webhookId"
+      responses:
+        "204":
+          description: Webhook deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhooks/{webhookId}/deliveries:
+    get:
+      tags: [Webhooks]
+      summary: Webhook delivery history
+      description: Returns recent delivery attempts for a webhook. Must be the webhook owner.
+      operationId: listWebhookDeliveries
+      parameters:
+        - $ref: "#/components/parameters/webhookId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Delivery history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhooks/{webhookId}/test:
+    post:
+      tags: [Webhooks]
+      summary: Send test webhook
+      description: Send a test event payload to the webhook URL to verify connectivity.
+      operationId: testWebhook
+      parameters:
+        - $ref: "#/components/parameters/webhookId"
+      responses:
+        "200":
+          description: Test event sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent:
+                    type: boolean
+                  message:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Acquisition — Indexers
+  # ===========================================================================
+  /api/v1/indexers:
+    get:
+      tags: [Acquisition]
+      summary: List indexers
+      description: Returns all configured indexers (torznab, newznab, RSS, custom).
+      operationId: listIndexers
+      responses:
+        "200":
+          description: Indexers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Indexer"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Acquisition]
+      summary: Add an indexer
+      operationId: createIndexer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIndexerRequest"
+      responses:
+        "201":
+          description: Indexer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Indexer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/indexers/{indexerId}:
+    patch:
+      tags: [Acquisition]
+      summary: Update an indexer
+      operationId: updateIndexer
+      parameters:
+        - name: indexerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIndexerRequest"
+      responses:
+        "204":
+          description: Indexer updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Acquisition]
+      summary: Delete an indexer
+      operationId: deleteIndexer
+      parameters:
+        - name: indexerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Indexer deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/indexers/{indexerId}/test:
+    post:
+      tags: [Acquisition]
+      summary: Test indexer connectivity
+      operationId: testIndexer
+      parameters:
+        - name: indexerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityTestResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Acquisition — Download Clients
+  # ===========================================================================
+  /api/v1/download-clients:
+    get:
+      tags: [Acquisition]
+      summary: List download clients
+      description: Returns all configured download clients (qBittorrent, Transmission, Deluge, rTorrent, direct).
+      operationId: listDownloadClients
+      responses:
+        "200":
+          description: Download clients
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DownloadClient"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Acquisition]
+      summary: Add a download client
+      operationId: createDownloadClient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDownloadClientRequest"
+      responses:
+        "201":
+          description: Download client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadClient"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/download-clients/{clientId}:
+    patch:
+      tags: [Acquisition]
+      summary: Update a download client
+      operationId: updateDownloadClient
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDownloadClientRequest"
+      responses:
+        "204":
+          description: Download client updated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Acquisition]
+      summary: Delete a download client
+      operationId: deleteDownloadClient
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Download client deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/download-clients/{clientId}/test:
+    post:
+      tags: [Acquisition]
+      summary: Test download client connectivity
+      operationId: testDownloadClient
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityTestResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Acquisition — Wanted List
+  # ===========================================================================
+  /api/v1/wanted:
+    get:
+      tags: [Acquisition]
+      summary: List wanted items
+      description: Returns the authenticated user's wanted book/author/series list.
+      operationId: listWanted
+      parameters:
+        - name: active_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Wanted items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WantedItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Acquisition]
+      summary: Add a wanted item
+      operationId: createWanted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWantedItemRequest"
+      responses:
+        "201":
+          description: Wanted item created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantedItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/wanted/{wantedItemId}:
+    patch:
+      tags: [Acquisition]
+      summary: Update a wanted item
+      operationId: updateWanted
+      parameters:
+        - name: wantedItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWantedItemRequest"
+      responses:
+        "204":
+          description: Wanted item updated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Acquisition]
+      summary: Delete a wanted item
+      operationId: deleteWanted
+      parameters:
+        - name: wantedItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Wanted item deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/wanted/{wantedItemId}/search:
+    post:
+      tags: [Acquisition]
+      summary: Search for a wanted item
+      description: Manually trigger a search across all enabled indexers for a specific wanted item.
+      operationId: searchWantedItem
+      parameters:
+        - name: wantedItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Search results from indexers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AcquisitionSearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/wanted/{wantedItemId}/grab:
+    post:
+      tags: [Acquisition]
+      summary: Grab a result for a wanted item
+      description: Send a specific search result to a download client for download.
+      operationId: grabWantedItem
+      parameters:
+        - name: wantedItemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrabRequest"
+      responses:
+        "201":
+          description: Download initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Download"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Acquisition — Downloads
+  # ===========================================================================
+  /api/v1/downloads:
+    get:
+      tags: [Acquisition]
+      summary: List downloads
+      operationId: listDownloads
+      parameters:
+        - name: status
+          in: query
+          description: Filter by download status
+          schema:
+            type: string
+            enum: [pending, downloading, completed, failed, importing]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Downloads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Download"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/downloads/{downloadId}:
+    get:
+      tags: [Acquisition]
+      summary: Get download detail
+      operationId: getDownload
+      parameters:
+        - name: downloadId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Download detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Download"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Acquisition]
+      summary: Cancel/remove a download
+      operationId: deleteDownload
+      parameters:
+        - name: downloadId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Download removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/downloads/{downloadId}/retry:
+    post:
+      tags: [Acquisition]
+      summary: Retry a failed download
+      description: Reset a failed download to pending and re-send to the download client.
+      operationId: retryDownload
+      parameters:
+        - name: downloadId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Download retried
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retried:
+                    type: boolean
+                  download_id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ===========================================================================
+  # Acquisition — Search & Grab
+  # ===========================================================================
+  /api/v1/acquisition/search:
+    get:
+      tags: [Acquisition]
+      summary: Search all indexers
+      description: Search across all enabled indexers for ebooks matching a query.
+      operationId: acquisitionSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: author
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AcquisitionSearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/acquisition/grab:
+    post:
+      tags: [Acquisition]
+      summary: Grab a search result
+      description: Send an indexer search result to a download client for immediate download (not linked to a wanted item).
+      operationId: acquisitionGrab
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrabRequest"
+      responses:
+        "201":
+          description: Download initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Download"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ===========================================================================
+  # OPDS
+  # ===========================================================================
+  /opds:
+    get:
+      tags: [OPDS]
+      summary: OPDS root catalog
+      description: Navigation feed with links to browse by author, series, and recent additions.
+      operationId: opdsRoot
+      responses:
+        "200":
+          description: OPDS navigation feed
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/authors:
+    get:
+      tags: [OPDS]
+      summary: OPDS authors feed
+      operationId: opdsAuthors
+      responses:
+        "200":
+          description: Author navigation feed
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/authors/{authorId}:
+    get:
+      tags: [OPDS]
+      summary: OPDS author books feed
+      operationId: opdsAuthorBooks
+      parameters:
+        - name: authorId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Acquisition feed for author's books
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/series:
+    get:
+      tags: [OPDS]
+      summary: OPDS series feed
+      operationId: opdsSeries
+      responses:
+        "200":
+          description: Series navigation feed
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/series/{seriesId}:
+    get:
+      tags: [OPDS]
+      summary: OPDS series books feed
+      operationId: opdsSeriesBooks
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Acquisition feed for series books
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/recent:
+    get:
+      tags: [OPDS]
+      summary: OPDS recently added
+      operationId: opdsRecent
+      responses:
+        "200":
+          description: Recently added books feed
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  /opds/search:
+    get:
+      tags: [OPDS]
+      summary: OPDS search
+      operationId: opdsSearch
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search results feed
+          content:
+            application/atom+xml:
+              schema:
+                type: string
+
+  # ===========================================================================
+  # Kobo Sync
+  # ===========================================================================
+  /kobo/{authToken}/v1/initialization:
+    get:
+      tags: [Kobo]
+      summary: Kobo initialization
+      description: Returns Kobo-compatible initialization data including API endpoints.
+      operationId: koboInit
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+      responses:
+        "200":
+          description: Kobo init response
+
+  /kobo/{authToken}/v1/library/sync:
+    get:
+      tags: [Kobo]
+      summary: Kobo library sync
+      description: Returns library changes for Kobo device synchronization.
+      operationId: koboLibrarySync
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+      responses:
+        "200":
+          description: Library sync data
+
+  /kobo/{authToken}/v1/library/tags:
+    get:
+      tags: [Kobo]
+      summary: Kobo tag sync
+      operationId: koboTagSync
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+      responses:
+        "200":
+          description: Tag sync data
+
+  /kobo/{authToken}/v1/books/{bookId}/file/{format}:
+    get:
+      tags: [Kobo]
+      summary: Kobo book download
+      operationId: koboBookDownload
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+        - $ref: "#/components/parameters/bookId"
+        - name: format
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Book file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /kobo/{authToken}/v1/books/{bookId}/image/{width}/{height}/{quality}/image.jpg:
+    get:
+      tags: [Kobo]
+      summary: Kobo cover image
+      operationId: koboBookCover
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+        - $ref: "#/components/parameters/bookId"
+        - name: width
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: height
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: quality
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cover image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+
+  /kobo/{authToken}/v1/library/{bookId}/state:
+    put:
+      tags: [Kobo]
+      summary: Kobo reading state sync
+      description: Update reading state from a Kobo device.
+      operationId: koboUpdateReadingState
+      parameters:
+        - $ref: "#/components/parameters/koboAuthToken"
+        - $ref: "#/components/parameters/bookId"
+      responses:
+        "200":
+          description: State updated
+
+  # ===========================================================================
+  # WebDAV
+  # ===========================================================================
+  /webdav/{authToken}/{path}:
+    get:
+      tags: [WebDAV]
+      summary: WebDAV GET
+      description: Retrieve a file via WebDAV (used by KOReader for sync).
+      operationId: webdavGet
+      parameters:
+        - name: authToken
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+    put:
+      tags: [WebDAV]
+      summary: WebDAV PUT
+      description: Upload/overwrite a file via WebDAV.
+      operationId: webdavPut
+      parameters:
+        - name: authToken
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: File created/updated
+    delete:
+      tags: [WebDAV]
+      summary: WebDAV DELETE
+      operationId: webdavDelete
+      parameters:
+        - name: authToken
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: File deleted
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        API key authentication. Keys are prefixed with "irs_" and created via
+        POST /api/v1/auth/api-keys. Send as: Authorization: Bearer irs_<prefix>.<secret>
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: ironshelf_session
+      description: Session cookie set by the login endpoint. HttpOnly, SameSite=Strict, 7-day expiry.
+
+  parameters:
+    libraryId:
+      name: libraryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    bookId:
+      name: bookId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    collectionId:
+      name: collectionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    webhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    koboAuthToken:
+      name: authToken
+      in: path
+      required: true
+      description: Kobo authentication token (API key)
+      schema:
+        type: string
+    page:
+      name: page
+      in: query
+      description: Page number (1-indexed)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    perPage:
+      name: per_page
+      in: query
+      description: Items per page (max 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    # -------------------------------------------------------------------------
+    # Core domain models
+    # -------------------------------------------------------------------------
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+
+    Author:
+      type: object
+      required: [id, name, sort_name, book_count, series_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sort_name:
+          type: string
+        book_count:
+          type: integer
+          format: int64
+        series_count:
+          type: integer
+          format: int64
+
+    AuthorDetail:
+      allOf:
+        - $ref: "#/components/schemas/Author"
+        - type: object
+          required: [series, standalone_count]
+          properties:
+            series:
+              type: array
+              items:
+                $ref: "#/components/schemas/Series"
+            standalone_count:
+              type: integer
+
+    Series:
+      type: object
+      required: [id, name, sort_name, book_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sort_name:
+          type: string
+        book_count:
+          type: integer
+          format: int64
+
+    SeriesDetail:
+      allOf:
+        - $ref: "#/components/schemas/Series"
+        - type: object
+          required: [books]
+          properties:
+            books:
+              type: array
+              items:
+                $ref: "#/components/schemas/Book"
+
+    Format:
+      type: object
+      required: [kind, file_name]
+      properties:
+        kind:
+          type: string
+          description: Format type (EPUB, PDF, CBZ, MOBI, etc.)
+          example: EPUB
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: File size in bytes
+        file_name:
+          type: string
+
+    Book:
+      type: object
+      required: [id, title, sort_title, author_ids, formats, has_cover, path, tags, languages, identifiers, custom]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        sort_title:
+          type: string
+        author_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        series_id:
+          type: integer
+          format: int64
+          nullable: true
+        series_index:
+          type: number
+          format: double
+          nullable: true
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/Format"
+        has_cover:
+          type: boolean
+        path:
+          type: string
+          description: Relative path within the library directory
+        pubdate:
+          type: string
+          format: date
+          nullable: true
+        added_at:
+          type: string
+          format: date-time
+          nullable: true
+        rating:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 10
+        tags:
+          type: array
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            type: string
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Key-value pairs (e.g., isbn, amazon, goodreads)"
+        description:
+          type: string
+          nullable: true
+        custom:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/CustomValue"
+          description: Custom column values keyed by column name
+
+    CustomColumn:
+      type: object
+      required: [id, label, name, datatype, is_multiple]
+      properties:
+        id:
+          type: integer
+          format: int64
+        label:
+          type: string
+          description: Column label (internal identifier)
+        name:
+          type: string
+          description: Display name
+        datatype:
+          type: string
+          description: "Data type (text, int, float, bool, datetime, rating, series, enumeration, comments)"
+        is_multiple:
+          type: boolean
+
+    CustomValue:
+      description: A value from a custom column. Type varies based on the column datatype.
+      oneOf:
+        - type: string
+        - type: integer
+        - type: number
+        - type: boolean
+        - type: array
+          items:
+            type: string
+        - type: "null"
+
+    # -------------------------------------------------------------------------
+    # Library
+    # -------------------------------------------------------------------------
+    LibrarySummary:
+      type: object
+      required: [id, name, library_type, source_kind]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        library_type:
+          type: string
+          enum: [book, light_novel, web_novel, fanfiction, comic, manga, mixed]
+        source_kind:
+          type: string
+          enum: [calibre, folder]
+
+    LibraryDetail:
+      allOf:
+        - $ref: "#/components/schemas/LibrarySummary"
+        - type: object
+          required: [custom_columns]
+          properties:
+            custom_columns:
+              type: array
+              items:
+                $ref: "#/components/schemas/CustomColumn"
+
+    CreateLibraryRequest:
+      type: object
+      required: [name, library_type, source_kind, path]
+      properties:
+        name:
+          type: string
+        library_type:
+          type: string
+          enum: [book, light_novel, web_novel, fanfiction, comic, manga, mixed]
+        source_kind:
+          type: string
+          enum: [calibre, folder]
+        path:
+          type: string
+          description: Absolute path to the library directory on disk
+        options:
+          type: object
+          description: Type-specific configuration options
+
+    CreateLibraryResponse:
+      type: object
+      required: [id, name, library_type]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        library_type:
+          type: string
+
+    UpdateLibraryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        library_type:
+          type: string
+        options:
+          type: object
+
+    # -------------------------------------------------------------------------
+    # Pagination
+    # -------------------------------------------------------------------------
+    PaginatedAuthors:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Author"
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    PaginatedBooks:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Book"
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    # -------------------------------------------------------------------------
+    # Auth
+    # -------------------------------------------------------------------------
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Must not contain control characters
+        password:
+          type: string
+          minLength: 8
+          maxLength: 1024
+        invite_code:
+          type: string
+          description: Required when at least one user already exists
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [user_id, username, is_owner, session_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        is_owner:
+          type: boolean
+        session_id:
+          type: string
+          format: uuid
+
+    CreateApiKeyRequest:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          description: Human-readable label for the API key
+
+    ApiKeyResponse:
+      type: object
+      required: [key, prefix, label]
+      properties:
+        key:
+          type: string
+          description: "Full API key (shown once): irs_<prefix>.<secret>"
+          example: "irs_a1b2c3d4.e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0"
+        prefix:
+          type: string
+          description: Key prefix (used for identification)
+        label:
+          type: string
+
+    ApiKeySummary:
+      type: object
+      required: [id, prefix, label, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        prefix:
+          type: string
+        label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # -------------------------------------------------------------------------
+    # Users
+    # -------------------------------------------------------------------------
+    UserListEntry:
+      type: object
+      required: [id, username, is_owner, created_at, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        is_owner:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [read, download, manage_library, manage_users]
+
+    SetPermissionsRequest:
+      type: object
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [read, download, manage_library, manage_users]
+
+    InviteResponse:
+      type: object
+      required: [code, created_at]
+      properties:
+        code:
+          type: string
+          description: Single-use invite code (32-character hex string)
+        created_at:
+          type: string
+          format: date-time
+
+    # -------------------------------------------------------------------------
+    # Genres
+    # -------------------------------------------------------------------------
+    GenreEntry:
+      type: object
+      required: [name, book_count]
+      properties:
+        name:
+          type: string
+        book_count:
+          type: integer
+          format: int64
+
+    # -------------------------------------------------------------------------
+    # Progress & Bookmarks
+    # -------------------------------------------------------------------------
+    ReadingProgress:
+      type: object
+      required: [book_id, format, percent, updated_at]
+      properties:
+        book_id:
+          type: string
+        format:
+          type: string
+        locator:
+          type: string
+          nullable: true
+          description: Reader-specific position locator (e.g., EPUB CFI)
+        percent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateProgressRequest:
+      type: object
+      required: [format, percent]
+      properties:
+        format:
+          type: string
+          description: Book format (e.g., EPUB, PDF)
+        locator:
+          type: string
+          nullable: true
+        percent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+
+    Bookmark:
+      type: object
+      required: [id, book_id, locator, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        book_id:
+          type: string
+        locator:
+          type: string
+          description: Reader-specific position locator
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateBookmarkRequest:
+      type: object
+      required: [locator]
+      properties:
+        locator:
+          type: string
+        note:
+          type: string
+
+    ContinueReadingEntry:
+      type: object
+      required: [book, progress]
+      properties:
+        book:
+          $ref: "#/components/schemas/Book"
+        progress:
+          type: object
+          required: [format, percent, updated_at]
+          properties:
+            format:
+              type: string
+            percent:
+              type: number
+              format: double
+            updated_at:
+              type: string
+              format: date-time
+
+    # -------------------------------------------------------------------------
+    # Highlights
+    # -------------------------------------------------------------------------
+    Highlight:
+      type: object
+      required: [id, user_id, book_id, format, cfi_range, color, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        book_id:
+          type: string
+        format:
+          type: string
+        cfi_range:
+          type: string
+          description: EPUB CFI range identifying the highlighted text
+        text_content:
+          type: string
+          nullable: true
+          description: The highlighted text content
+        color:
+          type: string
+          enum: [yellow, green, blue, pink, purple]
+        note:
+          type: string
+          nullable: true
+          description: User's note attached to the highlight
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateHighlightRequest:
+      type: object
+      required: [cfi_range]
+      properties:
+        cfi_range:
+          type: string
+          description: EPUB CFI range (must not be empty)
+        text_content:
+          type: string
+        color:
+          type: string
+          enum: [yellow, green, blue, pink, purple]
+          default: yellow
+        note:
+          type: string
+        format:
+          type: string
+          default: EPUB
+
+    UpdateHighlightRequest:
+      type: object
+      properties:
+        color:
+          type: string
+          enum: [yellow, green, blue, pink, purple]
+        note:
+          type: string
+
+    # -------------------------------------------------------------------------
+    # Collections
+    # -------------------------------------------------------------------------
+    CollectionSummary:
+      type: object
+      required: [id, user_id, name, is_public, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        is_public:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CollectionDetail:
+      allOf:
+        - $ref: "#/components/schemas/CollectionSummary"
+        - type: object
+          required: [books]
+          properties:
+            books:
+              type: array
+              items:
+                $ref: "#/components/schemas/CollectionBookEntry"
+
+    CollectionBookEntry:
+      type: object
+      required: [book_id, position, added_at]
+      properties:
+        book_id:
+          type: string
+        position:
+          type: integer
+          format: int64
+        added_at:
+          type: string
+          format: date-time
+
+    CreateCollectionRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        is_public:
+          type: boolean
+          default: false
+
+    CreateCollectionResponse:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    UpdateCollectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        is_public:
+          type: boolean
+
+    AddBookToCollectionRequest:
+      type: object
+      required: [book_id]
+      properties:
+        book_id:
+          type: string
+        position:
+          type: integer
+          format: int64
+          description: Position in the collection (0-indexed). Defaults to appending at end.
+
+    # -------------------------------------------------------------------------
+    # Search
+    # -------------------------------------------------------------------------
+    SearchResponse:
+      type: object
+      required: [query, results, total, indexed]
+      properties:
+        query:
+          type: string
+        results:
+          type: object
+          required: [authors, series, books]
+          properties:
+            authors:
+              type: array
+              items:
+                $ref: "#/components/schemas/AuthorSearchResult"
+            series:
+              type: array
+              items:
+                $ref: "#/components/schemas/SeriesSearchResult"
+            books:
+              type: array
+              items:
+                $ref: "#/components/schemas/BookSearchResult"
+        total:
+          type: integer
+          description: Total results across all types
+        indexed:
+          type: boolean
+          description: Whether the full-text index was used for book results
+
+    AuthorSearchResult:
+      type: object
+      required: [id, name, sort_name, book_count, series_count, library_id]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sort_name:
+          type: string
+        book_count:
+          type: integer
+          format: int64
+        series_count:
+          type: integer
+          format: int64
+        library_id:
+          type: string
+
+    SeriesSearchResult:
+      type: object
+      required: [id, name, sort_name, book_count, library_id]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sort_name:
+          type: string
+        book_count:
+          type: integer
+          format: int64
+        library_id:
+          type: string
+
+    BookSearchResult:
+      type: object
+      required: [id, title, sort_title, has_cover, tags, library_id]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        sort_title:
+          type: string
+        has_cover:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        library_id:
+          type: string
+        score:
+          type: number
+          format: float
+          description: Tantivy relevance score (present when index was used)
+
+    RebuildResponse:
+      type: object
+      required: [message, books_indexed]
+      properties:
+        message:
+          type: string
+        books_indexed:
+          type: integer
+
+    # -------------------------------------------------------------------------
+    # Metadata
+    # -------------------------------------------------------------------------
+    BookMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+          nullable: true
+        authors:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+          nullable: true
+        cover_url:
+          type: string
+          format: uri
+          nullable: true
+        categories:
+          type: array
+          items:
+            type: string
+        published_date:
+          type: string
+          nullable: true
+        isbn_10:
+          type: string
+          nullable: true
+        isbn_13:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+
+    MetadataMatch:
+      type: object
+      required: [provider_name, external_id, confidence, metadata]
+      properties:
+        provider_name:
+          type: string
+          description: "Source provider (e.g., google_books, open_library)"
+        external_id:
+          type: string
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        metadata:
+          $ref: "#/components/schemas/BookMetadata"
+
+    MetadataSearchResponse:
+      type: object
+      required: [book_id, matches]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetadataMatch"
+        composite:
+          $ref: "#/components/schemas/BookMetadata"
+          nullable: true
+          description: Best-merged composite from all matches
+
+    ApplyMetadataRequest:
+      type: object
+      properties:
+        match_index:
+          type: integer
+          description: Index into the cached search results to apply (null for composite)
+          nullable: true
+        title:
+          type: string
+          description: Direct title override
+        description:
+          type: string
+          description: Direct description override
+        cover_url:
+          type: string
+          format: uri
+          description: Direct cover URL override
+        tags:
+          type: array
+          items:
+            type: string
+          description: Direct tags override
+
+    ApplyMetadataResponse:
+      type: object
+      required: [book_id, applied]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+        applied:
+          type: boolean
+
+    BulkScanResponse:
+      type: object
+      required: [library_id, books_missing_metadata, books_enriched, errors]
+      properties:
+        library_id:
+          type: string
+        books_missing_metadata:
+          type: integer
+          format: int64
+        books_enriched:
+          type: integer
+          format: int64
+        errors:
+          type: array
+          items:
+            type: object
+            required: [book_id, title, error]
+            properties:
+              book_id:
+                type: integer
+                format: int64
+              title:
+                type: string
+              error:
+                type: string
+
+    # -------------------------------------------------------------------------
+    # Import / Export
+    # -------------------------------------------------------------------------
+    ExportDocument:
+      type: object
+      required: [version, exported_at, user]
+      properties:
+        version:
+          type: integer
+          description: Export format version (currently 1)
+          example: 1
+        exported_at:
+          type: string
+          format: date-time
+        user:
+          type: string
+        reading_progress:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportedReadingProgress"
+        bookmarks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportedBookmark"
+        collections:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportedCollection"
+
+    ExportedReadingProgress:
+      type: object
+      required: [book_id, format, percent, updated_at]
+      properties:
+        book_id:
+          type: string
+        format:
+          type: string
+        locator:
+          type: string
+          nullable: true
+        percent:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
+
+    ExportedBookmark:
+      type: object
+      required: [book_id, locator, created_at]
+      properties:
+        book_id:
+          type: string
+        locator:
+          type: string
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ExportedCollection:
+      type: object
+      required: [name, is_public, books]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        is_public:
+          type: boolean
+        books:
+          type: array
+          items:
+            type: object
+            required: [book_id, position]
+            properties:
+              book_id:
+                type: string
+              position:
+                type: integer
+                format: int64
+
+    ImportResult:
+      type: object
+      required:
+        - reading_progress_upserted
+        - bookmarks_inserted
+        - bookmarks_skipped_duplicate
+        - collections_created
+        - collections_merged
+        - collection_books_added
+      properties:
+        reading_progress_upserted:
+          type: integer
+          format: int64
+        bookmarks_inserted:
+          type: integer
+          format: int64
+        bookmarks_skipped_duplicate:
+          type: integer
+          format: int64
+        collections_created:
+          type: integer
+          format: int64
+        collections_merged:
+          type: integer
+          format: int64
+        collection_books_added:
+          type: integer
+          format: int64
+
+    LibraryConfigExport:
+      type: object
+      required: [version, exported_at, libraries]
+      properties:
+        version:
+          type: integer
+          example: 1
+        exported_at:
+          type: string
+          format: date-time
+        libraries:
+          type: array
+          items:
+            type: object
+            required: [name, library_type, source_kind, path]
+            properties:
+              name:
+                type: string
+              library_type:
+                type: string
+              source_kind:
+                type: string
+              path:
+                type: string
+              options:
+                type: object
+
+    LibraryConfigImportResult:
+      type: object
+      required: [libraries_created, libraries_skipped_duplicate]
+      properties:
+        libraries_created:
+          type: integer
+          format: int64
+        libraries_skipped_duplicate:
+          type: integer
+          format: int64
+
+    # -------------------------------------------------------------------------
+    # Notifications
+    # -------------------------------------------------------------------------
+    Notification:
+      type: object
+      required: [id, title, message, notification_type, is_read, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        message:
+          type: string
+        notification_type:
+          type: string
+        is_read:
+          type: boolean
+        link:
+          type: string
+          nullable: true
+          description: Optional navigation link related to the notification
+        created_at:
+          type: string
+          format: date-time
+
+    # -------------------------------------------------------------------------
+    # Stats & Activity
+    # -------------------------------------------------------------------------
+    ServerStats:
+      type: object
+      required:
+        - total_books
+        - total_authors
+        - total_series
+        - total_users
+        - total_libraries
+        - books_read
+        - active_readers
+        - storage_bytes
+        - popular_books
+        - recent_activity
+      properties:
+        total_books:
+          type: integer
+          format: int64
+        total_authors:
+          type: integer
+          format: int64
+        total_series:
+          type: integer
+          format: int64
+        total_users:
+          type: integer
+          format: int64
+        total_libraries:
+          type: integer
+          format: int64
+        books_read:
+          type: integer
+          format: int64
+          description: Distinct books where any user reached 100% progress
+        active_readers:
+          type: integer
+          format: int64
+          description: Distinct users with reading activity in the last 30 days
+        storage_bytes:
+          type: integer
+          format: int64
+          description: Total file storage in bytes across all libraries
+        popular_books:
+          type: array
+          items:
+            type: object
+            required: [book_id, title, open_count]
+            properties:
+              book_id:
+                type: string
+              title:
+                type: string
+              open_count:
+                type: integer
+                format: int64
+        recent_activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityLogEntry"
+
+    ActivityLogEntry:
+      type: object
+      required: [id, user_id, action, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        user_id:
+          type: string
+        action:
+          type: string
+          description: "Action type (e.g., book_opened, library_scanned, user_registered)"
+        target_type:
+          type: string
+          nullable: true
+        target_id:
+          type: string
+          nullable: true
+        details_json:
+          type: object
+          nullable: true
+          description: Additional structured data about the action
+        created_at:
+          type: string
+          format: date-time
+
+    # -------------------------------------------------------------------------
+    # Webhooks
+    # -------------------------------------------------------------------------
+    Webhook:
+      type: object
+      required: [id, name, url, events, is_active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+            enum:
+              - book.added
+              - book.completed
+              - book.imported
+              - download.completed
+              - download.failed
+              - library.scanned
+              - user.registered
+              - collection.updated
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required: [name, url, events]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          format: uri
+          description: Must start with http:// or https://
+        secret:
+          type: string
+          description: HMAC secret for signature verification
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - book.added
+              - book.completed
+              - book.imported
+              - download.completed
+              - download.failed
+              - library.scanned
+              - user.registered
+              - collection.updated
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        secret:
+          type: string
+        events:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - book.added
+              - book.completed
+              - book.imported
+              - download.completed
+              - download.failed
+              - library.scanned
+              - user.registered
+              - collection.updated
+        is_active:
+          type: boolean
+
+    WebhookDelivery:
+      type: object
+      required: [id, webhook_id, event, payload_json, delivered_at, is_success]
+      properties:
+        id:
+          type: string
+          format: uuid
+        webhook_id:
+          type: string
+          format: uuid
+        event:
+          type: string
+        payload_json:
+          type: string
+          description: JSON-encoded event payload
+        response_status:
+          type: integer
+          nullable: true
+          description: HTTP status code from the webhook target
+        response_body:
+          type: string
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+        is_success:
+          type: boolean
+
+    # -------------------------------------------------------------------------
+    # Acquisition
+    # -------------------------------------------------------------------------
+    Indexer:
+      type: object
+      required: [id, name, indexer_type, url, is_enabled, priority, search_interval_minutes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        indexer_type:
+          type: string
+          enum: [torznab, newznab, rss, custom]
+        url:
+          type: string
+          format: uri
+        categories:
+          type: string
+          nullable: true
+          description: Comma-separated category IDs
+        is_enabled:
+          type: boolean
+        priority:
+          type: integer
+          default: 50
+        search_interval_minutes:
+          type: integer
+          default: 60
+        last_searched_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateIndexerRequest:
+      type: object
+      required: [name, indexer_type, url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        indexer_type:
+          type: string
+          enum: [torznab, newznab, rss, custom]
+        url:
+          type: string
+          format: uri
+          description: Must start with http:// or https://
+        api_key:
+          type: string
+        categories:
+          type: string
+        priority:
+          type: integer
+        search_interval_minutes:
+          type: integer
+
+    UpdateIndexerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        api_key:
+          type: string
+        categories:
+          type: string
+        is_enabled:
+          type: boolean
+        priority:
+          type: integer
+        search_interval_minutes:
+          type: integer
+
+    DownloadClient:
+      type: object
+      required: [id, name, client_type, host, port, use_ssl, is_enabled, priority, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        client_type:
+          type: string
+          enum: [qbittorrent, transmission, deluge, rtorrent, direct]
+        host:
+          type: string
+        port:
+          type: integer
+        use_ssl:
+          type: boolean
+        download_directory:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        is_enabled:
+          type: boolean
+        priority:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    CreateDownloadClientRequest:
+      type: object
+      required: [name, client_type, host, port]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        client_type:
+          type: string
+          enum: [qbittorrent, transmission, deluge, rtorrent, direct]
+        host:
+          type: string
+          minLength: 1
+        port:
+          type: integer
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        use_ssl:
+          type: boolean
+          default: false
+        download_directory:
+          type: string
+        category:
+          type: string
+
+    UpdateDownloadClientRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        use_ssl:
+          type: boolean
+        download_directory:
+          type: string
+        category:
+          type: string
+        is_enabled:
+          type: boolean
+        priority:
+          type: integer
+
+    WantedItem:
+      type: object
+      required: [id, user_id, item_type, title, is_active, is_fulfilled, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        item_type:
+          type: string
+          enum: [book, author, series]
+        title:
+          type: string
+        author_name:
+          type: string
+          nullable: true
+        isbn:
+          type: string
+          nullable: true
+        year:
+          type: string
+          nullable: true
+        preferred_format:
+          type: string
+          nullable: true
+        quality_profile:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        is_fulfilled:
+          type: boolean
+        fulfilled_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_searched_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateWantedItemRequest:
+      type: object
+      required: [item_type, title]
+      properties:
+        item_type:
+          type: string
+          enum: [book, author, series]
+        title:
+          type: string
+          minLength: 1
+        author_name:
+          type: string
+        isbn:
+          type: string
+        year:
+          type: string
+        preferred_format:
+          type: string
+        quality_profile:
+          type: string
+
+    UpdateWantedItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        author_name:
+          type: string
+        isbn:
+          type: string
+        year:
+          type: string
+        preferred_format:
+          type: string
+        quality_profile:
+          type: string
+        is_active:
+          type: boolean
+
+    GrabRequest:
+      type: object
+      required: [download_url]
+      properties:
+        download_url:
+          type: string
+          format: uri
+          minLength: 1
+        magnet_url:
+          type: string
+        indexer_id:
+          type: string
+          format: uuid
+        download_client_id:
+          type: string
+          format: uuid
+          description: Specific download client to use (defaults to highest priority enabled client)
+        target_library_id:
+          type: string
+          format: uuid
+          description: Library to import the downloaded file into
+        title:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+
+    Download:
+      type: object
+      required: [id, title, download_url, status, progress_percent, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        wanted_item_id:
+          type: string
+          format: uuid
+          nullable: true
+        indexer_id:
+          type: string
+          format: uuid
+          nullable: true
+        download_client_id:
+          type: string
+          format: uuid
+          nullable: true
+        title:
+          type: string
+        download_url:
+          type: string
+          format: uri
+        magnet_url:
+          type: string
+          nullable: true
+        torrent_hash:
+          type: string
+          nullable: true
+        size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [pending, downloading, completed, failed, importing]
+        progress_percent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        error_message:
+          type: string
+          nullable: true
+        file_path:
+          type: string
+          nullable: true
+        target_library_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AcquisitionSearchResult:
+      type: object
+      required: [title, download_url, indexer_name]
+      properties:
+        title:
+          type: string
+        author_guess:
+          type: string
+          nullable: true
+        size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        download_url:
+          type: string
+          format: uri
+        magnet_url:
+          type: string
+          nullable: true
+        info_hash:
+          type: string
+          nullable: true
+        seeders:
+          type: integer
+          nullable: true
+        leechers:
+          type: integer
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        indexer_name:
+          type: string
+
+    ConnectivityTestResult:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    # -------------------------------------------------------------------------
+    # Server Info
+    # -------------------------------------------------------------------------
+    ServerInfo:
+      type: object
+      required: [name, version, features, registration_open, invite_required]
+      properties:
+        name:
+          type: string
+          example: Ironshelf
+        version:
+          type: string
+          example: "0.1.0"
+        features:
+          type: array
+          items:
+            type: string
+          description: List of enabled server features
+          example: [opds, search, custom_columns, reading_progress]
+        registration_open:
+          type: boolean
+          description: True when no users exist yet (first user = owner)
+        invite_required:
+          type: boolean
+          description: True when users exist and invite codes are required
