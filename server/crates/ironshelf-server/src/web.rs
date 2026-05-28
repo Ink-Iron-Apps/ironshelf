@@ -9,10 +9,9 @@ use rust_embed::Embed;
 struct WebAssets;
 
 /// Serve embedded web UI files. Falls back to index.html for SPA routing.
-pub async fn serve_web(
-    axum::extract::Path(path): axum::extract::Path<String>,
-) -> Response {
-    serve_file(&path)
+pub async fn serve_web(request: axum::extract::Request) -> Response {
+    let path = request.uri().path().trim_start_matches('/');
+    serve_file(path)
 }
 
 /// Serve root (index.html).
