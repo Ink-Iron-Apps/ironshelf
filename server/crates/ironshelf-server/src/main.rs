@@ -408,14 +408,12 @@ async fn main() -> anyhow::Result<()> {
     // WebDAV routes for KOReader sync (auth is via path token, no session middleware).
     // Uses `any()` because WebDAV methods (PROPFIND, MKCOL) are not in axum's MethodFilter.
     // Method dispatch happens inside the handler.
-    let webdav_routes = Router::new()
-        .route(
-            "/{*webdav_path}",
-            axum::routing::any(routes::webdav::webdav_dispatch),
-        )
+    // WebDAV uses a fallback handler instead of a catch-all route
+    // because axum 0.7 does not support {*param} catch-all syntax.
+    let webdav_inner = Router::new()
+        .fallback(axum::routing::any(routes::webdav::webdav_dispatch))
         .with_state(app_state.clone());
-    // Nest under /webdav prefix — avoids catch-all route conflicts
-    let webdav_routes = Router::new().nest("/webdav", webdav_routes);
+    let webdav_routes = Router::new().nest("/webdav", webdav_inner);
 
     // Web UI (embedded static files — no state needed, but resolve for type consistency)
     let web_routes = Router::new()
