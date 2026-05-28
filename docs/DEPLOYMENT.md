@@ -15,17 +15,16 @@ This guide covers installing, configuring, and running Ironshelf on a Linux serv
 
 The install script handles user creation, binary placement, configuration, and systemd setup in a single step.
 
-1. Download the install script from the latest release:
+**Linux/macOS (one-liner):**
 
 ```bash
-curl -LO https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh
-chmod +x install.sh
+curl -fsSL https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh | sudo bash
 ```
 
-2. Run the install script:
+**Windows (PowerShell as Admin):**
 
-```bash
-sudo ./install.sh
+```powershell
+irm https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.ps1 | iex
 ```
 
 The script will:
