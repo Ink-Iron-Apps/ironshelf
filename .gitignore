@@ -25,6 +25,10 @@ app/pubspec.lock
 *.iml
 .DS_Store
 
+# Internal dev docs (not for public repo)
+docs/internal/
+CLAUDE.md
+
 # Environment
 .env
 .env.*
