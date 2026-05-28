@@ -414,12 +414,8 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::any(routes::webdav::webdav_dispatch_root),
         )
         .route(
-            "/webdav/{auth_token}/",
-            axum::routing::any(routes::webdav::webdav_dispatch_root),
-        )
-        .route(
-            "/webdav/{auth_token}/{*path}",
-            axum::routing::any(routes::webdav::webdav_dispatch_path),
+            "/webdav/{*webdav_path}",
+            axum::routing::any(routes::webdav::webdav_dispatch),
         )
         .with_state(app_state.clone());
 
