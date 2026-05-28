@@ -75,6 +75,15 @@ database_path = "./ironshelf.db"
 
 That's it. Ironshelf indexes your collection and you can start browsing immediately.
 
+> **Windows note:** If you see a script signing error when running `install.ps1`, run:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File .\install.ps1
+> ```
+
+## Community
+
+[GitHub Discussions](https://github.com/LightWraith8268/ironshelf/discussions) for questions and feature requests.
+
 ## Configuration
 
 Ironshelf uses a TOML configuration file with sensible defaults. All settings can also be overridden with environment variables.

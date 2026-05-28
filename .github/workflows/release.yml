@@ -201,6 +201,17 @@ jobs:
           chmod +x release-assets/install.sh release-assets/uninstall.sh
           ls -la release-assets/
 
+      # TODO: Enable when SignPath certificate is configured
+      # - name: Sign PowerShell scripts
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+      #     organization-id: '${{ secrets.SIGNPATH_ORG_ID }}'
+      #     project-slug: 'ironshelf'
+      #     signing-policy-slug: 'release-signing'
+      #     artifact-configuration-slug: 'powershell-scripts'
+      #     github-artifact-id: 'install-scripts'
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
