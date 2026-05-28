@@ -6,7 +6,8 @@
 //! Authentication is via a path-embedded API key (`{auth_token}` = `irs_<prefix>.<secret>`),
 //! validated on every request using the same logic as Bearer auth.
 
-use axum::extract::{Host, Path, State};
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -159,12 +160,16 @@ fn entitlement_id(book_id: i64) -> String {
 /// discover image URL templates and other service endpoints.
 pub async fn initialization(
     State(state): State<AppState>,
-    Host(host): Host,
+    headers: HeaderMap,
     Path(auth_token): Path<String>,
 ) -> Result<Json<Value>, AppError> {
     authenticate_kobo_token(&state, &auth_token).await?;
 
-    let base_url = build_base_url(&host);
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:10810");
+    let base_url = build_base_url(host);
 
     Ok(Json(json!({
         "Resources": {
@@ -185,12 +190,16 @@ pub async fn initialization(
 /// The Kobo device uses this to discover available books and their download URLs.
 pub async fn library_sync(
     State(state): State<AppState>,
-    Host(host): Host,
+    headers: HeaderMap,
     Path(auth_token): Path<String>,
 ) -> Result<Json<Vec<KoboEntitlement>>, AppError> {
     authenticate_kobo_token(&state, &auth_token).await?;
 
-    let base_url = build_base_url(&host);
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:10810");
+    let base_url = build_base_url(host);
     let libraries = state.libraries.read().await;
 
     // Collect all authors across libraries for name resolution.
