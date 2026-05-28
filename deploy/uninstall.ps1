@@ -27,17 +27,24 @@ Write-Host ""
 Write-Host "=== Ironshelf Uninstaller (Windows) ===" -ForegroundColor Yellow
 Write-Host ""
 
-# --- Stop and remove service ---
+# --- Stop and remove scheduled task / legacy service ---
 
+$ExistingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+    Write-Info "Stopping scheduled task..."
+    Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    Write-Info "Removing scheduled task..."
+    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
+} else {
+    Write-Info "Scheduled task not found."
+}
+
+# Also clean up legacy Windows Service if it exists from older installs
 $ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($ExistingService) {
-    Write-Info "Stopping service..."
+    Write-Info "Removing legacy Windows Service..."
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    Write-Info "Removing service..."
     sc.exe delete $ServiceName | Out-Null
-} else {
-    Write-Info "Service not found, skipping."
 }
 
 # --- Remove firewall rule ---

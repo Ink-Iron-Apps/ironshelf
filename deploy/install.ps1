@@ -16,10 +16,14 @@ $ServiceDisplayName = "Ironshelf Ebook Server"
 $BinaryName = "ironshelf-server.exe"
 $ArtifactName = "ironshelf-server-windows-x86_64.exe"
 $DefaultPort = 10810
-$InstallDir = "$env:ProgramFiles\Ironshelf"
-$ConfigDir = "$env:APPDATA\Ironshelf"
-$ConfigPath = "$ConfigDir\config.toml"
-$BinaryPath = "$InstallDir\$BinaryName"
+# Defaults — user can override interactively
+$DefaultInstallDir = "$env:ProgramFiles\Ironshelf"
+$DefaultConfigDir = $null  # Set after install dir is chosen
+$InstallDir = $null
+$ConfigDir = $null
+$ConfigPath = $null
+$BinaryPath = $null
+$ChosenPort = $ChosenPort
 $MinDiskMB = 500
 $VCRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
@@ -203,6 +207,30 @@ Write-Host ""
 # Run all preflight checks before touching anything
 Invoke-PreflightChecks
 
+# --- Interactive prompts ---
+
+Write-Host ""
+Write-Host "=== Installation Options ===" -ForegroundColor White
+Write-Host ""
+
+# Install directory
+$InputDir = Read-Host "Install directory [$DefaultInstallDir]"
+if ([string]::IsNullOrWhiteSpace($InputDir)) { $InstallDir = $DefaultInstallDir } else { $InstallDir = $InputDir.Trim() }
+
+# Config goes in install dir (not user AppData — service runs as LocalSystem)
+$ConfigDir = $InstallDir
+$ConfigPath = "$ConfigDir\config.toml"
+$BinaryPath = "$InstallDir\$BinaryName"
+
+# Port
+$InputPort = Read-Host "Server port [$DefaultPort]"
+if ([string]::IsNullOrWhiteSpace($InputPort)) { $ChosenPort = $DefaultPort } else { $ChosenPort = [int]$InputPort }
+
+Write-Host ""
+Write-Info "Installing to: $InstallDir"
+Write-Info "Server port:   $ChosenPort"
+Write-Host ""
+
 # --- Get latest release download URL ---
 
 Write-Info "Fetching latest release from GitHub..."
@@ -242,7 +270,7 @@ if (-not (Test-Path $ConfigPath)) {
 # See https://github.com/LightWraith8268/ironshelf for documentation.
 
 host = "0.0.0.0"
-port = $DefaultPort
+port = $ChosenPort
 database_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf.db"
 
 # search_index_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf-search-index\\"
@@ -266,48 +294,77 @@ database_path = "$($InstallDir -replace '\\', '\\\\')\\ironshelf.db"
     Write-Info "Config already exists at $ConfigPath, not overwriting."
 }
 
-# --- Register Windows Service ---
+# --- Register as Scheduled Task (auto-start, no console window) ---
 
-Write-Info "Registering Windows Service..."
+Write-Info "Registering auto-start task..."
 
-# Stop existing service if running
+# Remove any existing service or task
 $ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($ExistingService) {
-    Write-Info "Stopping existing service..."
+    Write-Info "Removing old Windows Service..."
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
     sc.exe delete $ServiceName | Out-Null
     Start-Sleep -Seconds 2
 }
 
-# Create the service using sc.exe with the binary directly.
-# Environment variables are set via the service registry key since sc.exe
-# cannot set them and .cmd wrappers are not valid service executables.
-sc.exe create $ServiceName binPath= "`"$BinaryPath`"" start= auto DisplayName= "$ServiceDisplayName" | Out-Null
-sc.exe description $ServiceName "Self-hosted ebook server with Calibre integration" | Out-Null
+$ExistingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+if ($ExistingTask) {
+    Write-Info "Removing existing scheduled task..."
+    Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
+}
 
-# Set environment variables for the service via registry.
-# The "Environment" multi-string value is read by the Service Control Manager.
-$RegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-$EnvValues = @(
-    "IRONSHELF_CONFIG=$ConfigPath",
-    "RUST_LOG=ironshelf_server=info"
-)
-Set-ItemProperty -Path $RegPath -Name "Environment" -Value $EnvValues -Type MultiString
+# Create scheduled task that runs at system startup, hidden (no window)
+$Action = New-ScheduledTaskAction `
+    -Execute $BinaryPath `
+    -WorkingDirectory $InstallDir `
+    -Argument ""
 
-# Start the service
-Write-Info "Starting service..."
-Start-Service -Name $ServiceName
+# Set environment variable for config path
+# The working directory is the install dir, so config.toml is found automatically
+
+$Trigger = New-ScheduledTaskTrigger -AtStartup
+$Settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit (New-TimeSpan -Days 365)
+
+$Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskName $ServiceName `
+    -Action $Action `
+    -Trigger $Trigger `
+    -Settings $Settings `
+    -Principal $Principal `
+    -Description "Ironshelf ebook server — runs at startup, no console window" | Out-Null
+
+# Start immediately
+Write-Info "Starting Ironshelf..."
+Start-ScheduledTask -TaskName $ServiceName
+Start-Sleep -Seconds 2
+
+# Verify it's running
+$TaskInfo = Get-ScheduledTask -TaskName $ServiceName
+if ($TaskInfo.State -eq "Running") {
+    Write-Info "Ironshelf is running."
+} else {
+    Write-Warn "Task registered but may not have started yet. Check Task Scheduler."
+}
 
 # --- Firewall rule ---
 
-Write-Info "Adding firewall rule for port $DefaultPort..."
-$RuleName = "Ironshelf Server (TCP $DefaultPort)"
+Write-Info "Adding firewall rule for port $ChosenPort..."
+$RuleName = "Ironshelf Server (TCP $ChosenPort)"
 $ExistingRule = Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue
 if (-not $ExistingRule) {
     New-NetFirewallRule -DisplayName $RuleName `
         -Direction Inbound `
         -Protocol TCP `
-        -LocalPort $DefaultPort `
+        -LocalPort $ChosenPort `
         -Action Allow `
         -Profile Private, Domain | Out-Null
     Write-Info "Firewall rule created."
@@ -320,13 +377,13 @@ if (-not $ExistingRule) {
 Write-Host ""
 Write-Host "=== Ironshelf Installed (Windows) ===" -ForegroundColor Green
 Write-Host ""
-Write-Host "Running at:  http://localhost:$DefaultPort"
+Write-Host "Running at:  http://localhost:$ChosenPort"
 Write-Host "Binary:      $BinaryPath"
 Write-Host "Config:      $ConfigPath"
 Write-Host "Service:     $ServiceName (auto-start)"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Open http://localhost:$DefaultPort and register your admin account"
+Write-Host "  1. Open http://localhost:$ChosenPort and register your admin account"
 Write-Host "  2. Add libraries via Settings -> Libraries in the web UI"
 Write-Host "  3. Config file: $ConfigPath"
 Write-Host "  4. Restart after config changes:"
