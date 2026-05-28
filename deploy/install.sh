@@ -8,10 +8,12 @@ REPO="LightWraith8268/ironshelf"
 SERVICE_NAME="ironshelf"
 BINARY_NAME="ironshelf-server"
 DEFAULT_PORT=10810
+MIN_DISK_MB=500
 
 # --- Helpers ---
 
 info() { echo "[INFO] $*"; }
+warn() { echo "[WARN] $*" >&2; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
 
 detect_platform() {
@@ -32,19 +34,127 @@ detect_platform() {
     esac
 
     ARTIFACT_NAME="${BINARY_NAME}-${PLATFORM}-${ARCH}"
-    info "Detected platform: ${PLATFORM}-${ARCH}"
 }
+
+# --- Prerequisite checks ---
+
+check_download_tool() {
+    if command -v curl &>/dev/null; then
+        DOWNLOAD_TOOL="curl"
+    elif command -v wget &>/dev/null; then
+        DOWNLOAD_TOOL="wget"
+    else
+        error "Neither curl nor wget found. Install one and retry."
+    fi
+}
+
+check_disk_space() {
+    local target_dir="$1"
+    local available_mb
+
+    # Resolve to an existing parent if target doesn't exist yet
+    local check_dir="$target_dir"
+    while [[ ! -d "$check_dir" ]]; do
+        check_dir="$(dirname "$check_dir")"
+    done
+
+    if [[ "$PLATFORM" == "macos" ]]; then
+        # macOS df outputs 512-byte blocks by default; use -m for MB
+        available_mb=$(df -m "$check_dir" 2>/dev/null | awk 'NR==2 {print $4}')
+    else
+        available_mb=$(df -BM "$check_dir" 2>/dev/null | awk 'NR==2 {gsub(/M/,""); print $4}')
+    fi
+
+    if [[ -n "$available_mb" ]] && [[ "$available_mb" -lt "$MIN_DISK_MB" ]]; then
+        error "Insufficient disk space: ${available_mb}MB available, ${MIN_DISK_MB}MB required at $target_dir"
+    elif [[ -n "$available_mb" ]]; then
+        info "Disk space: ${available_mb}MB available at $check_dir"
+    else
+        warn "Could not determine available disk space. Proceeding anyway."
+    fi
+}
+
+check_optional_tools() {
+    # ebook-convert (Calibre CLI) — used for format conversion
+    if command -v ebook-convert &>/dev/null; then
+        local ebook_version
+        ebook_version=$(ebook-convert --version 2>&1 | head -1 || echo "unknown")
+        info "Found ebook-convert: $ebook_version"
+        info "  Format conversion feature will be available."
+    else
+        info "ebook-convert not found (optional)."
+        info "  Install Calibre to enable format conversion (epub <-> mobi, pdf, etc.)."
+        info "  https://calibre-ebook.com/download"
+    fi
+}
+
+print_system_summary() {
+    echo ""
+    echo "=== System Information ==="
+    echo ""
+    echo "  Platform:     ${PLATFORM}-${ARCH}"
+    echo "  OS:           $(uname -sr)"
+    echo "  Download via: ${DOWNLOAD_TOOL}"
+
+    if [[ "$PLATFORM" == "linux" ]]; then
+        # Show distro info if available
+        if [[ -f /etc/os-release ]]; then
+            local distro
+            distro=$(. /etc/os-release && echo "${PRETTY_NAME:-$NAME}")
+            echo "  Distro:       $distro"
+        fi
+
+        # Check systemd
+        if command -v systemctl &>/dev/null; then
+            echo "  Init system:  systemd"
+        else
+            warn "systemd not found. The installer creates a systemd service unit."
+            warn "You will need to manage the process manually or adapt for your init system."
+        fi
+    fi
+
+    # ebook-convert status (brief)
+    if command -v ebook-convert &>/dev/null; then
+        echo "  ebook-convert: found (format conversion enabled)"
+    else
+        echo "  ebook-convert: not found (format conversion unavailable)"
+    fi
+
+    # TLS info
+    echo "  TLS backend:  rustls (bundled, no system libssl required)"
+
+    echo ""
+}
+
+run_preflight_checks() {
+    info "Running preflight checks..."
+    echo ""
+
+    check_download_tool
+
+    # Determine install target for disk space check
+    local install_target
+    if [[ "$PLATFORM" == "linux" ]]; then
+        install_target="/opt/ironshelf"
+    else
+        install_target="/usr/local/bin"
+    fi
+    check_disk_space "$install_target"
+
+    check_optional_tools
+    print_system_summary
+}
+
+# --- Download helpers ---
 
 get_latest_release_url() {
     local api_url="https://api.github.com/repos/${REPO}/releases/latest"
     local download_url
 
-    if command -v curl &>/dev/null; then
+    if [[ "$DOWNLOAD_TOOL" == "curl" ]]; then
         download_url=$(curl -fsSL "$api_url" | grep -o "\"browser_download_url\": *\"[^\"]*${ARTIFACT_NAME}\"" | head -1 | cut -d'"' -f4)
-    elif command -v wget &>/dev/null; then
-        download_url=$(wget -qO- "$api_url" | grep -o "\"browser_download_url\": *\"[^\"]*${ARTIFACT_NAME}\"" | head -1 | cut -d'"' -f4)
     else
-        error "Neither curl nor wget found. Install one and retry."
+        download_url=$(wget -qO- "$api_url" | grep -o "\"browser_download_url\": *\"[^\"]*${ARTIFACT_NAME}\"" | head -1 | cut -d'"' -f4)
     fi
 
     if [[ -z "$download_url" ]]; then
@@ -58,7 +168,7 @@ get_latest_release_url() {
 download_binary() {
     local dest="$1"
     info "Downloading binary..."
-    if command -v curl &>/dev/null; then
+    if [[ "$DOWNLOAD_TOOL" == "curl" ]]; then
         curl -fsSL -o "$dest" "$DOWNLOAD_URL"
     else
         wget -qO "$dest" "$DOWNLOAD_URL"
@@ -282,9 +392,10 @@ echo "=== Ironshelf Installer ==="
 echo ""
 
 detect_platform
+run_preflight_checks
 get_latest_release_url
 
 case "$PLATFORM" in
     linux)  install_linux ;;
-    darwin) install_macos ;;
+    macos)  install_macos ;;
 esac
