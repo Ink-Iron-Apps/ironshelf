@@ -12,10 +12,10 @@ Ironshelf is a self-hosted ebook management server that finally gets library bro
 ## Features
 
 - **Calibre integration (read-only)** — Reads your existing `metadata.db` directly. No import step, no data duplication, no risk of corruption.
-- **Folder scanning with OPF parsing** — Point Ironshelf at any directory of epubs and it extracts metadata from embedded OPF files automatically.
+- **Folder scanning with OPF parsing** — Point Ironshelf at any directory of ebooks and it extracts metadata from embedded OPF files automatically.
 - **Author → Series → Book hierarchy** — Browse your library the way you think about it. Series are grouped under authors, books are ordered by series index.
 - **Custom column support** — Calibre custom columns (read status, tags, ratings, shelves) surface automatically in the UI and API.
-- **Genre/tag browsing** — Browse by genre across all libraries with author and series drill-down within each genre.
+- **Genre and tag browsing** — Browse by genre across all libraries with author and series drill-down within each genre.
 - **Full-text search** — Fast search powered by Tantivy across all libraries, authors, series, and books.
 - **OPDS feeds** — Compatible with any OPDS reader app (KOReader, Moon+ Reader, Librera, and more).
 - **Kobo Sync** — Native Kobo eReader sync support for library access and reading progress.
@@ -30,7 +30,7 @@ Ironshelf is a self-hosted ebook management server that finally gets library bro
 - **Webhooks** — Get notified when books are added, completed, or libraries are scanned via configurable webhook endpoints.
 - **Notifications** — In-app notification system for scan completions, new books, and system events.
 - **Import/export** — Portable data: export and import reading progress, bookmarks, collections, and library configuration.
-- **Metadata enrichment** — Search and apply metadata from external providers to improve book information.
+- **Metadata enrichment** — Search and apply metadata from Google Books and Open Library to improve book information.
 - **Activity and stats** — Reading statistics and activity tracking for users and the server.
 - **Cloudflare Access support** — Pass service token headers through to secure your instance behind zero-trust networking.
 - **Rate limiting and security headers** — Built-in protection against abuse with per-IP rate limiting and CSP/security headers.
@@ -52,13 +52,15 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 
 ### 2. Create a configuration file
 
-Create `ironshelf.toml` in the same directory as the binary (or set `IRONSHELF_CONFIG` to point elsewhere):
+Create `ironshelf.toml` in the same directory as the binary (or set the `IRONSHELF_CONFIG` environment variable to point elsewhere):
 
 ```toml
 host = "0.0.0.0"
 port = 10810
 database_path = "./ironshelf.db"
 ```
+
+> **Note:** If you skip this step, Ironshelf starts with sensible defaults (listening on `0.0.0.0:10810` with the database in the current directory).
 
 ### 3. Run it
 
@@ -70,7 +72,7 @@ database_path = "./ironshelf.db"
 
 1. Open your browser to `http://localhost:10810`
 2. Register your first user account (this account automatically becomes the admin)
-3. Navigate to Settings → Libraries → Add Library
+3. Navigate to **Settings → Libraries → Add Library**
 4. Choose your source type (Calibre database or folder scan) and point it at your books
 
 That's it. Ironshelf indexes your collection and you can start browsing immediately.
@@ -80,15 +82,13 @@ That's it. Ironshelf indexes your collection and you can start browsing immediat
 > powershell -ExecutionPolicy Bypass -File .\install.ps1
 > ```
 
-## Community
-
-[GitHub Discussions](https://github.com/LightWraith8268/ironshelf/discussions) for questions and feature requests.
+For production deployments with systemd, reverse proxies, and TLS, see the [Deployment Guide](docs/DEPLOYMENT.md).
 
 ## Configuration
 
-Ironshelf uses a TOML configuration file with sensible defaults. All settings can also be overridden with environment variables.
+Ironshelf uses a TOML configuration file with sensible defaults. All settings can also be overridden with environment variables (which take precedence over the file).
 
-| Setting | TOML key | Environment variable | Default |
+| Setting | TOML Key | Environment Variable | Default |
 |---------|----------|---------------------|---------|
 | Listen address | `host` | `IRONSHELF_HOST` | `0.0.0.0` |
 | Listen port | `port` | `IRONSHELF_PORT` | `10810` |
@@ -97,9 +97,8 @@ Ironshelf uses a TOML configuration file with sensible defaults. All settings ca
 | Thumbnail cache path | `thumbnail_cache_path` | `IRONSHELF_THUMBNAIL_CACHE` | `./ironshelf-thumbnail-cache/` |
 | TLS enabled | `tls_enabled` | `IRONSHELF_TLS_ENABLED` | `false` |
 | Trust proxy headers | `trust_proxy_headers` | `IRONSHELF_TRUST_PROXY_HEADERS` | `false` |
-| Config file path | — | `IRONSHELF_CONFIG` | `./ironshelf.toml` |
-
-Environment variables take precedence over the TOML file. The config file location itself can only be set via `IRONSHELF_CONFIG`.
+| Config file path | -- | `IRONSHELF_CONFIG` | `./ironshelf.toml` |
+| Log level | -- | `RUST_LOG` | `ironshelf_server=info` |
 
 Libraries are managed through the web UI and API, not the configuration file.
 
@@ -121,7 +120,8 @@ auto_register = true
 
 Ironshelf exposes a REST API (JSON) and OPDS 1.2 feeds for reader app compatibility. All endpoints require authentication via session cookie or API key Bearer token.
 
-For the full API specification, see [`docs/API.md`](docs/API.md).
+- Full API reference: [`docs/API.md`](docs/API.md)
+- OpenAPI specification: [`docs/openapi.yaml`](docs/openapi.yaml)
 
 ## Tech Stack
 
@@ -130,8 +130,8 @@ For the full API specification, see [`docs/API.md`](docs/API.md).
 | Backend | Rust with Axum |
 | Database | SQLite via sqlx |
 | Full-text search | Tantivy |
-| Web UI | Embedded (vanilla JS) |
-| Mobile app | Flutter (coming soon) |
+| Web UI | Embedded vanilla JS (compiled into binary via rust-embed) |
+| Mobile app | Flutter (Android; iOS coming soon) |
 | Authentication | Argon2 password hashing, session cookies, API keys, OIDC/SSO |
 
 ## Building from Source
@@ -143,7 +143,7 @@ cd server
 cargo build --release
 ```
 
-The compiled binary will be at `server/target/release/ironshelf-server`.
+The compiled binary will be at `server/target/release/ironshelf-server`. The web UI files in `server/web/` are automatically embedded into the binary at compile time via rust-embed.
 
 For development with verbose logging:
 
@@ -151,6 +151,24 @@ For development with verbose logging:
 cd server
 RUST_LOG=ironshelf_server=debug,tower_http=debug cargo run -p ironshelf-server
 ```
+
+## Contributing
+
+Contributions are welcome. To get started:
+
+1. Fork the repository and clone your fork.
+2. Create a feature branch from `main` (e.g., `feat/my-feature`).
+3. Make your changes and commit using [Conventional Commits](https://www.conventionalcommits.org/) format (`feat:`, `fix:`, `docs:`, etc.).
+4. Open a pull request against `main` with a clear description of what your change does and why.
+
+Please open an issue or discussion before starting work on large features to ensure alignment with the project direction.
+
+## Community
+
+- **[GitHub Discussions](https://github.com/LightWraith8268/ironshelf/discussions)** — Ask questions, share ideas, and discuss features.
+- **[GitHub Issues](https://github.com/LightWraith8268/ironshelf/issues)** — Report bugs or request features.
+- **[Roadmap](docs/ROADMAP.md)** — See what has been built and what is planned next.
+- **[Changelog](CHANGELOG.md)** — Track what changed in each release.
 
 ## License
 
