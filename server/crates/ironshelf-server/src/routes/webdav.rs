@@ -33,21 +33,14 @@ async fn authenticate_webdav_token(
 // Top-level dispatchers (axum MethodFilter doesn't support custom WebDAV methods)
 // ---------------------------------------------------------------------------
 
-/// Unified dispatch handler for WebDAV requests nested under `/webdav/`.
+/// Unified dispatch handler for `/webdav/{*webdav_path}`.
 /// Parses auth_token from the first path segment, remainder is the resource path.
 /// Routes by HTTP method: OPTIONS, PROPFIND, GET, PUT, MKCOL, DELETE.
 pub async fn webdav_dispatch(
     State(state): State<AppState>,
+    Path(webdav_path): Path<String>,
     request: Request,
 ) -> Result<Response, AppError> {
-    // Extract the path after /webdav/ from the request URI
-    let full_path = request.uri().path();
-    let webdav_path = full_path
-        .strip_prefix("/webdav/")
-        .or_else(|| full_path.strip_prefix("/webdav"))
-        .unwrap_or("")
-        .to_string();
-
     // Parse: "auth_token/some/resource/path" or just "auth_token" or "auth_token/"
     let (auth_token, resource_path) = match webdav_path.find('/') {
         Some(slash_pos) => {
