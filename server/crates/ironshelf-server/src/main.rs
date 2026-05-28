@@ -410,10 +410,12 @@ async fn main() -> anyhow::Result<()> {
     // Method dispatch happens inside the handler.
     let webdav_routes = Router::new()
         .route(
-            "/webdav/{*webdav_path}",
+            "/{*webdav_path}",
             axum::routing::any(routes::webdav::webdav_dispatch),
         )
         .with_state(app_state.clone());
+    // Nest under /webdav prefix — avoids catch-all route conflicts
+    let webdav_routes = Router::new().nest("/webdav", webdav_routes);
 
     // Web UI (embedded static files — no state needed, but resolve for type consistency)
     let web_routes = Router::new()
