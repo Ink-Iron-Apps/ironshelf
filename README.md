@@ -48,9 +48,11 @@ Ironshelf is a self-hosted ebook management server that finally gets library bro
 
 ### 1. Install
 
+#### Quick install (one-liner, uses defaults)
+
 **Linux/macOS:**
 ```bash
-curl -fsSL https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh | sudo bash
 ```
 
 **Windows (PowerShell as Admin):**
@@ -58,7 +60,24 @@ curl -fsSL https://github.com/LightWraith8268/ironshelf/releases/latest/download
 irm https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.ps1 | iex
 ```
 
-**Or download manually** from the [Releases](https://github.com/LightWraith8268/ironshelf/releases) page.
+#### Interactive install (choose install directory and port)
+
+**Linux/macOS:**
+```bash
+curl -LO https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+**Windows (PowerShell as Admin):**
+```powershell
+Invoke-WebRequest -Uri https://github.com/LightWraith8268/ironshelf/releases/latest/download/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+#### Manual install
+
+Download the binary for your platform from the [Releases](https://github.com/LightWraith8268/ironshelf/releases) page and run it directly.
 
 ### 2. Create a configuration file
 
