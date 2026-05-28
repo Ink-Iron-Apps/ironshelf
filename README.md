@@ -87,8 +87,36 @@ database_path = "./ironshelf.db"
 
 That's it. Ironshelf indexes your collection and you can start browsing immediately.
 
+### Managing the Server
 
-For production deployments with systemd, reverse proxies, and TLS, see the [Deployment Guide](docs/DEPLOYMENT.md).
+**Linux (systemd):**
+```bash
+sudo systemctl start ironshelf      # Start
+sudo systemctl stop ironshelf       # Stop
+sudo systemctl restart ironshelf    # Restart
+sudo systemctl status ironshelf     # Check status
+sudo journalctl -u ironshelf -f     # View logs
+```
+
+**macOS (launchd):**
+```bash
+launchctl load ~/Library/LaunchAgents/com.inknironapps.ironshelf.plist     # Start
+launchctl unload ~/Library/LaunchAgents/com.inknironapps.ironshelf.plist   # Stop
+launchctl list | grep ironshelf                                             # Check status
+tail -f ~/Library/Logs/ironshelf.log                                        # View logs
+```
+
+**Windows (PowerShell as Admin):**
+```powershell
+Start-ScheduledTask -TaskName Ironshelf                                     # Start
+Stop-ScheduledTask -TaskName Ironshelf                                      # Stop
+Stop-ScheduledTask -TaskName Ironshelf; Start-Sleep 2; Start-ScheduledTask -TaskName Ironshelf  # Restart
+Get-ScheduledTask -TaskName Ironshelf | Select-Object State                 # Check status
+```
+
+> **Windows interactive install:** Download `install.ps1` and run it directly to choose a custom install directory and port. The `irm | iex` one-liner uses defaults.
+
+For production deployments with reverse proxies and TLS, see the [Deployment Guide](docs/DEPLOYMENT.md).
 
 ## Configuration
 

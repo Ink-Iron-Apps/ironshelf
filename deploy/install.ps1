@@ -207,24 +207,31 @@ Write-Host ""
 # Run all preflight checks before touching anything
 Invoke-PreflightChecks
 
-# --- Interactive prompts ---
+# --- Installation options (interactive if run directly, defaults if piped) ---
 
-Write-Host ""
-Write-Host "=== Installation Options ===" -ForegroundColor White
-Write-Host ""
+# Detect if running interactively (piped via irm | iex has no stdin)
+$IsInteractive = [Environment]::UserInteractive -and -not ([Console]::IsInputRedirected)
 
-# Install directory
-$InputDir = Read-Host "Install directory [$DefaultInstallDir]"
-if ([string]::IsNullOrWhiteSpace($InputDir)) { $InstallDir = $DefaultInstallDir } else { $InstallDir = $InputDir.Trim() }
+if ($IsInteractive) {
+    Write-Host ""
+    Write-Host "=== Installation Options ===" -ForegroundColor White
+    Write-Host ""
 
-# Config goes in install dir (not user AppData — service runs as LocalSystem)
+    $InputDir = Read-Host "Install directory [$DefaultInstallDir]"
+    if ([string]::IsNullOrWhiteSpace($InputDir)) { $InstallDir = $DefaultInstallDir } else { $InstallDir = $InputDir.Trim() }
+
+    $InputPort = Read-Host "Server port [$DefaultPort]"
+    if ([string]::IsNullOrWhiteSpace($InputPort)) { $ChosenPort = $DefaultPort } else { $ChosenPort = [int]$InputPort }
+} else {
+    Write-Info "Non-interactive mode — using defaults."
+    $InstallDir = $DefaultInstallDir
+    $ChosenPort = $DefaultPort
+}
+
+# Config goes in install dir (not user AppData — task runs as SYSTEM)
 $ConfigDir = $InstallDir
 $ConfigPath = "$ConfigDir\config.toml"
 $BinaryPath = "$InstallDir\$BinaryName"
-
-# Port
-$InputPort = Read-Host "Server port [$DefaultPort]"
-if ([string]::IsNullOrWhiteSpace($InputPort)) { $ChosenPort = $DefaultPort } else { $ChosenPort = [int]$InputPort }
 
 Write-Host ""
 Write-Info "Installing to: $InstallDir"
