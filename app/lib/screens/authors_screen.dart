@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../models/author.dart';
 import '../providers/browse_provider.dart';
 import '../widgets/alpha_sidebar.dart';
 import '../widgets/author_tile.dart';
@@ -102,7 +103,7 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
     );
   }
 
-  void _scrollToLetter(String letter, List authorsList) {
+  void _scrollToLetter(String letter, List<Author> authorsList) {
     int targetIndex = -1;
     for (int i = 0; i < authorsList.length; i++) {
       final author = authorsList[i];
