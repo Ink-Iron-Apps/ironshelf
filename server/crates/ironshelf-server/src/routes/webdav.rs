@@ -33,39 +33,41 @@ async fn authenticate_webdav_token(
 // Top-level dispatchers (axum MethodFilter doesn't support custom WebDAV methods)
 // ---------------------------------------------------------------------------
 
-/// Dispatch handler for `/webdav/{auth_token}` and `/webdav/{auth_token}/`.
-/// Routes by HTTP method: OPTIONS, PROPFIND.
-pub async fn webdav_dispatch_root(
-    State(state): State<AppState>,
-    Path(auth_token): Path<String>,
-    request: Request,
-) -> Result<Response, AppError> {
-    let method = request.method().clone();
-    let headers = request.headers().clone();
-
-    match method.as_str() {
-        "OPTIONS" => webdav_options(State(state), Path(auth_token)).await.map(IntoResponse::into_response),
-        "PROPFIND" => propfind_root(State(state), Path(auth_token), headers).await.map(IntoResponse::into_response),
-        // SAFETY: Response::builder() with static status + empty body cannot fail.
-        _ => Ok(Response::builder()
-            .status(StatusCode::METHOD_NOT_ALLOWED)
-            .body(Body::empty())
-            .unwrap()),
-    }
-}
-
-/// Dispatch handler for `/webdav/{auth_token}/{*path}`.
+/// Unified dispatch handler for `/webdav/{*webdav_path}`.
+/// Parses auth_token from the first path segment, remainder is the resource path.
 /// Routes by HTTP method: OPTIONS, PROPFIND, GET, PUT, MKCOL, DELETE.
-pub async fn webdav_dispatch_path(
+pub async fn webdav_dispatch(
     State(state): State<AppState>,
-    Path((auth_token, resource_path)): Path<(String, String)>,
+    Path(webdav_path): Path<String>,
     request: Request,
 ) -> Result<Response, AppError> {
-    // SAFETY: Reject path traversal attempts before any processing.
-    validate_webdav_path(&resource_path)?;
+    // Parse: "auth_token/some/resource/path" or just "auth_token" or "auth_token/"
+    let (auth_token, resource_path) = match webdav_path.find('/') {
+        Some(slash_pos) => {
+            let token = &webdav_path[..slash_pos];
+            let path = webdav_path[slash_pos + 1..].trim_end_matches('/');
+            (token.to_string(), path.to_string())
+        }
+        None => (webdav_path.trim_end_matches('/').to_string(), String::new()),
+    };
 
     let method = request.method().clone();
     let headers = request.headers().clone();
+
+    // Root path (no resource) — only OPTIONS and PROPFIND
+    if resource_path.is_empty() {
+        return match method.as_str() {
+            "OPTIONS" => webdav_options(State(state), Path(auth_token)).await.map(IntoResponse::into_response),
+            "PROPFIND" => propfind_root(State(state), Path(auth_token), headers).await.map(IntoResponse::into_response),
+            _ => Ok(Response::builder()
+                .status(StatusCode::METHOD_NOT_ALLOWED)
+                .body(Body::empty())
+                .unwrap()),
+        };
+    }
+
+    // Resource path — validate against traversal
+    validate_webdav_path(&resource_path)?;
 
     match method.as_str() {
         "OPTIONS" => webdav_options_path(State(state), Path((auth_token, resource_path))).await.map(IntoResponse::into_response),
