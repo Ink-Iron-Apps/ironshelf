@@ -4204,3 +4204,424 @@ tbody td {
   box-shadow: var(--shadow-glow-teal);
   color: var(--color-bg);
 }
+
+/* ============================================================
+   Acquisition Engine
+   ============================================================ */
+
+/* --- Tab Bar --- */
+.acq-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-6);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.acq-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.acq-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  margin-bottom: -1px;
+}
+
+.acq-tab:hover {
+  color: var(--color-text);
+}
+
+.acq-tab.active {
+  color: var(--color-teal-bright);
+  border-bottom-color: var(--color-teal-bright);
+}
+
+.acq-tab .nav-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* --- Search Bar --- */
+.acq-search-bar {
+  margin-bottom: var(--space-6);
+}
+
+.acq-search-fields {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+/* --- Results List --- */
+.acq-results-header {
+  margin-bottom: var(--space-3);
+}
+
+.acq-results-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.acq-results-modal {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.acq-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background var(--transition-fast);
+}
+
+.acq-result-row:last-child {
+  border-bottom: none;
+}
+
+.acq-result-row:hover {
+  background: var(--color-surface-hover);
+}
+
+.acq-result-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.acq-result-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.acq-result-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  flex-wrap: wrap;
+}
+
+.acq-result-meta .nav-icon {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.acq-seeders {
+  color: var(--color-success);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.acq-seeders svg {
+  width: 10px;
+  height: 10px;
+}
+
+.acq-leechers {
+  color: var(--color-danger);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.acq-leechers svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* --- Wanted Cards --- */
+.acq-wanted-section {
+  margin-bottom: var(--space-4);
+}
+
+.acq-wanted-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.acq-wanted-card {
+  padding: var(--space-4) var(--space-5);
+}
+
+.acq-wanted-fulfilled {
+  opacity: 0.6;
+}
+
+.acq-wanted-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.acq-wanted-card-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-bright);
+}
+
+.acq-wanted-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.acq-wanted-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* --- Download Cards --- */
+.acq-downloads-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.acq-download-card {
+  padding: var(--space-4) var(--space-5);
+}
+
+.acq-download-active {
+  border-color: var(--color-teal);
+}
+
+.acq-download-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.acq-download-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.acq-download-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.acq-download-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.acq-download-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* --- Download Progress Bars --- */
+.acq-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-top: var(--space-3);
+}
+
+.acq-progress-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width var(--transition-slow);
+  position: relative;
+}
+
+.acq-progress-downloading .acq-progress-fill {
+  background: var(--color-info);
+  animation: acqProgressPulse 2s ease-in-out infinite;
+}
+
+.acq-progress-pending .acq-progress-fill {
+  background: var(--color-muted);
+}
+
+.acq-progress-importing .acq-progress-fill {
+  background: var(--color-warning);
+  animation: acqProgressPulse 1.5s ease-in-out infinite;
+}
+
+.acq-progress-imported .acq-progress-fill {
+  background: var(--color-success);
+}
+
+.acq-progress-failed .acq-progress-fill {
+  background: var(--color-danger);
+}
+
+.acq-progress-label {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  margin-top: var(--space-1);
+  text-align: right;
+}
+
+@keyframes acqProgressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* --- Indexer Cards --- */
+.acq-indexer-list,
+.acq-client-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.acq-indexer-card,
+.acq-client-card {
+  padding: var(--space-4) var(--space-5);
+}
+
+.acq-indexer-header,
+.acq-client-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.acq-indexer-type-icon,
+.acq-client-type-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--color-teal-dim);
+  color: var(--color-teal-bright);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.acq-indexer-info,
+.acq-client-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.acq-indexer-name,
+.acq-client-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-bright);
+}
+
+.acq-indexer-meta,
+.acq-client-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.acq-indexer-actions,
+.acq-client-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* --- Responsive: Acquisition --- */
+@media (max-width: 768px) {
+  .acq-search-fields {
+    flex-direction: column;
+  }
+
+  .acq-search-fields .form-group {
+    flex: unset !important;
+  }
+
+  .acq-result-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  .acq-result-row .acq-grab-btn {
+    align-self: flex-end;
+  }
+
+  .acq-wanted-card-header,
+  .acq-download-header {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .acq-wanted-card-actions,
+  .acq-download-actions {
+    align-self: flex-end;
+  }
+
+  .acq-indexer-header,
+  .acq-client-header {
+    flex-wrap: wrap;
+  }
+
+  .acq-indexer-actions,
+  .acq-client-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: var(--space-2);
+  }
+
+  .acq-tab {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .acq-tab span:last-child {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) {
+  .acq-tab span:last-child {
+    display: inline;
+  }
+}
