@@ -13,7 +13,7 @@ authors = ["Ink & Iron Apps"]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
-axum = "0.7"
+axum = "0.8"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }
 serde = { version = "1", features = ["derive"] }
