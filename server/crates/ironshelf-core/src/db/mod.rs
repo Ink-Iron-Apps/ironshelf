@@ -315,6 +315,15 @@ pub struct StoredWebhookDelivery {
     pub is_success: bool,
 }
 
+/// A reading queue item as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredReadingQueueItem {
+    pub user_id: String,
+    pub book_id: String,
+    pub position: i64,
+    pub added_at: String,
+}
+
 /// A reading goal as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredReadingGoal {
@@ -2107,6 +2116,262 @@ impl IronshelfDb {
         Ok(rows
             .iter()
             .map(|row| (row.get::<i32, _>("month_number"), row.get::<i64, _>("book_count")))
+            .collect())
+    }
+
+    // =========================================================================
+    // Reading Queue
+    // =========================================================================
+
+    /// A reading queue entry with enriched book metadata (joined from library sources at route level).
+    /// At the DB level we only store user_id, book_id, position, added_at.
+
+    /// Get all reading queue entries for a user, ordered by position.
+    pub async fn get_reading_queue(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<StoredReadingQueueItem>, DbError> {
+        let rows = sqlx::query(
+            "SELECT user_id, book_id, position, added_at \
+             FROM reading_queue WHERE user_id = ? ORDER BY position ASC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredReadingQueueItem {
+                user_id: row.get("user_id"),
+                book_id: row.get("book_id"),
+                position: row.get("position"),
+                added_at: row.get("added_at"),
+            })
+            .collect())
+    }
+
+    /// Add a book to the end of a user's reading queue. Idempotent — ignores if already present.
+    pub async fn add_to_reading_queue(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<(), DbError> {
+        // Get the current max position for this user, then append at max + 1.
+        let max_position: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(position) FROM reading_queue WHERE user_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let next_position = max_position.unwrap_or(-1) + 1;
+
+        sqlx::query(
+            "INSERT INTO reading_queue (user_id, book_id, position) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(user_id, book_id) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(book_id)
+        .bind(next_position)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Remove a book from a user's reading queue.
+    pub async fn remove_from_reading_queue(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query(
+            "DELETE FROM reading_queue WHERE user_id = ? AND book_id = ?",
+        )
+        .bind(user_id)
+        .bind(book_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Move a queue item up or down by swapping positions with its neighbor.
+    pub async fn move_reading_queue_item(
+        &self,
+        user_id: &str,
+        book_id: &str,
+        direction: &str,
+    ) -> Result<(), DbError> {
+        let items = self.get_reading_queue(user_id).await?;
+        let current_index = items.iter().position(|item| item.book_id == book_id);
+        let current_index = match current_index {
+            Some(index) => index,
+            None => return Err(DbError::NotFound),
+        };
+
+        let swap_index = match direction {
+            "up" if current_index > 0 => current_index - 1,
+            "down" if current_index < items.len() - 1 => current_index + 1,
+            _ => return Ok(()), // already at boundary, no-op
+        };
+
+        let current_position = items[current_index].position;
+        let swap_position = items[swap_index].position;
+
+        // Swap the two positions
+        sqlx::query("UPDATE reading_queue SET position = ? WHERE user_id = ? AND book_id = ?")
+            .bind(swap_position)
+            .bind(user_id)
+            .bind(&items[current_index].book_id)
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("UPDATE reading_queue SET position = ? WHERE user_id = ? AND book_id = ?")
+            .bind(current_position)
+            .bind(user_id)
+            .bind(&items[swap_index].book_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Reorder the entire reading queue for a user based on a list of book IDs in desired order.
+    pub async fn reorder_reading_queue(
+        &self,
+        user_id: &str,
+        book_ids: &[String],
+    ) -> Result<(), DbError> {
+        for (index, book_id) in book_ids.iter().enumerate() {
+            sqlx::query(
+                "UPDATE reading_queue SET position = ? WHERE user_id = ? AND book_id = ?",
+            )
+            .bind(index as i64)
+            .bind(user_id)
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Personal Stats Queries
+    // =========================================================================
+
+    /// Get the average rating a user has given across all their rated books.
+    pub async fn get_user_average_rating(&self, user_id: &str) -> Result<Option<f64>, DbError> {
+        let average: Option<f64> = sqlx::query_scalar(
+            "SELECT AVG(CAST(rating AS REAL)) FROM user_ratings WHERE user_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(average)
+    }
+
+    /// Get the top N authors for a user by number of completed books.
+    pub async fn get_user_top_authors(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<(String, i64)>, DbError> {
+        // Join completed_books with activity_log details to extract author names.
+        // Since we don't store author names in completed_books, we look them up from
+        // activity_log where action = 'book_opened' or from the details_json.
+        // Fallback: return empty if no data enriched.
+        let rows = sqlx::query(
+            "SELECT json_extract(al.details_json, '$.author') AS author_name, \
+                    COUNT(DISTINCT cb.book_id) AS book_count \
+             FROM completed_books cb \
+             LEFT JOIN activity_log al ON al.user_id = cb.user_id \
+                AND al.target_id = cb.book_id \
+                AND al.action = 'book_opened' \
+             WHERE cb.user_id = ? \
+                AND json_extract(al.details_json, '$.author') IS NOT NULL \
+             GROUP BY author_name \
+             ORDER BY book_count DESC \
+             LIMIT ?",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("author_name"),
+                    row.get::<i64, _>("book_count"),
+                )
+            })
+            .collect())
+    }
+
+    /// Get the top N tags/genres for a user by number of completed books.
+    pub async fn get_user_top_tags(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Vec<(String, i64)>, DbError> {
+        let rows = sqlx::query(
+            "SELECT json_extract(al.details_json, '$.genre') AS genre_name, \
+                    COUNT(DISTINCT cb.book_id) AS book_count \
+             FROM completed_books cb \
+             LEFT JOIN activity_log al ON al.user_id = cb.user_id \
+                AND al.target_id = cb.book_id \
+                AND al.action = 'book_opened' \
+             WHERE cb.user_id = ? \
+                AND json_extract(al.details_json, '$.genre') IS NOT NULL \
+             GROUP BY genre_name \
+             ORDER BY book_count DESC \
+             LIMIT ?",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("genre_name"),
+                    row.get::<i64, _>("book_count"),
+                )
+            })
+            .collect())
+    }
+
+    /// Get the format breakdown for a user's completed books (from reading_progress).
+    pub async fn get_user_format_breakdown(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<(String, i64)>, DbError> {
+        let rows = sqlx::query(
+            "SELECT rp.format, COUNT(DISTINCT rp.book_id) AS book_count \
+             FROM reading_progress rp \
+             INNER JOIN completed_books cb ON cb.user_id = rp.user_id AND cb.book_id = rp.book_id \
+             WHERE rp.user_id = ? \
+             GROUP BY rp.format \
+             ORDER BY book_count DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("format"),
+                    row.get::<i64, _>("book_count"),
+                )
+            })
             .collect())
     }
 
