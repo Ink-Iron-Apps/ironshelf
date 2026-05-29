@@ -5213,3 +5213,322 @@ tbody td {
     flex-wrap: wrap;
   }
 }
+
+/* ============================================================
+   Device Integration Cards (Settings)
+   ============================================================ */
+
+.device-integration-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.device-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.device-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.device-card-header h4 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.device-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--color-teal-dim);
+  color: var(--color-teal-bright);
+  flex-shrink: 0;
+}
+
+.device-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.device-url-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.device-url {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--color-bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  color: var(--color-teal-bright);
+  word-break: break-all;
+  line-height: var(--leading-normal);
+}
+
+/* ============================================================
+   Tab Bar (Genre sub-navigation, reusable)
+   ============================================================ */
+
+.tab-bar {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-6);
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-dim);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.tab-btn.active {
+  color: var(--color-teal-bright);
+  border-bottom-color: var(--color-teal-bright);
+}
+
+.tab-btn .nav-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* ============================================================
+   Bookmarks Page
+   ============================================================ */
+
+.bookmarks-group {
+  margin-bottom: var(--space-6);
+}
+
+.bookmarks-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.bookmarks-group-header h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  margin: 0;
+}
+
+.bookmark-card {
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.bookmark-card:hover {
+  border-color: var(--color-teal);
+  background: var(--color-surface-hover);
+}
+
+.bookmark-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.bookmark-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bookmark-icon {
+  display: flex;
+  color: var(--color-teal-bright);
+}
+
+.bookmark-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.bookmark-locator {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-dim);
+  background: var(--color-bg-elevated);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.bookmark-note {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  line-height: var(--leading-relaxed);
+}
+
+.bookmark-meta {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+}
+
+/* ============================================================
+   API Key Usage Guide
+   ============================================================ */
+
+.key-usage-guide {
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.key-usage-guide summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  background: var(--color-bg-elevated);
+  transition: background var(--transition-fast);
+  list-style: none;
+}
+
+.key-usage-guide summary::-webkit-details-marker {
+  display: none;
+}
+
+.key-usage-guide summary::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.key-usage-guide[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.key-usage-guide summary:hover {
+  background: var(--color-surface-hover);
+}
+
+.key-usage-guide-content {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.key-usage-item h4 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+}
+
+.key-usage-item p {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.key-usage-code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  color: var(--color-teal-bright);
+  word-break: break-all;
+  line-height: var(--leading-normal);
+}
+
+/* ============================================================
+   Change Password Form Error
+   ============================================================ */
+
+.form-error {
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.form-error.hidden {
+  display: none;
+}
+
+/* ============================================================
+   Responsive adjustments for new components
+   ============================================================ */
+
+@media (min-width: 768px) {
+  .device-integration-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-btn {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .device-url {
+    font-size: var(--text-xs);
+  }
+
+  .bookmarks-group-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+}
