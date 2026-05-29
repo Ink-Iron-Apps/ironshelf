@@ -175,7 +175,8 @@ function Write-SystemSummary {
     Write-Host "  Platform:       Windows x86_64"
     Write-Host "  OS:             $((Get-CimInstance Win32_OperatingSystem).Caption)"
     Write-Host "  PowerShell:     $($PSVersionTable.PSVersion)"
-    Write-Host "  Install target: $InstallDir"
+    $displayDir = if ($InstallDir) { $InstallDir } else { $DefaultInstallDir }
+    Write-Host "  Install target: $displayDir"
 
     if ($script:EbookConvertAvailable) {
         Write-Host "  ebook-convert:  found (format conversion enabled)"
@@ -325,8 +326,7 @@ if ($ExistingTask) {
 # Create scheduled task that runs at system startup, hidden (no window)
 $Action = New-ScheduledTaskAction `
     -Execute $BinaryPath `
-    -WorkingDirectory $InstallDir `
-    -Argument ""
+    -WorkingDirectory $InstallDir
 
 # Set environment variable for config path
 # The working directory is the install dir, so config.toml is found automatically
