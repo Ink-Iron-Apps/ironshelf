@@ -173,7 +173,7 @@ async fn library_rescan_task(application_state: AppState) {
                                 notification_title,
                                 &notification_message,
                                 "new_book",
-                                None,
+                                Some("/#/libraries"),
                             )
                             .await
                         {
@@ -313,6 +313,7 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
             candidates.len(),
             truncated_list
         );
+        let notification_link = Some("/#/books/missing-metadata");
 
         match application_state.ironshelf_db.get_all_user_ids().await {
             Ok(user_ids) => {
@@ -324,7 +325,7 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
                             notification_title,
                             &notification_message,
                             "metadata_enriched",
-                            None,
+                            notification_link.map(|s| s.to_string()).as_deref(),
                         )
                         .await
                     {
@@ -645,7 +646,7 @@ async fn acquisition_download_monitor_task(application_state: AppState) {
                                             download.title
                                         ),
                                         "download_completed",
-                                        None,
+                                        Some("/#/acquisition/downloads"),
                                     )
                                     .await;
                             }

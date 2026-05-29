@@ -775,6 +775,10 @@
       webhooks: renderWebhooks,
       duplicates: renderDuplicates,
       acquisition: () => renderAcquisition(parsed.params.id),
+      books: () => {
+        if (parsed.params.id === 'missing-metadata') return renderMissingMetadata();
+        return renderHome();
+      },
     };
 
     const handler = handlers[parsed.name];
@@ -7195,5 +7199,65 @@
       route();
     }
   });
+
+  // --- Missing Metadata page (linked from notifications) ---
+
+  async function renderMissingMetadata() {
+    if (!await checkAuth()) return;
+    setTitle(['Books Missing Metadata']);
+    breadcrumbTrail = [{ label: 'Home', path: '/' }, { label: 'Missing Metadata', path: '/books/missing-metadata' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Books Missing Metadata</h1></div>
+      ${skeletonCards(6)}
+    `, 'libraries');
+
+    try {
+      const libraries = await apiGet('/libraries').catch(() => []);
+      const libraryList = Array.isArray(libraries) ? libraries : (libraries?.items || []);
+      let allBooks = [];
+
+      for (const library of libraryList) {
+        const booksResponse = await apiGet(`/libraries/${library.id}/books?per_page=200`).catch(() => ({ items: [] }));
+        const books = Array.isArray(booksResponse) ? booksResponse : (booksResponse?.items || []);
+        allBooks = allBooks.concat(books.filter(book => !book.description));
+      }
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Books Missing Metadata (${allBooks.length})</h1>
+        </div>
+      `;
+
+      if (allBooks.length === 0) {
+        bodyContent += renderEmptyState('All books have metadata', 'Every book in your library has a description.');
+      } else {
+        bodyContent += `<p style="color:var(--color-text-dim);margin-bottom:var(--space-6)">These books have no description. Click a book to view it, then use "Enrich Metadata" to fetch information from Google Books or Open Library.</p>`;
+        bodyContent += '<div class="grid grid-4">';
+        for (const book of allBooks) {
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          const authorNames = (book.author_names || []).join(', ');
+          bodyContent += `
+            <div class="book-card" data-book-id="${book.id}" role="link" tabindex="0">
+              ${coverUrl ? `<img src="${coverUrl}" class="book-cover" loading="lazy" alt="">` : '<div class="book-cover-placeholder"></div>'}
+              <div class="book-title">${escapeHtml(book.title)}</div>
+              ${authorNames ? `<div class="book-meta">${escapeHtml(authorNames)}</div>` : ''}
+            </div>
+          `;
+        }
+        bodyContent += '</div>';
+      }
+
+      renderShell(bodyContent, 'libraries');
+
+      document.querySelectorAll('[data-book-id]').forEach(card => {
+        const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+    } catch (err) {
+      renderShell(renderError('Failed to load books', String(err?.message || err), renderMissingMetadata), 'libraries');
+    }
+  }
 
 })();
