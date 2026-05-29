@@ -54,7 +54,8 @@ function Test-WindowsVersion {
 }
 
 function Test-DiskSpace {
-    $targetDrive = (Split-Path -Qualifier $InstallDir)
+    $checkDir = if ($InstallDir) { $InstallDir } else { $DefaultInstallDir }
+    $targetDrive = (Split-Path -Qualifier $checkDir)
     if (-not $targetDrive) { $targetDrive = "C:" }
 
     try {
