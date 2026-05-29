@@ -40,3 +40,4 @@ hmac = "0.12"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 quick-xml = "0.36"
+base64 = "0.22"

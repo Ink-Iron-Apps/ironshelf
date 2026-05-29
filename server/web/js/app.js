@@ -761,6 +761,8 @@
       home: renderHome,
       login: renderLogin,
       register: renderRegister,
+      'cloud-login': renderCloudLogin,
+      'cloud-servers': renderCloudServerPicker,
       libraries: renderLibraries,
       library: () => renderLibrary(parsed.params.id),
       author: () => renderAuthor(parsed.params.id),
@@ -1169,6 +1171,18 @@
       <a href="${API}/auth/oidc/login" class="btn btn-sso">${icon('shield', 18)} Sign in with SSO</a>
     ` : '';
 
+    // Check if server is claimed (cloud login available)
+    let cloudLoginHtml = '';
+    try {
+      const claimStatus = await fetch(`${API}/auth/claim-status`).then(r => r.ok ? r.json() : null).catch(() => null);
+      if (claimStatus?.is_claimed && claimStatus?.cloud_service_url) {
+        cloudLoginHtml = `
+          <div class="login-divider">or</div>
+          <a href="#/cloud-login" class="btn btn-cloud">${icon('globe', 18)} Sign in with Ironshelf Cloud</a>
+        `;
+      }
+    } catch { /* ignore */ }
+
     document.getElementById('app').innerHTML = `
       <div class="login-page">
         <div class="login-card">
@@ -1189,6 +1203,7 @@
             <button type="submit" class="btn btn-primary btn-lg">Sign In</button>
           </form>
           ${oidcButtonHtml}
+          ${cloudLoginHtml}
           ${registerLinkHtml}
         </div>
       </div>
@@ -7639,6 +7654,258 @@
     }
   });
 
+  // --- Cloud Login ---
+
+  let cloudToken = null;
+  let cloudServiceUrl = null;
+
+  async function renderCloudLogin() {
+    setTitle(['Sign in with Ironshelf Cloud']);
+    breadcrumbTrail = [];
+
+    // Try to get cloud service URL from server's claim-status
+    let claimStatus = null;
+    try {
+      claimStatus = await fetch(`${API}/auth/claim-status`).then(r => r.ok ? r.json() : null).catch(() => null);
+    } catch { /* ignore */ }
+
+    const defaultCloudUrl = claimStatus?.cloud_service_url || 'https://ironshelf.inknironapps.com';
+
+    document.getElementById('app').innerHTML = `
+      <div class="login-page">
+        <div class="login-card">
+          <div class="brand">
+            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <p>Sign in with Ironshelf Cloud</p>
+          </div>
+          <form id="cloud-login-form" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="cloud-email">Email or Username</label>
+              <input type="text" class="form-input" id="cloud-email" name="email_or_username" required autocomplete="email" autofocus>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cloud-password">Password</label>
+              <input type="password" class="form-input" id="cloud-password" name="password" required autocomplete="current-password">
+            </div>
+            <input type="hidden" id="cloud-service-url" value="${escapeHtml(defaultCloudUrl)}">
+            <button type="submit" class="btn btn-primary btn-lg">${icon('globe', 18)} Sign In</button>
+          </form>
+          <div class="login-footer">
+            <a href="#/login">Back to server login</a>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('cloud-login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in...';
+
+      const serviceUrl = document.getElementById('cloud-service-url').value;
+
+      try {
+        // Authenticate with the central cloud service
+        const cloudResponse = await fetch(`${serviceUrl}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email_or_username: document.getElementById('cloud-email').value,
+            password: document.getElementById('cloud-password').value,
+          }),
+        });
+
+        if (!cloudResponse.ok) {
+          const errorData = await cloudResponse.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Cloud authentication failed');
+        }
+
+        const cloudData = await cloudResponse.json();
+        if (!cloudData.ok || !cloudData.data?.token) {
+          throw new Error('Invalid response from cloud service');
+        }
+
+        // Store the cloud token and service URL for the server picker
+        cloudToken = cloudData.data.token;
+        cloudServiceUrl = serviceUrl;
+
+        // If this is a direct server login (server is claimed), try to get a token directly
+        if (claimStatus?.is_claimed && claimStatus?.server_id) {
+          await cloudLoginToServer(serviceUrl, cloudData.data.token, claimStatus.server_id);
+        } else {
+          // Show server picker — user picks which server to connect to
+          navigateTo('/cloud-servers');
+        }
+      } catch (err) {
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign In';
+      }
+    });
+  }
+
+  async function renderCloudServerPicker() {
+    setTitle(['Select Server']);
+    breadcrumbTrail = [];
+
+    if (!cloudToken || !cloudServiceUrl) {
+      navigateTo('/cloud-login');
+      return;
+    }
+
+    document.getElementById('app').innerHTML = `
+      <div class="login-page">
+        <div class="login-card" style="max-width: 500px">
+          <div class="brand">
+            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <p>Select a server to connect to</p>
+          </div>
+          <div class="cloud-servers-loading">
+            <div class="skeleton skeleton-text" style="width:100%;height:48px;margin-bottom:8px"></div>
+            <div class="skeleton skeleton-text" style="width:100%;height:48px;margin-bottom:8px"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    try {
+      // Fetch servers the user has access to (owned + shared)
+      const [ownedResponse, sharedResponse] = await Promise.all([
+        fetch(`${cloudServiceUrl}/servers/mine`, {
+          headers: { 'Authorization': `Bearer ${cloudToken}` },
+        }),
+        fetch(`${cloudServiceUrl}/servers/shared`, {
+          headers: { 'Authorization': `Bearer ${cloudToken}` },
+        }),
+      ]);
+
+      const ownedData = ownedResponse.ok ? await ownedResponse.json() : { data: [] };
+      const sharedData = sharedResponse.ok ? await sharedResponse.json() : { data: [] };
+
+      const ownedServers = ownedData.data || [];
+      const sharedServers = sharedData.data || [];
+      const allServers = [
+        ...ownedServers.map(s => ({ ...s, relationship: 'owned' })),
+        ...sharedServers.map(s => ({ ...s, relationship: 'shared' })),
+      ];
+
+      if (allServers.length === 0) {
+        document.querySelector('.cloud-servers-loading').innerHTML = `
+          <div class="empty-state">
+            ${icon('server', 48)}
+            <p>No servers available</p>
+            <p class="text-muted" style="font-size:0.85rem">You don't have access to any servers yet. Ask a server owner to share access with you.</p>
+          </div>
+          <div class="login-footer" style="margin-top:1rem">
+            <a href="#/login">Back to server login</a>
+          </div>
+        `;
+        return;
+      }
+
+      const serverListHtml = allServers.map(server => `
+        <button class="cloud-server-btn" data-server-id="${escapeHtml(server.id)}" data-server-url="${escapeHtml(server.url)}">
+          <div class="cloud-server-info">
+            <span class="cloud-server-name">${icon('server', 16)} ${escapeHtml(server.name)}</span>
+            <span class="cloud-server-url text-muted">${escapeHtml(server.url)}</span>
+          </div>
+          <div class="cloud-server-meta">
+            <span class="badge ${server.relationship === 'owned' ? 'badge-primary' : 'badge-default'}">${server.relationship}</span>
+            ${server.is_verified ? `<span class="badge badge-success" title="Verified">${icon('check', 12)}</span>` : `<span class="badge badge-warning" title="Unverified">${icon('alertCircle', 12)}</span>`}
+          </div>
+        </button>
+      `).join('');
+
+      document.querySelector('.cloud-servers-loading').innerHTML = `
+        <div class="cloud-server-list">
+          ${serverListHtml}
+        </div>
+        <div class="login-footer" style="margin-top:1rem">
+          <a href="#/cloud-login">Sign in as different user</a> | <a href="#/login">Back to server login</a>
+        </div>
+      `;
+
+      // Bind click handlers for server buttons
+      document.querySelectorAll('.cloud-server-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const serverId = btn.dataset.serverId;
+          btn.disabled = true;
+          btn.style.opacity = '0.6';
+          try {
+            await cloudLoginToServer(cloudServiceUrl, cloudToken, serverId);
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+          }
+        });
+      });
+    } catch (err) {
+      toast('Failed to load servers: ' + err.message, 'error');
+      document.querySelector('.cloud-servers-loading').innerHTML = `
+        <div class="empty-state">
+          ${icon('alertCircle', 48)}
+          <p>Failed to load servers</p>
+          <p class="text-muted">${escapeHtml(err.message)}</p>
+        </div>
+        <div class="login-footer" style="margin-top:1rem">
+          <a href="#/cloud-login">Try again</a>
+        </div>
+      `;
+    }
+  }
+
+  /**
+   * Complete cloud login: get a server access token from the cloud service,
+   * then send it to the server's cloud-login endpoint to create a local session.
+   */
+  async function cloudLoginToServer(serviceUrl, centralToken, serverId) {
+    // 1. Get a short-lived server access token from the cloud service
+    const tokenResponse = await fetch(`${serviceUrl}/servers/${serverId}/token`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${centralToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to get server access token');
+    }
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenData.ok || !tokenData.data?.server_access_token) {
+      throw new Error('Invalid token response from cloud service');
+    }
+
+    // 2. Send the server access token to the server's cloud-login endpoint
+    const cloudLoginResponse = await fetch(`${API}/auth/cloud-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ cloud_token: tokenData.data.server_access_token }),
+    });
+
+    if (!cloudLoginResponse.ok) {
+      const errorData = await cloudLoginResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Server rejected cloud login');
+    }
+
+    // 3. Session cookie is set by the server response. Check auth and navigate.
+    cloudToken = null;
+    cloudServiceUrl = null;
+
+    if (await checkAuth()) {
+      startNotificationPolling();
+      toast('Signed in via Ironshelf Cloud', 'success');
+      navigateTo('/');
+    } else {
+      throw new Error('Cloud login succeeded but session was not established');
+    }
+  }
+
   // --- Init ---
 
   window.addEventListener('hashchange', route);
@@ -7653,7 +7920,13 @@
       }
     } else {
       stopNotificationPolling();
-      navigateTo('/login');
+      // Allow cloud login routes without redirecting to /login
+      const currentPath = getHashPath();
+      if (currentPath === '/cloud-login' || currentPath === '/cloud-servers') {
+        route();
+      } else {
+        navigateTo('/login');
+      }
     }
   });
 
