@@ -807,6 +807,14 @@
     }
   }
 
+  /** Check if the current user has a specific permission.
+   *  Owners implicitly have all permissions. */
+  function hasPermission(permission) {
+    if (!currentUser) return false;
+    if (currentUser.is_owner) return true;
+    return Array.isArray(currentUser.permissions) && currentUser.permissions.includes(permission);
+  }
+
   // --- Skeleton Loaders ---
 
   function skeletonCards(count = 6) {
@@ -942,10 +950,12 @@
 
     navItems.push({ id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' });
 
-    navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
-
-    if (currentUser?.is_owner) {
+    if (hasPermission('manage_library')) {
+      navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
       navItems.push({ id: 'acquisition', label: 'Acquisition', icon: 'package', path: '/acquisition' });
+    }
+
+    if (hasPermission('manage_users')) {
       navItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
     }
 
@@ -1226,7 +1236,7 @@
       const libraries = await apiGet('/libraries');
       let bodyContent = '';
 
-      const addBtnHtml = currentUser?.is_owner
+      const addBtnHtml = hasPermission('manage_library')
         ? `<div class="actions"><button class="btn btn-primary" id="add-library-btn">${icon('plus', 16)} Add Library</button></div>`
         : '';
 
@@ -1237,8 +1247,8 @@
           <div class="empty-state">
             <div class="empty-state-icon">${Icons.library}</div>
             <h3>No libraries yet</h3>
-            <p>Add a Calibre library or folder to start browsing your collection.</p>
-            ${currentUser?.is_owner ? '<button class="btn btn-primary btn-lg" id="add-library-empty-btn">Add Your First Library</button>' : ''}
+            <p>${hasPermission('manage_library') ? 'Add a Calibre library or folder to start browsing your collection.' : 'No libraries are available. Ask an administrator to add one.'}</p>
+            ${hasPermission('manage_library') ? '<button class="btn btn-primary btn-lg" id="add-library-empty-btn">Add Your First Library</button>' : ''}
           </div>
         `;
       } else {
@@ -1791,7 +1801,7 @@
             <button class="btn btn-secondary" id="scan-library-btn" ${isScanningThisLibrary ? 'disabled' : ''} aria-label="Scan library for new books">
               ${icon('scan', 16)} ${isScanningThisLibrary ? 'Scanning...' : 'Scan'}
             </button>
-            ${currentUser?.is_owner ? `<button class="btn btn-ghost" id="edit-library-btn" aria-label="Edit library">${icon('edit', 16)} Edit</button>` : ''}
+            ${hasPermission('manage_library') ? `<button class="btn btn-ghost" id="edit-library-btn" aria-label="Edit library">${icon('edit', 16)} Edit</button>` : ''}
           </div>
         </div>
         <div id="scan-status" class="${isScanningThisLibrary ? '' : 'hidden'}" aria-live="polite">
@@ -2184,16 +2194,16 @@
                 ${renderAddToCollectionButton(bookId)}
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
                 <div id="convert-btn-container"></div>
-                ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
-                ${currentUser?.is_owner && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
+                ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
+                ${hasPermission('manage_library') && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
               </div>
             ` : `
               <div class="book-detail-formats">
                 ${renderAddToCollectionButton(bookId)}
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
                 <div id="convert-btn-container"></div>
-                ${(!book.description || currentUser?.is_owner) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
-                ${currentUser?.is_owner && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
+                ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
+                ${hasPermission('manage_library') && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
               </div>
             `}
 
@@ -2381,13 +2391,13 @@
 
         ${renderReaderPreferencesSection()}
 
-        ${currentUser?.is_owner ? `
+        ${hasPermission('manage_library') ? `
           <div class="settings-section">
             <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Integrations</h3>
             <p class="description">Manage webhooks, duplicate detection, and other advanced features.</p>
             <div style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
-              <a href="#/webhooks" class="btn btn-secondary">${icon('globe', 16)} Webhooks</a>
-              <a href="#/duplicates" class="btn btn-secondary">${icon('search', 16)} Duplicate Detection</a>
+              ${hasPermission('manage_library') ? `<a href="#/webhooks" class="btn btn-secondary">${icon('globe', 16)} Webhooks</a>` : ''}
+              ${currentUser?.is_owner ? `<a href="#/duplicates" class="btn btn-secondary">${icon('search', 16)} Duplicate Detection</a>` : ''}
             </div>
           </div>
         ` : ''}
@@ -2564,6 +2574,7 @@
 
   async function renderUsers() {
     if (!await checkAuth()) return;
+    if (!hasPermission('manage_users')) { navigateTo('/'); return; }
     setTitle(['Users']);
     breadcrumbTrail = [{ label: 'Users', path: '/users' }];
 
@@ -2722,13 +2733,7 @@
 
       const continueBooks = Array.isArray(continueReading) ? continueReading : (continueReading?.items || []);
       const collectionsList = Array.isArray(collections) ? collections : (collections?.items || []);
-      const hasDashboardContent = continueBooks.length > 0 || collectionsList.length > 0;
-
-      if (!hasDashboardContent) {
-        // Fall back to libraries view
-        renderLibraries();
-        return;
-      }
+      const libraryList = Array.isArray(libraries) ? libraries : (libraries?.items || []);
 
       let bodyContent = `<div class="page-header"><h1>Home</h1></div>`;
 
@@ -2774,30 +2779,69 @@
         bodyContent += `</div></div>`;
       }
 
-      // Recently Added section
-      let recentBooks = [];
-      if (libraries && libraries.length > 0) {
-        try {
-          const recentResponse = await apiGet(`/libraries/${libraries[0].id}/books?sort=added&direction=desc&per_page=12`).catch(() => null);
-          recentBooks = Array.isArray(recentResponse) ? recentResponse : (recentResponse?.items || recentResponse?.data || []);
-        } catch { /* ignore */ }
-      }
-
-      if (recentBooks.length > 0) {
+      // Your Libraries section (always shown when libraries exist)
+      if (libraryList.length > 0) {
         bodyContent += `
           <div class="dashboard-section">
             <div class="dashboard-section-header">
-              <h2>${icon('star', 22)} Recently Added</h2>
+              <h2>${icon('library', 22)} Your Libraries</h2>
+              <a href="#/libraries" class="section-link">View all ${icon('chevronRight', 14)}</a>
             </div>
-            <div class="grid grid-books">
+            <div class="grid grid-libraries">
         `;
-        for (const book of recentBooks) {
-          bodyContent += renderBookCard(book);
+        for (const lib of libraryList.slice(0, 6)) {
+          const sourceLabel = lib.source_kind === 'calibre' ? 'Calibre' : 'Folder';
+          bodyContent += `
+            <div class="card card-interactive library-card" data-library-id="${lib.id}" role="link" tabindex="0" aria-label="${escapeHtml(lib.name)} library">
+              <div class="library-card-header">
+                <div class="library-card-icon">${lib.source_kind === 'calibre' ? Icons.book : Icons.folder}</div>
+                <span class="badge badge-teal">${escapeHtml(sourceLabel)}</span>
+              </div>
+              <div class="library-card-name">${escapeHtml(lib.name)}</div>
+              <div class="library-card-path">${escapeHtml(lib.path || '')}</div>
+            </div>
+          `;
         }
         bodyContent += `</div></div>`;
+
+        // Recently Added section
+        let recentBooks = [];
+        try {
+          const recentResponse = await apiGet(`/libraries/${libraryList[0].id}/books?sort=added&direction=desc&per_page=12`).catch(() => null);
+          recentBooks = Array.isArray(recentResponse) ? recentResponse : (recentResponse?.items || recentResponse?.data || []);
+        } catch { /* ignore */ }
+
+        if (isStaleNavigation(thisGeneration)) return;
+
+        if (recentBooks.length > 0) {
+          bodyContent += `
+            <div class="dashboard-section">
+              <div class="dashboard-section-header">
+                <h2>${icon('star', 22)} Recently Added</h2>
+              </div>
+              <div class="grid grid-books">
+          `;
+          for (const book of recentBooks) {
+            bodyContent += renderBookCard(book);
+          }
+          bodyContent += `</div></div>`;
+        }
+      } else {
+        // No libraries at all — show welcome empty state
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.library}</div>
+            <h3>Welcome to Ironshelf</h3>
+            <p>${hasPermission('manage_library') ? 'Get started by adding your first Calibre library or book folder.' : 'No libraries are available yet. Ask an administrator to set one up.'}</p>
+            ${hasPermission('manage_library') ? `<button class="btn btn-primary btn-lg" id="home-add-library-btn">Add Your First Library</button>` : ''}
+          </div>
+        `;
       }
 
       renderShell(bodyContent, 'home');
+
+      // Bind home add-library button
+      document.getElementById('home-add-library-btn')?.addEventListener('click', showAddLibraryModal);
 
       // Bind continue reading cards
       document.querySelectorAll('[data-read-book-id]').forEach(card => {
@@ -2810,6 +2854,13 @@
       // Bind collection cards
       document.querySelectorAll('[data-collection-id]').forEach(card => {
         const handler = () => navigateTo(`/collection/${card.dataset.collectionId}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind library cards
+      document.querySelectorAll('[data-library-id]').forEach(card => {
+        const handler = () => navigateTo(`/library/${card.dataset.libraryId}`);
         card.addEventListener('click', handler);
         card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
       });
@@ -3313,7 +3364,7 @@
     setTitle(['Stats']);
     breadcrumbTrail = [{ label: 'Stats', path: '/stats' }];
 
-    const showServerTab = currentUser?.is_owner;
+    const showServerTab = hasPermission('manage_library');
 
     renderShell(`
       <div class="page-header"><h1>Stats</h1></div>
@@ -4858,7 +4909,7 @@
 
   async function renderWebhooks() {
     if (!await checkAuth()) return;
-    if (!currentUser?.is_owner) { navigateTo('/settings'); return; }
+    if (!hasPermission('manage_library')) { navigateTo('/settings'); return; }
     setTitle(['Webhooks']);
     breadcrumbTrail = [
       { label: 'Settings', path: '/settings' },
@@ -5599,7 +5650,7 @@
 
   async function renderAcquisition(subRoute) {
     if (!await checkAuth()) return;
-    if (!currentUser?.is_owner) { navigateTo('/'); return; }
+    if (!hasPermission('manage_library')) { navigateTo('/'); return; }
 
     // Stop any running download poll
     if (acquisitionDownloadTimer) {

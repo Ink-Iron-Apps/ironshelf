@@ -281,13 +281,21 @@ pub async fn logout(
 
 /// GET /api/v1/auth/me
 pub async fn me(
+    State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
-) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
+) -> Result<Json<serde_json::Value>, AppError> {
+    let permissions = state
+        .ironshelf_db
+        .get_permissions(&user.user_id)
+        .await
+        .unwrap_or_default();
+
+    Ok(Json(serde_json::json!({
         "user_id": user.user_id,
         "username": user.username,
         "is_owner": user.is_owner,
-    }))
+        "permissions": permissions,
+    })))
 }
 
 /// POST /api/v1/auth/api-keys — create new API key
