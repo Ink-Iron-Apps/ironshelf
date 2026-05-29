@@ -84,6 +84,8 @@
     crosshair: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>',
     arrowDownCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12 12 16 16 12"/><line x1="12" y1="8" x2="12" y2="16"/></svg>',
     list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1z"/></svg>',
+    pinOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M15 9.34V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1v2.34"/><path d="M2 2l20 20"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -96,6 +98,47 @@
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // --- Pinned Libraries (localStorage) ---
+
+  const PINNED_LIBRARIES_KEY = 'ironshelf_pinned_libraries';
+  const MAX_PINNED_LIBRARIES = 10;
+
+  function getPinnedLibraries() {
+    try {
+      const stored = localStorage.getItem(PINNED_LIBRARIES_KEY);
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore corrupt data */ }
+    return [];
+  }
+
+  function setPinnedLibraries(pinned) {
+    localStorage.setItem(PINNED_LIBRARIES_KEY, JSON.stringify(pinned));
+  }
+
+  function isLibraryPinned(libraryId) {
+    return getPinnedLibraries().some(p => p.id === libraryId);
+  }
+
+  function togglePinLibrary(library) {
+    let pinned = getPinnedLibraries();
+    const existingIndex = pinned.findIndex(p => p.id === library.id);
+    if (existingIndex !== -1) {
+      pinned.splice(existingIndex, 1);
+    } else {
+      if (pinned.length >= MAX_PINNED_LIBRARIES) {
+        toast(`Maximum ${MAX_PINNED_LIBRARIES} pinned libraries reached`, 'warning');
+        return false;
+      }
+      pinned.push({
+        id: library.id,
+        name: library.name,
+        source_kind: library.source_kind,
+      });
+    }
+    setPinnedLibraries(pinned);
+    return true;
   }
 
   /**
@@ -1004,6 +1047,22 @@
           <nav class="sidebar-nav">
             ${navHtml}
           </nav>
+          ${(() => {
+            const pinnedLibraries = getPinnedLibraries();
+            if (pinnedLibraries.length === 0) return '';
+            return `
+              <div class="sidebar-section-label">Libraries</div>
+              <nav class="sidebar-nav sidebar-pinned-libraries">
+                ${pinnedLibraries.map(lib => {
+                  const sourceIcon = lib.source_kind === 'calibre' ? 'book' : 'folder';
+                  return `<a href="#/library/${lib.id}" class="" aria-label="${escapeHtml(lib.name)} library">
+                    ${icon(sourceIcon)}
+                    <span>${escapeHtml(lib.name)}</span>
+                  </a>`;
+                }).join('')}
+              </nav>
+            `;
+          })()}
           <div class="sidebar-footer">
             <div class="user-info">
               <div class="user-avatar" aria-hidden="true">${userInitial}</div>
@@ -1255,11 +1314,15 @@
         bodyContent += '<div class="grid grid-libraries">';
         for (const lib of libraries) {
           const sourceLabel = lib.source_kind === 'calibre' ? 'Calibre' : 'Folder';
+          const isPinned = isLibraryPinned(lib.id);
           bodyContent += `
             <div class="card card-interactive library-card" data-library-id="${lib.id}" role="link" tabindex="0" aria-label="${escapeHtml(lib.name)} library">
               <div class="library-card-header">
                 <div class="library-card-icon">${lib.source_kind === 'calibre' ? Icons.book : Icons.folder}</div>
                 <span class="badge badge-teal">${escapeHtml(sourceLabel)}</span>
+                <button class="pin-library-btn ${isPinned ? 'is-pinned' : ''}" data-pin-library-id="${lib.id}" data-pin-library-name="${escapeHtml(lib.name)}" data-pin-library-source="${lib.source_kind}" aria-label="${isPinned ? 'Unpin' : 'Pin'} ${escapeHtml(lib.name)}" title="${isPinned ? 'Unpin from sidebar' : 'Pin to sidebar'}">
+                  <span class="nav-icon" style="width:16px;height:16px">${isPinned ? Icons.pinOff : Icons.pin}</span>
+                </button>
               </div>
               <div class="library-card-name">${escapeHtml(lib.name)}</div>
               <div class="library-card-path">${escapeHtml(lib.path || '')}</div>
@@ -1279,6 +1342,23 @@
         const handler = () => navigateTo(`/library/${card.dataset.libraryId}`);
         card.addEventListener('click', handler);
         card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+      // Bind pin toggle buttons (stop propagation so card click doesn't fire)
+      document.querySelectorAll('.pin-library-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const libraryForPin = {
+            id: btn.dataset.pinLibraryId,
+            name: btn.dataset.pinLibraryName,
+            source_kind: btn.dataset.pinLibrarySource,
+          };
+          const wasPinned = isLibraryPinned(libraryForPin.id);
+          if (togglePinLibrary(libraryForPin)) {
+            toast(wasPinned ? `Unpinned "${libraryForPin.name}"` : `Pinned "${libraryForPin.name}" to sidebar`, 'success');
+            renderLibraries();
+          }
+        });
       });
 
       document.getElementById('add-library-btn')?.addEventListener('click', showAddLibraryModal);
@@ -1772,7 +1852,7 @@
         page: libraryPage,
         per_page: 50,
         sort: librarySortField,
-        direction: librarySortDirection,
+        dir: librarySortDirection,
       });
       if (librarySearchQuery) params.set('search', librarySearchQuery);
 
@@ -2158,7 +2238,7 @@
           </div>
           <div class="book-detail-info">
             <h1>${escapeHtml(book.title)}</h1>
-            ${book.authors ? `<a class="author-link" href="#/author/${book.author_id || ''}">${escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors)}</a>` : ''}
+            ${(book.author_names && book.author_names.length > 0) ? `<a class="author-link" href="#/author/${(book.author_ids && book.author_ids[0]) || ''}">${escapeHtml(book.author_names.join(', '))}</a>` : ''}
             ${book.series_name ? `<p class="text-caption" style="margin-top:var(--space-2)">Book ${book.series_index || '?'} of <a href="#/series/${book.series_id || ''}">${escapeHtml(book.series_name)}</a></p>` : ''}
             ${genreChipsHtml}
 
@@ -2195,7 +2275,7 @@
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
                 <div id="convert-btn-container"></div>
                 ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
-                ${hasPermission('manage_library') && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
+                ${hasPermission('manage_library') && book.author_names && book.author_names.length > 0 ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
               </div>
             ` : `
               <div class="book-detail-formats">
@@ -2203,7 +2283,7 @@
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
                 <div id="convert-btn-container"></div>
                 ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
-                ${hasPermission('manage_library') && book.authors ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
+                ${hasPermission('manage_library') && book.author_names && book.author_names.length > 0 ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
               </div>
             `}
 
@@ -2273,9 +2353,9 @@
 
       // Bind find-more-by-author
       const findMoreAuthorBtn = document.getElementById('find-more-author-btn');
-      if (findMoreAuthorBtn && book.authors) {
+      if (findMoreAuthorBtn && book.author_names && book.author_names.length > 0) {
         findMoreAuthorBtn.addEventListener('click', () => {
-          const authorName = Array.isArray(book.authors) ? book.authors[0] : book.authors;
+          const authorName = book.author_names[0];
           navigateTo(`/acquisition/search?author=${encodeURIComponent(authorName)}`);
         });
       }
@@ -2286,7 +2366,8 @@
       // Render conversion button if converters available
       renderConversionButton(bookId, '#convert-btn-container');
     } catch (err) {
-      renderShell(renderError('Failed to load book', err.message, () => renderBook(bookId)), 'libraries');
+      const errorMessage = (err && typeof err.message === 'string') ? err.message : String(err || 'Unknown error');
+      renderShell(renderError('Failed to load book', errorMessage, () => renderBook(bookId)), 'libraries');
     }
   }
 
@@ -2307,6 +2388,18 @@
 
       let bodyContent = `
         <div class="page-header"><h1>Settings</h1></div>
+
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" id="server-update-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Server Update</h3>
+          <p class="description">Check for new Ironshelf server releases and apply updates directly from the UI.</p>
+          <div class="update-card" id="update-card">
+            <div class="update-actions">
+              <button class="btn btn-primary" id="check-update-btn">${icon('refresh', 16)} Check for Updates</button>
+            </div>
+          </div>
+        </div>
+        ` : ''}
 
         <div class="settings-section">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('key', 20)} API Keys</h3>
@@ -2565,9 +2658,299 @@
           },
         });
       });
+
+      // Server update check (owner only)
+      bindServerUpdateEvents();
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
     }
+  }
+
+  // --- Server Update Helpers ---
+
+  function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function bindServerUpdateEvents() {
+    const checkButton = document.getElementById('check-update-btn');
+    if (!checkButton) return;
+
+    checkButton.addEventListener('click', async () => {
+      const updateCard = document.getElementById('update-card');
+      if (!updateCard) return;
+
+      checkButton.disabled = true;
+      checkButton.innerHTML = `<span class="update-spinner"></span> Checking...`;
+
+      try {
+        const updateInfo = await apiGet('/server/update/check');
+        renderUpdateCheckResult(updateCard, updateInfo);
+      } catch (checkError) {
+        updateCard.innerHTML = `
+          <div style="display:flex;align-items:center;gap:var(--space-3);color:var(--color-danger);font-size:var(--text-sm)">
+            ${icon('alertCircle', 18)}
+            <span>Failed to check for updates: ${escapeHtml(checkError.message)}</span>
+          </div>
+          <div class="update-actions" style="margin-top:var(--space-4)">
+            <button class="btn btn-primary" id="check-update-btn">${icon('refresh', 16)} Retry</button>
+          </div>
+        `;
+        bindServerUpdateEvents();
+      }
+    });
+  }
+
+  function renderUpdateCheckResult(updateCard, updateInfo) {
+    const isUpdateAvailable = updateInfo.update_available;
+    const downloadSizeText = updateInfo.download_size ? formatBytes(updateInfo.download_size) : '';
+
+    let releaseNotesHtml = '';
+    if (updateInfo.release_notes && updateInfo.release_notes.trim()) {
+      releaseNotesHtml = `
+        <button class="update-release-notes-toggle" id="toggle-release-notes">Show release notes</button>
+        <div class="update-release-notes" id="release-notes-content" style="display:none">
+          ${escapeHtml(updateInfo.release_notes)}
+        </div>
+      `;
+    }
+
+    updateCard.innerHTML = `
+      <div class="update-version-row">
+        <span class="update-version-badge is-current">Current: v${escapeHtml(updateInfo.current_version)}</span>
+        ${isUpdateAvailable ? `
+          <span class="update-version-arrow">&rarr;</span>
+          <span class="update-version-badge is-latest">v${escapeHtml(updateInfo.latest_version)}</span>
+        ` : ''}
+      </div>
+
+      ${isUpdateAvailable ? `
+        <div class="update-available-banner">
+          ${icon('arrowUp', 18)}
+          <span>A new version is available${downloadSizeText ? ` (${downloadSizeText})` : ''}</span>
+        </div>
+      ` : `
+        <div class="update-up-to-date">
+          ${icon('check', 18)}
+          <span>Server is up to date</span>
+        </div>
+      `}
+
+      ${releaseNotesHtml}
+
+      <div class="update-actions" style="margin-top:var(--space-4)">
+        <button class="btn btn-secondary" id="check-update-btn">${icon('refresh', 16)} Check Again</button>
+        ${isUpdateAvailable ? `
+          <button class="btn btn-primary" id="apply-update-btn">${icon('download', 16)} Update to v${escapeHtml(updateInfo.latest_version)}</button>
+        ` : ''}
+      </div>
+    `;
+
+    // Bind release notes toggle
+    const toggleButton = document.getElementById('toggle-release-notes');
+    const notesContent = document.getElementById('release-notes-content');
+    if (toggleButton && notesContent) {
+      toggleButton.addEventListener('click', () => {
+        const isHidden = notesContent.style.display === 'none';
+        notesContent.style.display = isHidden ? 'block' : 'none';
+        toggleButton.textContent = isHidden ? 'Hide release notes' : 'Show release notes';
+      });
+    }
+
+    // Re-bind check button
+    bindServerUpdateEvents();
+
+    // Bind apply button
+    const applyButton = document.getElementById('apply-update-btn');
+    if (applyButton) {
+      applyButton.addEventListener('click', () => {
+        showConfirmModal({
+          title: 'Update Server',
+          message: `This will download v${updateInfo.latest_version} and restart the server. All active connections will be closed. Continue?`,
+          confirmText: 'Update Now',
+          confirmClass: 'btn-primary',
+          onConfirm: () => startServerUpdate(updateCard, updateInfo.latest_version),
+        });
+      });
+    }
+  }
+
+  async function startServerUpdate(updateCard, targetVersion) {
+    updateCard.innerHTML = `
+      <div class="update-progress" id="update-progress">
+        <div class="update-progress-step is-active" id="step-downloading">
+          <span class="update-spinner"></span>
+          <span>Downloading v${escapeHtml(targetVersion)}...</span>
+        </div>
+        <div class="update-progress-bar">
+          <div class="update-progress-bar-fill" id="update-download-bar" style="width:0%"></div>
+        </div>
+        <div class="update-progress-step" id="step-replacing">
+          <span class="nav-icon" style="width:16px;height:16px;opacity:0.3">${Icons.check}</span>
+          <span>Replacing binary</span>
+        </div>
+        <div class="update-progress-step" id="step-restarting">
+          <span class="nav-icon" style="width:16px;height:16px;opacity:0.3">${Icons.check}</span>
+          <span>Restarting server</span>
+        </div>
+      </div>
+    `;
+
+    try {
+      await apiPost('/server/update/apply', {});
+    } catch (applyError) {
+      // If the POST itself fails, show error immediately
+      if (!applyError.message?.includes('Failed to fetch')) {
+        updateCard.innerHTML = `
+          <div style="display:flex;align-items:center;gap:var(--space-3);color:var(--color-danger);font-size:var(--text-sm)">
+            ${icon('alertCircle', 18)}
+            <span>Update failed: ${escapeHtml(applyError.message)}</span>
+          </div>
+          <div class="update-actions" style="margin-top:var(--space-4)">
+            <button class="btn btn-primary" id="check-update-btn">${icon('refresh', 16)} Check Again</button>
+          </div>
+        `;
+        bindServerUpdateEvents();
+        return;
+      }
+    }
+
+    // Poll the update status endpoint until the server restarts
+    pollUpdateStatus(updateCard, targetVersion);
+  }
+
+  function pollUpdateStatus(updateCard, targetVersion) {
+    let updatePollTimer = null;
+    let serverDownDetected = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 60; // 2 minutes at 2-second intervals
+
+    updatePollTimer = setInterval(async () => {
+      try {
+        if (serverDownDetected) {
+          // Server went down — now try to reach health endpoint with new version
+          reconnectAttempts++;
+          if (reconnectAttempts > maxReconnectAttempts) {
+            clearInterval(updatePollTimer);
+            updateCard.innerHTML = `
+              <div style="display:flex;align-items:center;gap:var(--space-3);color:var(--color-warning);font-size:var(--text-sm)">
+                ${icon('alertCircle', 18)}
+                <span>Server has not come back online after 2 minutes. It may need manual restart.</span>
+              </div>
+            `;
+            return;
+          }
+
+          try {
+            const healthResponse = await fetch('/health');
+            if (healthResponse.ok) {
+              const healthData = await healthResponse.json();
+              clearInterval(updatePollTimer);
+              updateCard.innerHTML = `
+                <div class="update-progress">
+                  <div class="update-progress-step is-complete">
+                    <span class="update-success-icon">${Icons.check}</span>
+                    <span>Downloaded</span>
+                  </div>
+                  <div class="update-progress-step is-complete">
+                    <span class="update-success-icon">${Icons.check}</span>
+                    <span>Binary replaced</span>
+                  </div>
+                  <div class="update-progress-step is-complete">
+                    <span class="update-success-icon">${Icons.check}</span>
+                    <span>Server restarted</span>
+                  </div>
+                </div>
+                <div class="update-available-banner" style="margin-top:var(--space-4);background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.2);color:var(--color-success)">
+                  ${icon('check', 18)}
+                  <span>Successfully updated to v${escapeHtml(healthData.version || targetVersion)}</span>
+                </div>
+              `;
+              toast('Server updated successfully', 'success');
+            }
+          } catch {
+            // Still down — keep polling
+            const restartStep = document.getElementById('step-restarting');
+            if (restartStep) {
+              restartStep.querySelector('span:last-child').textContent =
+                `Waiting for server... (${reconnectAttempts}s)`;
+            }
+          }
+          return;
+        }
+
+        // Server is still up — poll the update status endpoint
+        const statusResponse = await apiGet('/server/update/status');
+        const downloadBar = document.getElementById('update-download-bar');
+        const downloadStep = document.getElementById('step-downloading');
+        const replaceStep = document.getElementById('step-replacing');
+        const restartStep = document.getElementById('step-restarting');
+
+        switch (statusResponse.phase) {
+          case 'downloading':
+            if (downloadBar && statusResponse.progress_percent >= 0) {
+              downloadBar.style.width = statusResponse.progress_percent + '%';
+            }
+            break;
+
+          case 'replacing':
+            if (downloadStep) {
+              downloadStep.className = 'update-progress-step is-complete';
+              downloadStep.innerHTML = `<span class="update-success-icon">${Icons.check}</span><span>Downloaded</span>`;
+            }
+            if (downloadBar) downloadBar.style.width = '100%';
+            if (replaceStep) {
+              replaceStep.className = 'update-progress-step is-active';
+              replaceStep.innerHTML = `<span class="update-spinner"></span><span>Replacing binary...</span>`;
+            }
+            break;
+
+          case 'restarting':
+            if (downloadStep) {
+              downloadStep.className = 'update-progress-step is-complete';
+              downloadStep.innerHTML = `<span class="update-success-icon">${Icons.check}</span><span>Downloaded</span>`;
+            }
+            if (downloadBar) downloadBar.style.width = '100%';
+            if (replaceStep) {
+              replaceStep.className = 'update-progress-step is-complete';
+              replaceStep.innerHTML = `<span class="update-success-icon">${Icons.check}</span><span>Binary replaced</span>`;
+            }
+            if (restartStep) {
+              restartStep.className = 'update-progress-step is-active';
+              restartStep.innerHTML = `<span class="update-spinner"></span><span>Restarting server...</span>`;
+            }
+            serverDownDetected = true;
+            break;
+
+          case 'failed':
+            clearInterval(updatePollTimer);
+            updateCard.innerHTML = `
+              <div style="display:flex;align-items:center;gap:var(--space-3);color:var(--color-danger);font-size:var(--text-sm)">
+                ${icon('alertCircle', 18)}
+                <span>Update failed: ${escapeHtml(statusResponse.message)}</span>
+              </div>
+              <div class="update-actions" style="margin-top:var(--space-4)">
+                <button class="btn btn-primary" id="check-update-btn">${icon('refresh', 16)} Check Again</button>
+              </div>
+            `;
+            bindServerUpdateEvents();
+            break;
+        }
+      } catch {
+        // If the status poll itself fails, the server may have already gone down for restart
+        if (!serverDownDetected) {
+          serverDownDetected = true;
+          const restartStep = document.getElementById('step-restarting');
+          if (restartStep) {
+            restartStep.className = 'update-progress-step is-active';
+            restartStep.innerHTML = `<span class="update-spinner"></span><span>Server restarting...</span>`;
+          }
+        }
+      }
+    }, 2000);
   }
 
   // --- Users (owner only) ---
@@ -2756,7 +3139,7 @@
                 : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
               }
               <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
-              <div class="book-meta">${book.authors ? escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors) : ''}</div>
+              <div class="book-meta">${(book.author_names && book.author_names.length > 0) ? escapeHtml(book.author_names.join(', ')) : ''}</div>
             </div>
           `;
         }
@@ -3029,7 +3412,7 @@
                 <div class="result-icon">${Icons.book}</div>
                 <div class="result-text">
                   <div class="result-name">${escapeHtml(book.title)}</div>
-                  ${book.authors ? `<div class="result-subtitle">${escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors)}</div>` : ''}
+                  ${(book.author_names && book.author_names.length > 0) ? `<div class="result-subtitle">${escapeHtml(book.author_names.join(', '))}</div>` : ''}
                 </div>
               </div>
             `;
@@ -3244,7 +3627,7 @@
                 : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>`
               }
               <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
-              <div class="book-meta">${book.authors ? escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors) : ''}</div>
+              <div class="book-meta">${(book.author_names && book.author_names.length > 0) ? escapeHtml(book.author_names.join(', ')) : ''}</div>
             </div>
           `;
         }
@@ -3786,7 +4169,7 @@
           : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>`
         }
         <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
-        <div class="book-meta">${book.authors ? escapeHtml(Array.isArray(book.authors) ? book.authors.join(', ') : book.authors) : ''}</div>
+        <div class="book-meta">${(book.author_names && book.author_names.length > 0) ? escapeHtml(book.author_names.join(', ')) : ''}</div>
       </div>
     `;
   }

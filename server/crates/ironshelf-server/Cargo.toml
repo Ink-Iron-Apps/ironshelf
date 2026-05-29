@@ -33,6 +33,10 @@ sqlx = { workspace = true }
 image = { workspace = true }
 urlencoding = { workspace = true }
 thiserror = { workspace = true }
+futures-util = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }

@@ -22,6 +22,7 @@ pub mod search;
 pub mod series;
 pub mod server_info;
 pub mod stats;
+pub mod update;
 pub mod users;
 pub mod webdav;
 pub mod webhooks;
