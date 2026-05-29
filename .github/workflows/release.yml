@@ -166,8 +166,8 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"${NEW_VERSION}\"/" server/Cargo.toml
           git add server/Cargo.toml
           git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
-          git tag "v${NEW_VERSION}"
-          git push origin main --tags
+          git tag -f "v${NEW_VERSION}"
+          git push origin main --tags --force
 
   release:
     runs-on: ubuntu-latest
