@@ -377,8 +377,9 @@ impl CalibreSource {
                     .ok()
             });
 
-            // Author IDs
+            // Author IDs and names
             let author_ids = self.fetch_author_ids(book_id).await?;
+            let author_names = self.fetch_author_names(book_id).await?;
 
             // Series ID
             let series_id = self.fetch_series_id(book_id).await?;
@@ -409,6 +410,7 @@ impl CalibreSource {
                 title,
                 sort_title,
                 author_ids,
+                author_names,
                 series_id,
                 series_index,
                 formats,
@@ -434,6 +436,18 @@ impl CalibreSource {
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.iter().map(|r| r.get("author")).collect())
+    }
+
+    async fn fetch_author_names(&self, book_id: i64) -> Result<Vec<String>, CalibreError> {
+        let rows = sqlx::query(
+            "SELECT a.name FROM authors a \
+             JOIN books_authors_link bal ON bal.author = a.id \
+             WHERE bal.book = ?",
+        )
+        .bind(book_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get("name")).collect())
     }
 
     async fn fetch_series_id(&self, book_id: i64) -> Result<Option<i64>, CalibreError> {
@@ -521,7 +535,21 @@ impl CalibreSource {
         let mut custom = HashMap::new();
 
         for col in &columns {
-            let value = self.fetch_custom_column_value(book_id, col).await?;
+            // Resilient: if a single custom column query fails, skip it and continue.
+            // Custom column tables may not exist or have unexpected schemas.
+            let value = match self.fetch_custom_column_value(book_id, col).await {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!(
+                        book_id,
+                        column_label = %col.label,
+                        column_datatype = %col.datatype,
+                        error = %error,
+                        "Failed to fetch custom column value, skipping"
+                    );
+                    CustomValue::Null
+                }
+            };
             if !matches!(value, CustomValue::Null) {
                 custom.insert(format!("#{}", col.label), value);
             }

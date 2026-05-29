@@ -72,6 +72,8 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .expect("failed to build shared reqwest client");
 
+    let update_status = routes::update::new_update_status();
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
@@ -81,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         oidc_state_store,
         http_client,
+        update_status,
     };
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
@@ -365,6 +368,20 @@ async fn main() -> anyhow::Result<()> {
         async move { auth::auth_middleware(State(state), request, next).await }
     });
 
+    let update_routes = Router::new()
+        .route(
+            "/api/v1/server/update/check",
+            get(routes::update::check_for_update),
+        )
+        .route(
+            "/api/v1/server/update/apply",
+            axum::routing::post(routes::update::apply_update),
+        )
+        .route(
+            "/api/v1/server/update/status",
+            get(routes::update::update_status),
+        );
+
     let protected_routes = Router::new()
         .merge(auth_management_routes)
         .merge(filesystem_routes)
@@ -373,6 +390,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(data_routes)
         .merge(genre_webhook_routes)
         .merge(acquisition_routes)
+        .merge(update_routes)
         .with_state(app_state.clone())
         .layer(auth_middleware_layer.clone());
 

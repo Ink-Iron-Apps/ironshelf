@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 
 use crate::config::Config;
 use crate::routes::oidc::OidcStateStore;
+use crate::routes::update::SharedUpdateStatus;
 
 /// Polymorphic library source.
 #[derive(Clone)]
@@ -189,4 +190,6 @@ pub struct AppState {
     /// Shared HTTP client for outbound requests (metadata providers, webhooks).
     /// Created once at startup to reuse connection pools and TLS sessions.
     pub http_client: reqwest::Client,
+    /// Shared update status for the self-update feature (tracks download/restart progress).
+    pub update_status: SharedUpdateStatus,
 }

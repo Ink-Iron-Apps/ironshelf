@@ -71,6 +71,8 @@ pub struct Book {
     pub title: String,
     pub sort_title: String,
     pub author_ids: Vec<i64>,
+    /// Resolved author names corresponding to `author_ids`.
+    pub author_names: Vec<String>,
     pub series_id: Option<i64>,
     pub series_index: Option<f64>,
     pub formats: Vec<Format>,

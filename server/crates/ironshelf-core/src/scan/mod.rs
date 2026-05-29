@@ -380,6 +380,7 @@ impl FolderSource {
             title: scanned.title.clone(),
             sort_title: scanned.title.clone(),
             author_ids: vec![], // Resolved by caller if needed
+            author_names: scanned.authors.clone(),
             series_id: None,    // FolderSource uses name-based series
             series_index: scanned.series_index,
             formats: vec![Format {
