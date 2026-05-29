@@ -115,6 +115,18 @@ async fn main() -> anyhow::Result<()> {
         .route("/ready", get(readiness))
         .route("/alive", get(liveness))
         .route("/api/v1/server/info", get(routes::server_info::server_info))
+        .route(
+            "/api/v1/auth/cloud-login",
+            axum::routing::post(routes::cloud_auth::cloud_login),
+        )
+        .route(
+            "/api/v1/auth/claim",
+            axum::routing::post(routes::cloud_auth::claim_server),
+        )
+        .route(
+            "/api/v1/auth/claim-status",
+            get(routes::cloud_auth::claim_status),
+        )
         .with_state(app_state.clone());
 
     // Protected routes (auth required).

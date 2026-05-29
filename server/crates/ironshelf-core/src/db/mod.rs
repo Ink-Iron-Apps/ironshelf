@@ -436,6 +436,9 @@ impl IronshelfDb {
         let migration_016 = include_str!("migrations/016_acquisition.sql");
         sqlx::raw_sql(migration_016).execute(&self.pool).await?;
 
+        let migration_017 = include_str!("migrations/017_cloud_config.sql");
+        sqlx::raw_sql(migration_017).execute(&self.pool).await?;
+
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
         // "duplicate column" errors to make migrate() safe to call on every startup.
@@ -494,6 +497,50 @@ impl IronshelfDb {
     /// Get a reference to the underlying pool.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    // --- Cloud Config (central auth relay) ---
+
+    /// Get a cloud config value by key.
+    pub async fn get_cloud_config(&self, key: &str) -> Result<Option<String>, DbError> {
+        let row = sqlx::query("SELECT value FROM cloud_config WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<String, _>("value")))
+    }
+
+    /// Set a cloud config value (upsert).
+    pub async fn set_cloud_config(&self, key: &str, value: &str) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO cloud_config (key, value) VALUES (?, ?) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a cloud config value.
+    pub async fn delete_cloud_config(&self, key: &str) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM cloud_config WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get all cloud config entries as key-value pairs.
+    pub async fn list_cloud_config(&self) -> Result<Vec<(String, String)>, DbError> {
+        let rows = sqlx::query("SELECT key, value FROM cloud_config ORDER BY key")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<String, _>("key"), r.get::<String, _>("value")))
+            .collect())
     }
 
     // --- Library CRUD (managed via API/GUI, not config file) ---

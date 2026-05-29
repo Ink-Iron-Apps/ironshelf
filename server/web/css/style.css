@@ -4171,6 +4171,83 @@ tbody td {
   border-color: var(--color-teal-bright);
 }
 
+/* --- Cloud Login --- */
+.btn-cloud {
+  width: 100%;
+  min-height: 44px;
+  font-size: var(--text-base);
+  background: linear-gradient(135deg, var(--color-teal) 0%, var(--color-teal-bright) 100%);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-decoration: none;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+.btn-cloud:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.cloud-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cloud-server-btn {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-align: left;
+  color: var(--color-text);
+}
+.cloud-server-btn:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-teal-bright);
+}
+.cloud-server-btn:disabled {
+  cursor: wait;
+}
+
+.cloud-server-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cloud-server-name {
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cloud-server-url {
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-server-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
 /* --- Duplicate Detection --- */
 .duplicate-group {
   margin-bottom: var(--space-6);
