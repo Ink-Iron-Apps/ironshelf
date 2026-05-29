@@ -1293,7 +1293,10 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="lib-path">Path on server</label>
-            <input type="text" class="form-input" id="lib-path" name="path" required placeholder="/mnt/books/calibre-library" value="${isEdit ? escapeHtml(editData.path || '') : ''}">
+            <div class="form-input-with-button">
+              <input type="text" class="form-input" id="lib-path" name="path" required placeholder="/mnt/books/calibre-library" value="${isEdit ? escapeHtml(editData.path || '') : ''}">
+              <button type="button" class="btn btn-secondary" id="browse-path-btn">${icon('folder', 16)} Browse</button>
+            </div>
             <p class="form-hint">Absolute path to the Calibre library or book folder</p>
           </div>
           <div class="form-group">
@@ -1326,6 +1329,15 @@
 
     const form = document.getElementById('library-form');
     form.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+    // Browse button opens folder picker modal
+    document.getElementById('browse-path-btn')?.addEventListener('click', () => {
+      const currentPathValue = document.getElementById('lib-path').value.trim();
+      const currentSourceKind = document.getElementById('lib-source').value;
+      showFolderPickerModal(currentPathValue, currentSourceKind, (selectedPath) => {
+        document.getElementById('lib-path').value = selectedPath;
+      });
+    });
 
     if (isEdit) {
       document.getElementById('delete-library-btn')?.addEventListener('click', () => {
@@ -1385,6 +1397,343 @@
         submitBtn.disabled = false;
       }
     });
+  }
+
+
+  // --- Folder Picker Modal ---
+
+  function showFolderPickerModal(initialPath, sourceKind, onSelectCallback) {
+    const overlay = document.createElement('div');
+    overlay.className = 'folder-picker-overlay';
+
+    overlay.innerHTML = `
+      <div class="folder-picker">
+        <div class="folder-picker-header">
+          <h3>Browse Server Folders</h3>
+          <button class="folder-picker-close" aria-label="Close">${Icons.x}</button>
+        </div>
+        <div class="folder-picker-toolbar">
+          <div class="folder-picker-roots">
+            <select id="folder-picker-root-select" aria-label="Root drive"></select>
+          </div>
+          <div class="folder-picker-breadcrumb" id="folder-picker-breadcrumb"></div>
+        </div>
+        <div class="folder-picker-manual">
+          <input type="text" id="folder-picker-path-input" placeholder="Type a path and press Go" aria-label="Manual path entry">
+          <button class="btn btn-sm btn-secondary" id="folder-picker-go-btn">Go</button>
+        </div>
+        <div class="folder-picker-listing" id="folder-picker-listing">
+          <div class="folder-picker-loading">Loading...</div>
+        </div>
+        <div class="folder-picker-footer">
+          <div class="folder-picker-selected">
+            <span class="folder-picker-selected-path" id="folder-picker-selected-path">No folder selected</span>
+            <span class="folder-picker-validation" id="folder-picker-validation"></span>
+          </div>
+          <button class="btn btn-ghost" id="folder-picker-cancel-btn">Cancel</button>
+          <button class="btn btn-primary" id="folder-picker-select-btn" disabled>Select</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('modal-root').appendChild(overlay);
+
+    let currentBrowsePath = '';
+    let currentSeparator = '/';
+    let currentRoots = [];
+    let validationResult = null;
+
+    const listingContainer = document.getElementById('folder-picker-listing');
+    const breadcrumbContainer = document.getElementById('folder-picker-breadcrumb');
+    const rootSelect = document.getElementById('folder-picker-root-select');
+    const pathInput = document.getElementById('folder-picker-path-input');
+    const selectedPathDisplay = document.getElementById('folder-picker-selected-path');
+    const validationDisplay = document.getElementById('folder-picker-validation');
+    const selectButton = document.getElementById('folder-picker-select-btn');
+
+    function closePicker() {
+      overlay.remove();
+    }
+
+    overlay.querySelector('.folder-picker-close').addEventListener('click', closePicker);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) closePicker();
+    });
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closePicker();
+    });
+    document.getElementById('folder-picker-cancel-btn').addEventListener('click', closePicker);
+
+    document.getElementById('folder-picker-select-btn').addEventListener('click', () => {
+      if (currentBrowsePath) {
+        onSelectCallback(currentBrowsePath);
+        closePicker();
+      }
+    });
+
+    document.getElementById('folder-picker-go-btn').addEventListener('click', () => {
+      const manualPath = pathInput.value.trim();
+      if (manualPath) {
+        browseTo(manualPath);
+      }
+    });
+
+    pathInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const manualPath = pathInput.value.trim();
+        if (manualPath) {
+          browseTo(manualPath);
+        }
+      }
+    });
+
+    rootSelect.addEventListener('change', () => {
+      const selectedRoot = rootSelect.value;
+      if (selectedRoot) {
+        browseTo(selectedRoot);
+      }
+    });
+
+    async function browseTo(targetPath) {
+      listingContainer.innerHTML = '<div class="folder-picker-loading">Loading...</div>';
+
+      try {
+        const queryParameter = targetPath ? `?path=${encodeURIComponent(targetPath)}` : '';
+        const browseResponse = await apiGet(`/filesystem/browse${queryParameter}`);
+
+        currentBrowsePath = browseResponse.current_path;
+        currentSeparator = browseResponse.separator || '/';
+        currentRoots = browseResponse.roots || [];
+
+        pathInput.value = currentBrowsePath;
+        selectedPathDisplay.textContent = currentBrowsePath || 'Select a folder';
+
+        // Update roots dropdown
+        updateRootsDropdown();
+
+        // Update breadcrumb
+        updateBreadcrumb(currentBrowsePath);
+
+        // Render directory entries
+        renderDirectoryEntries(browseResponse);
+
+        // Validate the current path
+        if (currentBrowsePath) {
+          await validateCurrentPath();
+        } else {
+          validationDisplay.innerHTML = '';
+          selectButton.disabled = true;
+        }
+      } catch (fetchError) {
+        listingContainer.innerHTML = `
+          <div class="folder-picker-error">
+            ${Icons.alertCircle} ${escapeHtml(fetchError.message || 'Failed to browse directory')}
+          </div>
+        `;
+        validationDisplay.innerHTML = '';
+        selectButton.disabled = true;
+      }
+    }
+
+    function updateRootsDropdown() {
+      const previousValue = rootSelect.value;
+      rootSelect.innerHTML = '<option value="">Root...</option>';
+      for (const rootPath of currentRoots) {
+        const optionElement = document.createElement('option');
+        optionElement.value = rootPath;
+        optionElement.textContent = rootPath;
+        rootSelect.appendChild(optionElement);
+      }
+      // Select the root that matches the current path prefix
+      const matchingRoot = currentRoots.find(
+        (rootPath) => currentBrowsePath && currentBrowsePath.startsWith(rootPath)
+      );
+      if (matchingRoot) {
+        rootSelect.value = matchingRoot;
+      } else if (previousValue && currentRoots.includes(previousValue)) {
+        rootSelect.value = previousValue;
+      }
+    }
+
+    function updateBreadcrumb(fullPath) {
+      breadcrumbContainer.innerHTML = '';
+
+      if (!fullPath) return;
+
+      // Split path into segments. Handle both / and \ separators.
+      const normalizedPath = fullPath.replace(/\\/g, '/');
+      const pathSegments = normalizedPath.split('/').filter(Boolean);
+
+      // On Windows, the first segment might be "C:" — reconstruct properly.
+      let accumulatedPath = '';
+
+      // Handle root differently on Windows vs Unix
+      if (currentSeparator === '\\') {
+        // Windows: first segment is drive like "C:"
+        if (pathSegments.length > 0) {
+          accumulatedPath = pathSegments[0] + '\\';
+          const rootButton = document.createElement('button');
+          rootButton.className = 'folder-picker-breadcrumb-segment';
+          rootButton.textContent = pathSegments[0] + '\\';
+          rootButton.addEventListener('click', () => browseTo(accumulatedPath));
+          breadcrumbContainer.appendChild(rootButton);
+
+          for (let segmentIndex = 1; segmentIndex < pathSegments.length; segmentIndex++) {
+            const separatorSpan = document.createElement('span');
+            separatorSpan.className = 'folder-picker-breadcrumb-separator';
+            separatorSpan.textContent = '\\';
+            breadcrumbContainer.appendChild(separatorSpan);
+
+            accumulatedPath += pathSegments[segmentIndex] + (segmentIndex < pathSegments.length - 1 ? '\\' : '');
+            const segmentButton = document.createElement('button');
+            segmentButton.className = 'folder-picker-breadcrumb-segment';
+            segmentButton.textContent = pathSegments[segmentIndex];
+            const targetPath = accumulatedPath;
+            segmentButton.addEventListener('click', () => browseTo(targetPath));
+            breadcrumbContainer.appendChild(segmentButton);
+          }
+        }
+      } else {
+        // Unix: root is /
+        const rootButton = document.createElement('button');
+        rootButton.className = 'folder-picker-breadcrumb-segment';
+        rootButton.textContent = '/';
+        rootButton.addEventListener('click', () => browseTo('/'));
+        breadcrumbContainer.appendChild(rootButton);
+
+        for (let segmentIndex = 0; segmentIndex < pathSegments.length; segmentIndex++) {
+          const separatorSpan = document.createElement('span');
+          separatorSpan.className = 'folder-picker-breadcrumb-separator';
+          separatorSpan.textContent = '/';
+          breadcrumbContainer.appendChild(separatorSpan);
+
+          accumulatedPath = '/' + pathSegments.slice(0, segmentIndex + 1).join('/');
+          const segmentButton = document.createElement('button');
+          segmentButton.className = 'folder-picker-breadcrumb-segment';
+          segmentButton.textContent = pathSegments[segmentIndex];
+          const targetPath = accumulatedPath;
+          segmentButton.addEventListener('click', () => browseTo(targetPath));
+          breadcrumbContainer.appendChild(segmentButton);
+        }
+      }
+
+      // Auto-scroll breadcrumb to the end
+      breadcrumbContainer.scrollLeft = breadcrumbContainer.scrollWidth;
+    }
+
+    function renderDirectoryEntries(browseResponse) {
+      const directoryEntries = browseResponse.entries || [];
+
+      if (directoryEntries.length === 0 && !browseResponse.parent_path) {
+        listingContainer.innerHTML = '<div class="folder-picker-empty">No accessible folders</div>';
+        return;
+      }
+
+      let entriesHtml = '';
+
+      // "Go Up" entry
+      if (browseResponse.parent_path) {
+        entriesHtml += `
+          <button class="folder-picker-entry folder-picker-up" data-path="${escapeHtml(browseResponse.parent_path)}" data-action="navigate">
+            <span class="folder-picker-entry-icon">${Icons.arrowUp}</span>
+            <span class="folder-picker-entry-name">..</span>
+          </button>
+        `;
+      }
+
+      for (const directoryEntry of directoryEntries) {
+        entriesHtml += `
+          <button class="folder-picker-entry" data-path="${escapeHtml(directoryEntry.path)}" data-action="navigate">
+            <span class="folder-picker-entry-icon">${Icons.folder}</span>
+            <span class="folder-picker-entry-name">${escapeHtml(directoryEntry.name)}</span>
+          </button>
+        `;
+      }
+
+      listingContainer.innerHTML = entriesHtml;
+
+      // Attach click handlers for navigation
+      listingContainer.querySelectorAll('[data-action="navigate"]').forEach((entryButton) => {
+        entryButton.addEventListener('click', () => {
+          const targetDirectoryPath = entryButton.getAttribute('data-path');
+          browseTo(targetDirectoryPath);
+        });
+      });
+
+      // Check each entry for metadata.db presence (async, decorative)
+      if (sourceKind === 'calibre') {
+        detectCalibreLibraries(directoryEntries);
+      }
+    }
+
+    async function detectCalibreLibraries(directoryEntries) {
+      for (const directoryEntry of directoryEntries) {
+        try {
+          const validationResponse = await apiGet(
+            `/filesystem/validate?path=${encodeURIComponent(directoryEntry.path)}&source_kind=calibre`
+          );
+          if (validationResponse.has_metadata_db) {
+            const matchingButton = listingContainer.querySelector(
+              `[data-path="${CSS.escape(directoryEntry.path)}"]`
+            );
+            if (matchingButton) {
+              matchingButton.querySelector('.folder-picker-entry-icon')?.classList.add('is-calibre');
+              // Add Calibre badge
+              const badgeSpan = document.createElement('span');
+              badgeSpan.className = 'folder-picker-entry-badge';
+              badgeSpan.textContent = 'Calibre';
+              matchingButton.appendChild(badgeSpan);
+            }
+          }
+        } catch (_) {
+          // Non-critical — skip silently
+        }
+      }
+    }
+
+    async function validateCurrentPath() {
+      if (!currentBrowsePath) {
+        validationDisplay.innerHTML = '';
+        selectButton.disabled = true;
+        return;
+      }
+
+      try {
+        const validationResponse = await apiGet(
+          `/filesystem/validate?path=${encodeURIComponent(currentBrowsePath)}&source_kind=${encodeURIComponent(sourceKind)}`
+        );
+        validationResult = validationResponse;
+
+        if (validationResponse.valid) {
+          validationDisplay.className = 'folder-picker-validation is-valid';
+          let validationLabel = 'Valid folder';
+          if (validationResponse.has_metadata_db) {
+            validationLabel = 'Calibre library detected';
+          }
+          validationDisplay.innerHTML = `${icon('check', 14)} ${validationLabel}`;
+          selectButton.disabled = false;
+        } else {
+          validationDisplay.className = 'folder-picker-validation is-invalid';
+          let invalidReason = 'Not a valid folder';
+          if (validationResponse.is_directory && sourceKind === 'calibre' && !validationResponse.has_metadata_db) {
+            invalidReason = 'No metadata.db found';
+          }
+          validationDisplay.innerHTML = `${icon('alertCircle', 14)} ${invalidReason}`;
+          // Still allow selection even if Calibre validation fails — user may
+          // want to pick the folder anyway (e.g. for folder source type change).
+          selectButton.disabled = !validationResponse.is_directory;
+        }
+      } catch (_) {
+        validationDisplay.innerHTML = '';
+        // Allow selection on validation failure — the create/update endpoint
+        // will do its own validation.
+        selectButton.disabled = false;
+      }
+    }
+
+    // Initial browse: start at the provided path or roots
+    browseTo(initialPath || '');
   }
 
   // --- Library Detail (Authors) ---

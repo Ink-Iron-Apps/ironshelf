@@ -6,6 +6,7 @@ pub mod authors;
 pub mod books;
 pub mod collections;
 pub mod continue_reading;
+pub mod filesystem;
 pub mod genres;
 pub mod files;
 pub mod highlights;
