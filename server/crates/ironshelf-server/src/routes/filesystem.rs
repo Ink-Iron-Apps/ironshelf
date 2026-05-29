@@ -131,7 +131,7 @@ async fn list_directories(directory_path: &Path) -> Vec<DirectoryEntry> {
         });
     }
 
-    entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    entries.sort_by_key(|entry| entry.name.to_lowercase());
     entries
 }
 
@@ -197,7 +197,7 @@ pub async fn browse_filesystem(
     };
 
     let canonical_path = validate_browse_path(&browse_path)
-        .map_err(|message| AppError::BadRequest(message))?;
+        .map_err(AppError::BadRequest)?;
 
     let parent_path = canonical_path
         .parent()

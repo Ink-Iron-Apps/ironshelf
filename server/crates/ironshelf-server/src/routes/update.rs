@@ -27,6 +27,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Phases of an in-progress update.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum UpdatePhase {
     Idle,
     Checking,
