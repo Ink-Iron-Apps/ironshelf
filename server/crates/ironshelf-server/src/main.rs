@@ -124,6 +124,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/auth/me", get(routes::auth::me))
         .route("/api/v1/auth/logout", axum::routing::post(routes::auth::logout))
         .route(
+            "/api/v1/auth/password",
+            axum::routing::put(routes::password::change_password),
+        )
+        .route(
             "/api/v1/auth/api-keys",
             get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
         )
@@ -211,6 +215,31 @@ async fn main() -> anyhow::Result<()> {
             get(routes::highlights::list_all_highlights),
         )
         .route(
+            "/api/v1/me/queue",
+            get(routes::reading_queue::list_queue).post(routes::reading_queue::add_to_queue),
+        )
+        .route(
+            "/api/v1/me/queue/reorder",
+            axum::routing::post(routes::reading_queue::reorder_queue),
+        )
+        .route(
+            "/api/v1/me/queue/{book_id}",
+            axum::routing::delete(routes::reading_queue::remove_from_queue),
+        )
+        .route(
+            "/api/v1/me/queue/{book_id}/move",
+            axum::routing::patch(routes::reading_queue::move_queue_item),
+        )
+        .route(
+            "/api/v1/me/reading-goal",
+            get(routes::reading_goals::get_reading_goal)
+                .post(routes::reading_goals::set_reading_goal),
+        )
+        .route(
+            "/api/v1/me/stats",
+            get(routes::personal_stats::personal_stats),
+        )
+        .route(
             "/api/v1/collections",
             get(routes::collections::list_collections).post(routes::collections::create_collection),
         )
@@ -259,7 +288,11 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/v1/stats", get(routes::stats::server_stats))
         .route("/api/v1/activity", get(routes::stats::user_activity))
-        .route("/api/v1/activity/all", get(routes::stats::server_activity));
+        .route("/api/v1/activity/all", get(routes::stats::server_activity))
+        .route(
+            "/api/v1/duplicates/scan",
+            get(routes::duplicates::scan_duplicates),
+        );
 
     let genre_webhook_routes = Router::new()
         .route("/api/v1/genres", get(routes::genres::list_all_genres))
@@ -380,6 +413,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/update/status",
             get(routes::update::update_status),
+        )
+        .route(
+            "/api/v1/server/converters",
+            get(routes::converters::server_converters),
         );
 
     let protected_routes = Router::new()

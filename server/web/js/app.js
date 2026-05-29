@@ -86,6 +86,10 @@
     list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
     pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1z"/></svg>',
     pinOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M15 9.34V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1v2.34"/><path d="M2 2l20 20"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79"/></svg>',
+    bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+    mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+    chevronDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
   };
 
   function icon(name, size = 20) {
@@ -237,6 +241,7 @@
 
   function apiGet(path) { return api(path); }
   function apiPost(path, body) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
+  function apiPut(path, body) { return api(path, { method: 'PUT', body: JSON.stringify(body) }); }
   function apiPatch(path, body) { return api(path, { method: 'PATCH', body: JSON.stringify(body) }); }
   function apiDelete(path) { return api(path, { method: 'DELETE' }); }
 
@@ -770,6 +775,7 @@
       activity: renderActivity,
       queue: renderReadingQueue,
       highlights: renderHighlights,
+      bookmarks: renderBookmarks,
       genres: renderGenres,
       genre: () => renderGenreDetail(parsed.params.id),
       webhooks: renderWebhooks,
@@ -992,6 +998,7 @@
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
       { id: 'highlights', label: 'Highlights', icon: 'edit', path: '/highlights' },
+      { id: 'bookmarks', label: 'Bookmarks', icon: 'bookmark', path: '/bookmarks' },
       { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
     ];
 
@@ -1388,10 +1395,10 @@
           <div class="form-group">
             <label class="form-label" for="lib-path">Path on server</label>
             <div class="form-input-with-button">
-              <input type="text" class="form-input" id="lib-path" name="path" required placeholder="/mnt/books/calibre-library" value="${isEdit ? escapeHtml(editData.path || '') : ''}">
-              <button type="button" class="btn btn-secondary" id="browse-path-btn">${icon('folder', 16)} Browse</button>
+              <input type="text" class="form-input" id="lib-path" name="path" required placeholder="/mnt/books/calibre-library" value="${isEdit ? escapeHtml(editData.path || '') : ''}" ${isEdit ? 'readonly style="opacity:0.6;cursor:not-allowed"' : ''}>
+              ${!isEdit ? `<button type="button" class="btn btn-secondary" id="browse-path-btn">${icon('folder', 16)} Browse</button>` : ''}
             </div>
-            <p class="form-hint">Absolute path to the Calibre library or book folder</p>
+            <p class="form-hint">${isEdit ? 'Path cannot be changed after creation.' : 'Absolute path to the Calibre library or book folder'}</p>
           </div>
           <div class="form-group">
             <label class="form-label" for="lib-source">Source Type</label>
@@ -2436,6 +2443,98 @@
         </div>
 
         <div class="settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('link', 20)} Device Integration</h3>
+          <p class="description">Connect e-readers and third-party apps to your Ironshelf server.</p>
+
+          ${(() => {
+            const origin = window.location.origin;
+            const firstKey = (keys || []).length > 0 ? keys[0] : null;
+            const keyDisplay = firstKey ? `irs_${escapeHtml(firstKey.prefix)}...` : '&lt;create-api-key-first&gt;';
+            const keyForUrl = firstKey ? `irs_${firstKey.prefix}...` : '<create-api-key-first>';
+            const noKeyNote = !firstKey ? '<p class="text-caption" style="margin-top:var(--space-2);color:var(--color-warning)">Create an API key above first.</p>' : '';
+
+            return `
+              <div class="device-integration-cards">
+                <div class="card device-card">
+                  <div class="device-card-header">
+                    <span class="device-card-icon">${Icons.rss}</span>
+                    <h4>OPDS Connection</h4>
+                  </div>
+                  <p class="text-caption">Connect KOReader, Moon+ Reader, or other OPDS readers.</p>
+                  <div class="device-url-row">
+                    <code class="device-url" id="opds-url">${origin}/opds</code>
+                    <button class="btn btn-ghost btn-sm copy-device-url" data-copy-target="opds-url" aria-label="Copy OPDS URL">${icon('copy', 14)}</button>
+                  </div>
+                  <p class="form-hint">Use your API key as Bearer token in the reader's authentication settings.</p>
+                  ${noKeyNote}
+                </div>
+
+                <div class="card device-card">
+                  <div class="device-card-header">
+                    <span class="device-card-icon">${Icons.book}</span>
+                    <h4>Kobo Sync</h4>
+                  </div>
+                  <p class="text-caption">Connect your Kobo e-reader.</p>
+                  <div class="device-url-row">
+                    <code class="device-url" id="kobo-url">${origin}/kobo/${escapeHtml(keyForUrl)}/v1/initialization</code>
+                    <button class="btn btn-ghost btn-sm copy-device-url" data-copy-target="kobo-url" aria-label="Copy Kobo URL">${icon('copy', 14)}</button>
+                  </div>
+                  <p class="form-hint">In Kobo settings, set your custom server to this URL.</p>
+                  ${noKeyNote}
+                </div>
+
+                <div class="card device-card">
+                  <div class="device-card-header">
+                    <span class="device-card-icon">${Icons.hardDrive}</span>
+                    <h4>WebDAV (KOReader Sync)</h4>
+                  </div>
+                  <p class="text-caption">Sync KOReader reading progress via WebDAV.</p>
+                  <div class="device-url-row">
+                    <code class="device-url" id="webdav-url">${origin}/webdav/${escapeHtml(keyForUrl)}/</code>
+                    <button class="btn btn-ghost btn-sm copy-device-url" data-copy-target="webdav-url" aria-label="Copy WebDAV URL">${icon('copy', 14)}</button>
+                  </div>
+                  <p class="form-hint">In KOReader, go to Settings &rarr; Cloud Storage &rarr; WebDAV and enter this URL.</p>
+                  ${noKeyNote}
+                </div>
+              </div>
+            `;
+          })()}
+        </div>
+
+        <div class="settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('lock', 20)} Change Password</h3>
+          <p class="description">Update your account password. You must provide your current password for verification.</p>
+          <form id="change-password-form" class="card" style="max-width:400px;display:flex;flex-direction:column;gap:var(--space-4)" novalidate>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" for="current-password">Current Password</label>
+              <input type="password" class="form-input" id="current-password" name="current_password" required autocomplete="current-password">
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" for="new-password">New Password</label>
+              <input type="password" class="form-input" id="new-password" name="new_password" required minlength="8" autocomplete="new-password">
+              <p class="form-hint">Minimum 8 characters.</p>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" for="confirm-password">Confirm New Password</label>
+              <input type="password" class="form-input" id="confirm-password" name="confirm_password" required minlength="8" autocomplete="new-password">
+            </div>
+            <div id="password-error" class="form-error hidden" role="alert"></div>
+            <button type="submit" class="btn btn-primary" style="align-self:flex-start">${icon('check', 16)} Update Password</button>
+          </form>
+        </div>
+
+        ${currentUser?.is_owner ? `
+        <div class="settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('mail', 20)} Pending Invites</h3>
+          <p class="description">Invite new users by creating invite codes. Share the code with someone to let them create an account.</p>
+          <div class="list-group" id="invites-list">
+            <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading invites...</div>
+          </div>
+          <button class="btn btn-primary mt-4" id="create-invite-btn">${icon('plus', 16)} Create Invite</button>
+        </div>
+        ` : ''}
+
+        <div class="settings-section">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Export / Import</h3>
           <p class="description">Export your reading progress, collections, and preferences as JSON. Import a previously exported file to restore data.</p>
           <div class="card" style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center">
@@ -2545,12 +2644,35 @@
             const result = await apiPost('/auth/api-keys', { label });
             close();
 
+            const createdKeyOrigin = window.location.origin;
             showModal({
               title: 'API Key Created',
               description: 'Copy this key now. It will not be shown again.',
               content: `
                 <div class="api-key-display" id="new-key-value">${escapeHtml(result.key)}</div>
                 <button class="btn btn-secondary" id="copy-key-btn">${icon('copy', 16)} Copy to Clipboard</button>
+
+                <details class="key-usage-guide">
+                  <summary>${icon('info', 14)} How to use this key</summary>
+                  <div class="key-usage-guide-content">
+                    <div class="key-usage-item">
+                      <h4>cURL</h4>
+                      <code class="key-usage-code">curl -H "Authorization: Bearer ${escapeHtml(result.key)}" ${createdKeyOrigin}/api/v1/libraries</code>
+                    </div>
+                    <div class="key-usage-item">
+                      <h4>OPDS Reader</h4>
+                      <p>Use as Bearer token in your reader app's authentication settings.</p>
+                    </div>
+                    <div class="key-usage-item">
+                      <h4>Kobo Sync</h4>
+                      <code class="key-usage-code">${createdKeyOrigin}/kobo/${escapeHtml(result.key)}/v1/initialization</code>
+                    </div>
+                    <div class="key-usage-item">
+                      <h4>WebDAV (KOReader)</h4>
+                      <code class="key-usage-code">${createdKeyOrigin}/webdav/${escapeHtml(result.key)}/</code>
+                    </div>
+                  </div>
+                </details>
               `,
               actions: '<button class="btn btn-primary" data-action="done">Done</button>',
             });
@@ -2665,8 +2787,128 @@
 
       // Server update check (owner only)
       bindServerUpdateEvents();
+
+      // Device integration copy buttons
+      document.querySelectorAll('.copy-device-url').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const targetElement = document.getElementById(btn.dataset.copyTarget);
+          if (!targetElement) return;
+          navigator.clipboard.writeText(targetElement.textContent.trim()).then(() => {
+            toast('URL copied to clipboard', 'success');
+          }).catch(() => {
+            toast('Failed to copy — select and copy manually', 'warning');
+          });
+        });
+      });
+
+      // Change password form
+      document.getElementById('change-password-form')?.addEventListener('submit', async (submitEvent) => {
+        submitEvent.preventDefault();
+        const passwordError = document.getElementById('password-error');
+        passwordError.classList.add('hidden');
+
+        const currentPassword = document.getElementById('current-password').value;
+        const newPassword = document.getElementById('new-password').value;
+        const confirmPassword = document.getElementById('confirm-password').value;
+
+        if (newPassword.length < 8) {
+          passwordError.textContent = 'New password must be at least 8 characters.';
+          passwordError.classList.remove('hidden');
+          return;
+        }
+
+        if (newPassword !== confirmPassword) {
+          passwordError.textContent = 'New passwords do not match.';
+          passwordError.classList.remove('hidden');
+          return;
+        }
+
+        try {
+          await apiPut('/auth/password', { current_password: currentPassword, new_password: newPassword });
+          toast('Password updated successfully', 'success');
+          document.getElementById('change-password-form').reset();
+        } catch (passwordChangeError) {
+          passwordError.textContent = passwordChangeError.message || 'Failed to change password.';
+          passwordError.classList.remove('hidden');
+        }
+      });
+
+      // Invite management (owner only)
+      if (currentUser?.is_owner) {
+        loadInvitesList();
+        document.getElementById('create-invite-btn')?.addEventListener('click', async () => {
+          try {
+            const inviteResult = await apiPost('/users/invite', {});
+            const inviteCode = inviteResult?.code || inviteResult?.invite_code || '';
+            showModal({
+              title: 'Invite Created',
+              description: 'Share this code with someone to let them create an account.',
+              content: `
+                <div class="api-key-display" id="invite-code-value">${escapeHtml(inviteCode)}</div>
+                <button class="btn btn-secondary" id="copy-invite-btn">${icon('copy', 16)} Copy to Clipboard</button>
+              `,
+              actions: '<button class="btn btn-primary" data-action="done">Done</button>',
+            });
+            const inviteModal = document.querySelector('.modal-overlay:last-child');
+            inviteModal.querySelector('[data-action="done"]')?.addEventListener('click', () => {
+              inviteModal.remove();
+              loadInvitesList();
+            });
+            inviteModal.querySelector('#copy-invite-btn')?.addEventListener('click', () => {
+              navigator.clipboard.writeText(inviteCode).then(() => {
+                toast('Invite code copied', 'success');
+              }).catch(() => {
+                toast('Failed to copy — select and copy manually', 'warning');
+              });
+            });
+          } catch (inviteError) {
+            toast(inviteError.message, 'error');
+          }
+        });
+      }
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
+    }
+  }
+
+  async function loadInvitesList() {
+    const invitesList = document.getElementById('invites-list');
+    if (!invitesList) return;
+    try {
+      const invitesData = await apiGet('/users/invites').catch(() => []);
+      const invites = Array.isArray(invitesData) ? invitesData : (invitesData?.items || []);
+      if (invites.length === 0) {
+        invitesList.innerHTML = `
+          <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">
+            No pending invites
+          </div>
+        `;
+        return;
+      }
+      invitesList.innerHTML = invites.map(invite => {
+        const isUsed = invite.used_at || invite.is_used;
+        const createdDate = invite.created_at ? new Date(invite.created_at).toLocaleDateString() : 'Unknown';
+        return `
+          <div class="list-item" style="cursor:default">
+            <div class="list-item-content">
+              <div class="list-item-icon">${Icons.mail}</div>
+              <div class="list-item-text">
+                <div class="list-item-name" style="font-family:var(--font-mono);font-size:var(--text-sm)">${escapeHtml(invite.code || invite.invite_code || '')}</div>
+                <div class="list-item-subtitle">Created ${createdDate}</div>
+              </div>
+            </div>
+            <div class="list-item-meta">
+              <span class="badge ${isUsed ? 'badge-muted' : 'badge-success'}">${isUsed ? 'Used' : 'Available'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch {
+      invitesList.innerHTML = `
+        <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">
+          Failed to load invites
+        </div>
+      `;
     }
   }
 
@@ -5118,6 +5360,106 @@
   }
 
   // ============================================================
+  // 5a. Bookmarks Page
+  // ============================================================
+
+  async function renderBookmarks() {
+    if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
+    setTitle(['Bookmarks']);
+    breadcrumbTrail = [{ label: 'Bookmarks', path: '/bookmarks' }];
+
+    renderShell(`
+      <div class="page-header"><h1>Bookmarks</h1></div>
+      ${skeletonList(5)}
+    `, 'bookmarks');
+
+    try {
+      const bookmarksData = await apiGet('/me/bookmarks');
+
+      if (isStaleNavigation(thisGeneration)) return;
+
+      const allBookmarks = Array.isArray(bookmarksData) ? bookmarksData : (bookmarksData?.items || []);
+
+      // Group by book
+      const groupedByBook = {};
+      for (const bookmarkItem of allBookmarks) {
+        const bookKey = bookmarkItem.book_id || 'unknown';
+        if (!groupedByBook[bookKey]) {
+          groupedByBook[bookKey] = {
+            bookTitle: bookmarkItem.book_title || 'Unknown Book',
+            bookId: bookmarkItem.book_id,
+            bookmarks: [],
+          };
+        }
+        groupedByBook[bookKey].bookmarks.push(bookmarkItem);
+      }
+
+      let bodyContent = `
+        <div class="page-header">
+          <h1>Bookmarks</h1>
+          <div class="actions">
+            <span class="badge badge-teal">${allBookmarks.length} total</span>
+          </div>
+        </div>
+      `;
+
+      if (allBookmarks.length === 0) {
+        bodyContent += `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.bookmark}</div>
+            <h3>No bookmarks yet</h3>
+            <p>Bookmark pages while reading to save your place and return later.</p>
+          </div>
+        `;
+      } else {
+        bodyContent += `<div id="bookmarks-container">`;
+        for (const bookKey of Object.keys(groupedByBook)) {
+          const group = groupedByBook[bookKey];
+          bodyContent += `
+            <div class="bookmarks-group">
+              <div class="bookmarks-group-header">
+                <h3>${icon('book', 16)} ${escapeHtml(group.bookTitle)}</h3>
+                ${group.bookId ? `<a href="#/book/${group.bookId}" class="btn btn-ghost btn-sm">View book</a>` : ''}
+              </div>
+          `;
+          for (const bookmarkEntry of group.bookmarks) {
+            const createdDate = bookmarkEntry.created_at ? new Date(bookmarkEntry.created_at).toLocaleDateString() : '';
+            const locatorDisplay = bookmarkEntry.chapter || bookmarkEntry.cfi || bookmarkEntry.position || '';
+            bodyContent += `
+              <div class="card bookmark-card" data-navigate-book="${group.bookId || ''}" role="link" tabindex="0">
+                <div class="bookmark-card-content">
+                  <div class="bookmark-card-header">
+                    <span class="bookmark-icon">${Icons.bookmark}</span>
+                    ${locatorDisplay ? `<span class="bookmark-locator">${escapeHtml(String(locatorDisplay))}</span>` : ''}
+                  </div>
+                  ${bookmarkEntry.note ? `<div class="bookmark-note">${escapeHtml(bookmarkEntry.note)}</div>` : ''}
+                  ${createdDate ? `<div class="bookmark-meta">${createdDate}</div>` : ''}
+                </div>
+              </div>
+            `;
+          }
+          bodyContent += `</div>`;
+        }
+        bodyContent += `</div>`;
+      }
+
+      renderShell(bodyContent, 'bookmarks');
+
+      // Bind bookmark cards to navigate to book
+      document.querySelectorAll('[data-navigate-book]').forEach(card => {
+        if (!card.dataset.navigateBook) return;
+        const handler = () => navigateTo(`/book/${card.dataset.navigateBook}`);
+        card.addEventListener('click', handler);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+
+    } catch (err) {
+      renderShell(renderError('Failed to load bookmarks', err.message, () => renderBookmarks()), 'bookmarks');
+    }
+  }
+
+  // ============================================================
   // 5. Genre Browse Page
   // ============================================================
 
@@ -5185,6 +5527,7 @@
   let genreSortField = 'title';
   let genreSortDirection = 'asc';
   let genrePageNumber = 1;
+  let genreActiveTab = 'books';
 
   async function renderGenreDetail(genreName) {
     if (!await checkAuth()) return;
@@ -5225,7 +5568,24 @@
             <span class="badge badge-teal">${books.length}${totalPages > 1 ? '+' : ''} book${books.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
-        ${renderToolbar({
+
+        <div class="tab-bar" role="tablist" aria-label="Genre sections">
+          <button class="tab-btn ${genreActiveTab === 'books' ? 'active' : ''}" role="tab" aria-selected="${genreActiveTab === 'books'}" data-genre-tab="books">
+            ${icon('book', 16)} Books
+          </button>
+          <button class="tab-btn ${genreActiveTab === 'authors' ? 'active' : ''}" role="tab" aria-selected="${genreActiveTab === 'authors'}" data-genre-tab="authors">
+            ${icon('author', 16)} Authors
+          </button>
+          <button class="tab-btn ${genreActiveTab === 'series' ? 'active' : ''}" role="tab" aria-selected="${genreActiveTab === 'series'}" data-genre-tab="series">
+            ${icon('series', 16)} Series
+          </button>
+        </div>
+
+        <div id="genre-tab-content">
+      `;
+
+      if (genreActiveTab === 'books') {
+        bodyContent += renderToolbar({
           searchPlaceholder: 'Search in genre...',
           sortOptions: [
             { value: 'title', label: 'Title' },
@@ -5234,26 +5594,48 @@
           ],
           currentSort: genreSortField,
           currentDirection: genreSortDirection,
-        })}
-      `;
+        });
 
-      if (books.length === 0) {
-        bodyContent += `
-          <div class="empty-state">
-            <div class="empty-state-icon">${Icons.bookOpen}</div>
-            <h3>No books in this genre</h3>
-          </div>
-        `;
-      } else {
-        bodyContent += `<div class="grid grid-books">`;
-        for (const book of books) {
-          bodyContent += renderBookCard(book);
+        if (books.length === 0) {
+          bodyContent += `
+            <div class="empty-state">
+              <div class="empty-state-icon">${Icons.bookOpen}</div>
+              <h3>No books in this genre</h3>
+            </div>
+          `;
+        } else {
+          bodyContent += `<div class="grid grid-books">`;
+          for (const book of books) {
+            bodyContent += renderBookCard(book);
+          }
+          bodyContent += `</div>`;
+          bodyContent += renderPagination(genrePageNumber, totalPages);
         }
-        bodyContent += `</div>`;
-        bodyContent += renderPagination(genrePageNumber, totalPages);
+      } else if (genreActiveTab === 'authors') {
+        bodyContent += `<div id="genre-authors-content"><div style="padding:var(--space-8);text-align:center;color:var(--color-muted)">Loading authors...</div></div>`;
+      } else if (genreActiveTab === 'series') {
+        bodyContent += `<div id="genre-series-content"><div style="padding:var(--space-8);text-align:center;color:var(--color-muted)">Loading series...</div></div>`;
       }
 
+      bodyContent += `</div>`;
+
       renderShell(bodyContent, 'genres');
+
+      // Bind tab buttons
+      document.querySelectorAll('[data-genre-tab]').forEach(tabButton => {
+        tabButton.addEventListener('click', () => {
+          genreActiveTab = tabButton.dataset.genreTab;
+          genrePageNumber = 1;
+          renderGenreDetail(genreName);
+        });
+      });
+
+      // Load authors/series tab content asynchronously
+      if (genreActiveTab === 'authors') {
+        loadGenreAuthors(decodedGenreName);
+      } else if (genreActiveTab === 'series') {
+        loadGenreSeries(decodedGenreName);
+      }
 
       // Bind book cards
       document.querySelectorAll('[data-book-id]').forEach(card => {
@@ -5262,24 +5644,106 @@
         card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
       });
 
-      bindToolbar(document.querySelector('.main-body'), {
-        currentDirection: genreSortDirection,
-        onSearch: () => {}, // Server-side search not yet supported for genres
-        onSort: (field, direction) => {
-          genreSortField = field;
-          genreSortDirection = direction;
-          genrePageNumber = 1;
-          renderGenreDetail(genreName);
-        },
-      });
+      if (genreActiveTab === 'books') {
+        bindToolbar(document.querySelector('.main-body'), {
+          currentDirection: genreSortDirection,
+          onSearch: () => {},
+          onSort: (field, direction) => {
+            genreSortField = field;
+            genreSortDirection = direction;
+            genrePageNumber = 1;
+            renderGenreDetail(genreName);
+          },
+        });
 
-      bindPagination(document.querySelector('.main-body'), (page) => {
-        genrePageNumber = page;
-        renderGenreDetail(genreName);
-      });
+        bindPagination(document.querySelector('.main-body'), (page) => {
+          genrePageNumber = page;
+          renderGenreDetail(genreName);
+        });
+      }
 
     } catch (err) {
       renderShell(renderError('Failed to load genre', err.message, () => renderGenreDetail(genreName)), 'genres');
+    }
+  }
+
+  async function loadGenreAuthors(genreName) {
+    const container = document.getElementById('genre-authors-content');
+    if (!container) return;
+    try {
+      const authorsData = await apiGet(`/genres/${encodeURIComponent(genreName)}/authors`);
+      const authors = Array.isArray(authorsData) ? authorsData : (authorsData?.items || []);
+      if (authors.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.author}</div>
+            <h3>No authors found in this genre</h3>
+          </div>
+        `;
+        return;
+      }
+      container.innerHTML = `<div class="list-group">${authors.map(authorItem => `
+        <div class="list-item" data-author-id="${authorItem.id}" role="link" tabindex="0" aria-label="${escapeHtml(authorItem.name)}">
+          <div class="list-item-content">
+            <div class="list-item-icon">${Icons.author}</div>
+            <div class="list-item-text">
+              <div class="list-item-name">${escapeHtml(authorItem.name)}</div>
+              <div class="list-item-subtitle">${authorItem.book_count || 0} book${(authorItem.book_count || 0) !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <div class="list-item-meta">
+            <span class="nav-icon" style="width:16px;height:16px;color:var(--color-muted)">${Icons.chevronRight}</span>
+          </div>
+        </div>
+      `).join('')}</div>`;
+
+      container.querySelectorAll('[data-author-id]').forEach(item => {
+        const handler = () => navigateTo(`/author/${item.dataset.authorId}`);
+        item.addEventListener('click', handler);
+        item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+    } catch (genreAuthorsError) {
+      container.innerHTML = `<div style="padding:var(--space-6);text-align:center;color:var(--color-danger)">${escapeHtml(genreAuthorsError.message)}</div>`;
+    }
+  }
+
+  async function loadGenreSeries(genreName) {
+    const container = document.getElementById('genre-series-content');
+    if (!container) return;
+    try {
+      const seriesData = await apiGet(`/genres/${encodeURIComponent(genreName)}/series`);
+      const seriesList = Array.isArray(seriesData) ? seriesData : (seriesData?.items || []);
+      if (seriesList.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">${Icons.series}</div>
+            <h3>No series found in this genre</h3>
+          </div>
+        `;
+        return;
+      }
+      container.innerHTML = `<div class="list-group">${seriesList.map(seriesItem => `
+        <div class="list-item" data-series-id="${seriesItem.id}" role="link" tabindex="0" aria-label="${escapeHtml(seriesItem.name)}">
+          <div class="list-item-content">
+            <div class="list-item-icon">${Icons.series}</div>
+            <div class="list-item-text">
+              <div class="list-item-name">${escapeHtml(seriesItem.name)}</div>
+              <div class="list-item-subtitle">${seriesItem.book_count || 0} book${(seriesItem.book_count || 0) !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <div class="list-item-meta">
+            <span class="nav-icon" style="width:16px;height:16px;color:var(--color-muted)">${Icons.chevronRight}</span>
+          </div>
+        </div>
+      `).join('')}</div>`;
+
+      container.querySelectorAll('[data-series-id]').forEach(item => {
+        const handler = () => navigateTo(`/series/${item.dataset.seriesId}`);
+        item.addEventListener('click', handler);
+        item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+      });
+    } catch (genreSeriesError) {
+      container.innerHTML = `<div style="padding:var(--space-6);text-align:center;color:var(--color-danger)">${escapeHtml(genreSeriesError.message)}</div>`;
     }
   }
 
