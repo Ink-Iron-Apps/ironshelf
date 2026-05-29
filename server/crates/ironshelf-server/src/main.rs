@@ -142,6 +142,16 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::patch(routes::users::set_permissions),
         );
 
+    let filesystem_routes = Router::new()
+        .route(
+            "/api/v1/filesystem/browse",
+            get(routes::filesystem::browse_filesystem),
+        )
+        .route(
+            "/api/v1/filesystem/validate",
+            get(routes::filesystem::validate_filesystem_path),
+        );
+
     let library_routes = Router::new()
         .route(
             "/api/v1/libraries",
@@ -357,6 +367,7 @@ async fn main() -> anyhow::Result<()> {
 
     let protected_routes = Router::new()
         .merge(auth_management_routes)
+        .merge(filesystem_routes)
         .merge(library_routes)
         .merge(reading_routes)
         .merge(data_routes)
