@@ -3149,10 +3149,9 @@
             <strong>cloudflared not installed</strong>
           </div>
           <p class="form-hint" style="margin-top:var(--space-2)">
-            Cloudflare Tunnel requires the <code>cloudflared</code> binary.
-            <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noopener" style="color:var(--teal-bright)">Download cloudflared</a>
-            and ensure it is in your system PATH.
+            Cloudflare Tunnel requires <code>cloudflared</code>. Click Start Tunnel below — it will be installed automatically.
           </p>
+          <button class="btn btn-primary mt-4" id="tunnel-start-btn">${icon('download', 16)} Install &amp; Start Tunnel</button>
           ${tunnel.error ? `<p class="remote-access-error" style="margin-top:var(--space-2)">${escapeHtml(tunnel.error)}</p>` : ''}
         </div>
       `;
