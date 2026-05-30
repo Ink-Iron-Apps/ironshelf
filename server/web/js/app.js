@@ -2473,6 +2473,8 @@
         console.warn('Book detail: conversion button failed:', conversionError);
       });
     } catch (err) {
+      console.error('renderBook crash:', err);
+      console.error('renderBook stack:', err?.stack);
       const errorMessage = (err && typeof err.message === 'string') ? err.message : String(err || 'Unknown error');
       renderShell(renderError('Failed to load book', errorMessage, () => renderBook(bookId)), 'libraries');
     }

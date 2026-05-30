@@ -402,8 +402,8 @@ impl CalibreSource {
             // Rating
             let rating = self.fetch_rating(book_id).await?;
 
-            // Custom columns
-            let custom = self.fetch_custom_values(book_id).await?;
+            // Custom columns (non-fatal: use empty map if query fails)
+            let custom = self.fetch_custom_values(book_id).await.unwrap_or_default();
 
             books.push(Book {
                 id: book_id,
