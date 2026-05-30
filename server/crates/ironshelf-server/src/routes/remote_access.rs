@@ -13,8 +13,8 @@ use crate::state::AppState;
 
 /// `GET /api/v1/server/remote-access` — return current UPnP status.
 pub async fn get_remote_access_status(
-    auth_user: AuthUser,
     State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
         return Err(StatusCode::FORBIDDEN);
@@ -42,8 +42,8 @@ pub struct EnableRemoteAccessRequest {
 
 /// `POST /api/v1/server/remote-access/enable` — enable UPnP port forwarding.
 pub async fn enable_remote_access(
-    auth_user: AuthUser,
     State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
     Json(request_body): Json<EnableRemoteAccessRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
@@ -91,8 +91,8 @@ pub async fn enable_remote_access(
 
 /// `POST /api/v1/server/remote-access/disable` — disable UPnP port forwarding.
 pub async fn disable_remote_access(
-    auth_user: AuthUser,
     State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
         return Err(StatusCode::FORBIDDEN);
@@ -115,8 +115,8 @@ pub async fn disable_remote_access(
 
 /// `POST /api/v1/server/remote-access/test` — check if the port mapping is registered.
 pub async fn test_remote_access(
-    auth_user: AuthUser,
     State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
         return Err(StatusCode::FORBIDDEN);

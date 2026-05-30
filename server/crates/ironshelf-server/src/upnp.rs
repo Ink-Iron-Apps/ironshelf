@@ -5,9 +5,10 @@
 //! lease before it expires.
 
 use igd_next::aio::tokio as igd_tokio;
+use igd_next::aio::Gateway as AioGateway;
 use igd_next::{PortMappingProtocol, SearchOptions};
 use serde::Serialize;
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 
 /// How long (in seconds) the UPnP lease is requested for.
 /// We renew well before this expires via the scheduler.
@@ -30,7 +31,7 @@ pub struct UpnpStatus {
 
 /// Manages a single UPnP/IGD port mapping for the Ironshelf server.
 pub struct UpnpManager {
-    gateway: Option<igd_tokio::Gateway>,
+    gateway: Option<AioGateway<igd_tokio::Tokio>>,
     external_port: u16,
     internal_port: u16,
     public_ip: Option<String>,
@@ -109,6 +110,7 @@ impl UpnpManager {
         })?;
 
         let local_socket = SocketAddrV4::new(local_ipv4, self.internal_port);
+        let local_address: SocketAddr = local_socket.into();
 
         // 3. Retrieve the external (public) IP from the gateway.
         let external_ip = gateway
@@ -126,7 +128,7 @@ impl UpnpManager {
             .add_port(
                 PortMappingProtocol::TCP,
                 self.external_port,
-                local_socket,
+                local_address,
                 LEASE_DURATION_SECONDS,
                 PORT_MAPPING_DESCRIPTION,
             )
@@ -232,12 +234,13 @@ impl UpnpManager {
         };
 
         let local_socket = SocketAddrV4::new(local_ipv4, self.internal_port);
+        let local_address: SocketAddr = local_socket.into();
 
         match gateway
             .add_port(
                 PortMappingProtocol::TCP,
                 self.external_port,
-                local_socket,
+                local_address,
                 LEASE_DURATION_SECONDS,
                 PORT_MAPPING_DESCRIPTION,
             )
@@ -285,23 +288,30 @@ impl UpnpManager {
 
     /// Quick check whether the port mapping is still registered on the gateway.
     /// Does NOT verify end-to-end reachability from the internet.
+    ///
+    /// Iterates the gateway's generic port mapping table looking for our TCP
+    /// external port. Returns `true` if found.
     pub async fn test_reachability(&self) -> bool {
         let Some(ref gateway) = self.gateway else {
             return false;
         };
 
-        // Ask the gateway for the specific port mapping. If it exists, the
-        // mapping is at least registered on the router.
-        match gateway
-            .get_specific_port_mapping_entry(
-                PortMappingProtocol::TCP,
-                self.external_port,
-            )
-            .await
-        {
-            Ok(_entry) => true,
-            Err(_) => false,
+        // Walk the gateway's port mapping table. Entries are indexed starting
+        // at 0; the gateway returns an error when the index is out of range.
+        for index in 0..256_u32 {
+            match gateway.get_generic_port_mapping_entry(index).await {
+                Ok(entry) => {
+                    if entry.protocol == PortMappingProtocol::TCP
+                        && entry.external_port == self.external_port
+                    {
+                        return true;
+                    }
+                }
+                Err(_) => break,
+            }
         }
+
+        false
     }
 
     /// Update the external port. The caller should subsequently call
