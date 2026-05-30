@@ -995,7 +995,7 @@
   function renderShell(bodyContent, activePage = '') {
     const app = document.getElementById('app');
 
-    const navItems = [
+    const mainNavItems = [
       { id: 'home', label: 'Home', icon: 'home', path: '/' },
       { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
       { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
@@ -1003,28 +1003,54 @@
       { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
       { id: 'highlights', label: 'Highlights', icon: 'edit', path: '/highlights' },
       { id: 'bookmarks', label: 'Bookmarks', icon: 'bookmark', path: '/bookmarks' },
-      { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
+      { id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' },
     ];
 
-    navItems.push({ id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' });
-
+    const adminNavItems = [];
     if (hasPermission('manage_library')) {
-      navItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
-      navItems.push({ id: 'acquisition', label: 'Acquisition', icon: 'package', path: '/acquisition' });
+      adminNavItems.push({ id: 'stats', label: 'Stats', icon: 'barChart', path: '/stats' });
+      adminNavItems.push({ id: 'acquisition', label: 'Acquisition', icon: 'package', path: '/acquisition' });
     }
-
     if (hasPermission('manage_users')) {
-      navItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
+      adminNavItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
     }
 
-    const navHtml = navItems.map(item => `
+    const navHtml = mainNavItems.map(item => `
       <a href="#${item.path}" class="${activePage === item.id ? 'active' : ''}" aria-current="${activePage === item.id ? 'page' : 'false'}">
         ${icon(item.icon)}
         <span>${item.label}</span>
       </a>
     `).join('');
 
-    const bottomNavHtml = navItems.map(item => `
+    const isAdminActive = adminNavItems.some(item => activePage === item.id);
+    const adminSectionHtml = adminNavItems.length > 0 ? `
+      <div class="sidebar-admin-section">
+        <button class="sidebar-admin-toggle${isAdminActive ? ' open' : ''}" id="sidebar-admin-toggle" aria-expanded="${isAdminActive ? 'true' : 'false'}">
+          ${icon('shield', 16)}
+          <span>Admin</span>
+          <span class="sidebar-admin-chevron">${Icons.chevronDown}</span>
+        </button>
+        <nav class="sidebar-admin-nav${isAdminActive ? ' expanded' : ''}" id="sidebar-admin-nav">
+          ${adminNavItems.map(item => `
+            <a href="#${item.path}" class="${activePage === item.id ? 'active' : ''}" aria-current="${activePage === item.id ? 'page' : 'false'}">
+              ${icon(item.icon)}
+              <span>${item.label}</span>
+            </a>
+          `).join('')}
+        </nav>
+      </div>
+    ` : '';
+
+    // Bottom nav: only essential items for mobile
+    const bottomNavItems = [
+      { id: 'home', label: 'Home', icon: 'home', path: '/' },
+      { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
+      { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
+      { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
+      { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
+    ];
+
+    const bottomNavHtml = bottomNavItems.map(item => `
       <a href="#${item.path}" class="${activePage === item.id ? 'active' : ''}" aria-label="${item.label}">
         <span class="nav-icon">${Icons[item.icon]}</span>
         <span>${item.label}</span>
@@ -1058,8 +1084,7 @@
             <span>Search...</span>
             <span class="search-slash-hint">/</span>
           </button>
-          <div class="sidebar-section-label">Navigation</div>
-          <nav class="sidebar-nav">
+          <nav class="sidebar-nav" id="sidebar-main-nav">
             ${navHtml}
           </nav>
           ${(() => {
@@ -1078,8 +1103,13 @@
               </nav>
             `;
           })()}
-          <div class="sidebar-footer">
-            <div class="user-info">
+          ${adminSectionHtml}
+          <div class="sidebar-spacer"></div>
+          <div class="sidebar-bottom">
+            <a href="#/settings" class="sidebar-settings-btn${activePage === 'settings' ? ' active' : ''}" aria-label="Settings" title="Settings">
+              <span class="nav-icon">${Icons.settings}</span>
+            </a>
+            <div class="sidebar-bottom-user">
               <div class="user-avatar" aria-hidden="true">${userInitial}</div>
               <span class="user-name">${currentUser ? escapeHtml(currentUser.username) : ''}</span>
             </div>
@@ -1122,6 +1152,17 @@
     document.getElementById('notification-bell')?.addEventListener('click', (e) => {
       e.stopPropagation();
       openNotificationPanel();
+    });
+
+    // Admin section toggle
+    document.getElementById('sidebar-admin-toggle')?.addEventListener('click', () => {
+      const adminNav = document.getElementById('sidebar-admin-nav');
+      const adminToggle = document.getElementById('sidebar-admin-toggle');
+      if (adminNav && adminToggle) {
+        const isExpanded = adminNav.classList.toggle('expanded');
+        adminToggle.classList.toggle('open', isExpanded);
+        adminToggle.setAttribute('aria-expanded', String(isExpanded));
+      }
     });
 
     // Update notification badge on shell render
@@ -2338,61 +2379,71 @@
 
       renderShell(bodyContent, 'libraries');
 
-      // Cover zoom
-      const coverTrigger = document.getElementById('cover-zoom-trigger');
-      if (coverTrigger && coverUrl) {
-        const openZoom = () => {
-          const overlay = document.createElement('div');
-          overlay.className = 'cover-zoom-overlay';
-          overlay.setAttribute('role', 'dialog');
-          overlay.setAttribute('aria-label', 'Enlarged cover image');
-          overlay.innerHTML = `<img src="${coverUrl}" alt="Cover of ${escapeHtml(book.title)}">`;
-          document.body.appendChild(overlay);
+      // Post-render event bindings — wrapped in try-catch so one failed
+      // binding does not kill the entire page render.
+      try {
+        // Cover zoom
+        const coverTrigger = document.getElementById('cover-zoom-trigger');
+        if (coverTrigger && coverUrl) {
+          const openZoom = () => {
+            const overlay = document.createElement('div');
+            overlay.className = 'cover-zoom-overlay';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-label', 'Enlarged cover image');
+            overlay.innerHTML = `<img src="${coverUrl}" alt="Cover of ${escapeHtml(book.title)}">`;
+            document.body.appendChild(overlay);
 
-          const closeZoom = () => overlay.remove();
-          overlay.addEventListener('click', closeZoom);
-          document.addEventListener('keydown', function escHandler(e) {
-            if (e.key === 'Escape') { closeZoom(); document.removeEventListener('keydown', escHandler); }
+            const closeZoom = () => overlay.remove();
+            overlay.addEventListener('click', closeZoom);
+            document.addEventListener('keydown', function escHandler(e) {
+              if (e.key === 'Escape') { closeZoom(); document.removeEventListener('keydown', escHandler); }
+            });
+          };
+          coverTrigger.addEventListener('click', openZoom);
+          coverTrigger.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(); } });
+        }
+
+        // Bind add-to-collection
+        bindAddToCollectionButton(bookId);
+
+        // Bind add-to-queue
+        document.getElementById('add-to-queue-btn')?.addEventListener('click', async () => {
+          const queueBtn = document.getElementById('add-to-queue-btn');
+          if (queueBtn) queueBtn.disabled = true;
+          try {
+            await apiPost('/me/queue', { book_id: bookId });
+            toast('Added to reading queue', 'success');
+            if (queueBtn) queueBtn.innerHTML = `${icon('check', 16)} In Queue`;
+          } catch (queueError) {
+            toast(queueError.message, 'error');
+            if (queueBtn) queueBtn.disabled = false;
+          }
+        });
+
+        // Bind enrich metadata
+        document.getElementById('enrich-metadata-btn')?.addEventListener('click', () => showMetadataSearchModal(bookId));
+
+        // Bind find-more-by-author
+        const findMoreAuthorBtn = document.getElementById('find-more-author-btn');
+        if (findMoreAuthorBtn && book.author_names && book.author_names.length > 0) {
+          findMoreAuthorBtn.addEventListener('click', () => {
+            const authorName = book.author_names[0];
+            navigateTo(`/acquisition/search?author=${encodeURIComponent(authorName)}`);
           });
-        };
-        coverTrigger.addEventListener('click', openZoom);
-        coverTrigger.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(); } });
+        }
+      } catch (bindingError) {
+        console.warn('Book detail: non-critical binding failed:', bindingError);
       }
 
-      // Bind add-to-collection
-      bindAddToCollectionButton(bookId);
-
-      // Bind add-to-queue
-      document.getElementById('add-to-queue-btn')?.addEventListener('click', async () => {
-        const queueBtn = document.getElementById('add-to-queue-btn');
-        queueBtn.disabled = true;
-        try {
-          await apiPost('/me/queue', { book_id: bookId });
-          toast('Added to reading queue', 'success');
-          queueBtn.innerHTML = `${icon('check', 16)} In Queue`;
-        } catch (err) {
-          toast(err.message, 'error');
-          queueBtn.disabled = false;
-        }
+      // Render ratings & reviews below description (async, independent)
+      renderBookRatingsAndReviews(bookId, '.book-detail-info').catch(ratingsError => {
+        console.warn('Book detail: ratings/reviews failed:', ratingsError);
       });
 
-      // Bind enrich metadata
-      document.getElementById('enrich-metadata-btn')?.addEventListener('click', () => showMetadataSearchModal(bookId));
-
-      // Bind find-more-by-author
-      const findMoreAuthorBtn = document.getElementById('find-more-author-btn');
-      if (findMoreAuthorBtn && book.author_names && book.author_names.length > 0) {
-        findMoreAuthorBtn.addEventListener('click', () => {
-          const authorName = book.author_names[0];
-          navigateTo(`/acquisition/search?author=${encodeURIComponent(authorName)}`);
-        });
-      }
-
-      // Render ratings & reviews below description
-      renderBookRatingsAndReviews(bookId, '.book-detail-info');
-
-      // Render conversion button if converters available
-      renderConversionButton(bookId, '#convert-btn-container');
+      // Render conversion button if converters available (async, independent)
+      renderConversionButton(bookId, '#convert-btn-container').catch(conversionError => {
+        console.warn('Book detail: conversion button failed:', conversionError);
+      });
     } catch (err) {
       const errorMessage = (err && typeof err.message === 'string') ? err.message : String(err || 'Unknown error');
       renderShell(renderError('Failed to load book', errorMessage, () => renderBook(bookId)), 'libraries');
@@ -2424,6 +2475,18 @@
           <div class="update-card" id="update-card">
             <div class="update-actions">
               <button class="btn btn-primary" id="check-update-btn">${icon('refresh', 16)} Check for Updates</button>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" id="remote-access-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Remote Access</h3>
+          <p class="description">Automatically forward a port on your router via UPnP so this server is reachable from outside your local network.</p>
+          <div class="card remote-access-card" id="remote-access-card">
+            <div class="remote-access-loading">
+              <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
             </div>
           </div>
         </div>
@@ -2817,6 +2880,11 @@
       // Server update check (owner only)
       bindServerUpdateEvents();
 
+      // Remote access (owner only)
+      if (currentUser?.is_owner) {
+        loadRemoteAccessCard();
+      }
+
       // Cloud settings (owner only)
       if (currentUser?.is_owner) {
         loadCloudSettingsCard();
@@ -2903,6 +2971,228 @@
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
     }
+  }
+
+  // ---- Remote Access Card ----
+
+  let remoteAccessPollingInterval = null;
+
+  async function loadRemoteAccessCard() {
+    const cardContainer = document.getElementById('remote-access-card');
+    if (!cardContainer) return;
+
+    // Stop any previous polling interval.
+    if (remoteAccessPollingInterval) {
+      clearInterval(remoteAccessPollingInterval);
+      remoteAccessPollingInterval = null;
+    }
+
+    try {
+      const status = await apiGet('/server/remote-access');
+
+      if (status.enabled && status.active) {
+        // Active — show green status with public URL.
+        cardContainer.innerHTML = `
+          <div class="remote-access-status">
+            <div class="remote-access-status-header">
+              <span class="remote-access-indicator remote-access-connected"></span>
+              <strong>Connected</strong>
+            </div>
+            <dl class="remote-access-details">
+              <dt>Public URL</dt>
+              <dd>
+                <div class="device-url-row" style="margin:0">
+                  <code class="device-url" id="remote-access-public-url">${escapeHtml(status.public_url)}</code>
+                  <button class="btn btn-ghost btn-sm copy-remote-url" aria-label="Copy public URL">${icon('copy', 14)}</button>
+                </div>
+              </dd>
+              <dt>Public IP</dt>
+              <dd><code>${escapeHtml(status.public_ip || 'unknown')}</code></dd>
+              <dt>External Port</dt>
+              <dd>${status.external_port}</dd>
+              <dt>Internal Port</dt>
+              <dd>${status.internal_port}</dd>
+            </dl>
+            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+              <button class="btn btn-secondary btn-sm" id="remote-access-test-btn">${icon('check', 14)} Test Reachability</button>
+              <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
+            </div>
+            <div class="remote-access-port-change" style="margin-top:var(--space-4)">
+              <label class="form-label" for="remote-access-port-input">External Port</label>
+              <div style="display:flex;gap:var(--space-2);align-items:center">
+                <input type="number" class="form-input" id="remote-access-port-input" value="${status.external_port}" min="1" max="65535" style="width:120px">
+                <button class="btn btn-secondary btn-sm" id="remote-access-apply-port-btn">Apply</button>
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (status.enabled && !status.active) {
+        // Enabled but not active — show yellow/warning.
+        cardContainer.innerHTML = `
+          <div class="remote-access-status">
+            <div class="remote-access-status-header">
+              <span class="remote-access-indicator remote-access-connecting"></span>
+              <strong>Not reachable</strong>
+            </div>
+            ${status.error ? `<p class="remote-access-error">${escapeHtml(status.error)}</p>` : ''}
+            <p class="form-hint" style="margin-top:var(--space-2)">You can manually forward port ${status.external_port} on your router if UPnP is not supported.</p>
+            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3)">
+              <button class="btn btn-primary btn-sm" id="remote-access-retry-btn">${icon('refresh', 14)} Retry</button>
+              <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
+            </div>
+          </div>
+        `;
+      } else {
+        // Disabled — show toggle to enable.
+        cardContainer.innerHTML = `
+          <div class="remote-access-status">
+            <div class="remote-access-status-header">
+              <span class="remote-access-indicator remote-access-disconnected"></span>
+              <strong>Disabled</strong>
+            </div>
+            <p class="form-hint" style="margin-top:var(--space-2)">Enable UPnP port forwarding to make this server reachable from outside your local network.</p>
+            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+              <button class="btn btn-primary btn-sm" id="remote-access-enable-btn">${icon('globe', 14)} Enable Remote Access</button>
+              <div style="display:flex;gap:var(--space-2);align-items:center">
+                <label class="form-label" for="remote-access-port-input-disabled" style="margin:0;white-space:nowrap">External Port:</label>
+                <input type="number" class="form-input" id="remote-access-port-input-disabled" value="${status.external_port}" min="1" max="65535" style="width:120px">
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Bind event handlers.
+      bindRemoteAccessEvents(status);
+
+      // Start polling every 10 seconds while the card is visible.
+      remoteAccessPollingInterval = setInterval(async () => {
+        if (!document.getElementById('remote-access-card')) {
+          clearInterval(remoteAccessPollingInterval);
+          remoteAccessPollingInterval = null;
+          return;
+        }
+        try {
+          const refreshedStatus = await apiGet('/server/remote-access');
+          // Only re-render if state actually changed.
+          const currentIndicator = document.querySelector('.remote-access-indicator');
+          const wasActive = currentIndicator?.classList.contains('remote-access-connected');
+          const wasConnecting = currentIndicator?.classList.contains('remote-access-connecting');
+          const isNowActive = refreshedStatus.enabled && refreshedStatus.active;
+          const isNowConnecting = refreshedStatus.enabled && !refreshedStatus.active;
+          if ((isNowActive && !wasActive) || (isNowConnecting && !wasConnecting) || (!refreshedStatus.enabled && (wasActive || wasConnecting))) {
+            loadRemoteAccessCard();
+          }
+        } catch (_) {
+          // Silently ignore polling errors.
+        }
+      }, 10000);
+
+    } catch (loadError) {
+      cardContainer.innerHTML = `
+        <div class="remote-access-status">
+          <p class="remote-access-error">Failed to load remote access status: ${escapeHtml(loadError.message)}</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:var(--space-3)" onclick="loadRemoteAccessCard()">Retry</button>
+        </div>
+      `;
+    }
+  }
+
+  function bindRemoteAccessEvents(status) {
+    // Enable button (when disabled).
+    document.getElementById('remote-access-enable-btn')?.addEventListener('click', async () => {
+      const portInput = document.getElementById('remote-access-port-input-disabled');
+      const externalPort = portInput ? parseInt(portInput.value, 10) : status.external_port;
+      const enableButton = document.getElementById('remote-access-enable-btn');
+      enableButton.disabled = true;
+      enableButton.textContent = 'Enabling...';
+      try {
+        await apiPost('/server/remote-access/enable', { external_port: externalPort });
+        toast('Remote access enabled', 'success');
+        loadRemoteAccessCard();
+      } catch (enableError) {
+        toast(enableError.message || 'Failed to enable remote access', 'error');
+        loadRemoteAccessCard();
+      }
+    });
+
+    // Disable button.
+    document.getElementById('remote-access-disable-btn')?.addEventListener('click', async () => {
+      try {
+        await apiPost('/server/remote-access/disable', {});
+        toast('Remote access disabled', 'success');
+        loadRemoteAccessCard();
+      } catch (disableError) {
+        toast(disableError.message || 'Failed to disable remote access', 'error');
+      }
+    });
+
+    // Retry button (when enabled but not active).
+    document.getElementById('remote-access-retry-btn')?.addEventListener('click', async () => {
+      const retryButton = document.getElementById('remote-access-retry-btn');
+      retryButton.disabled = true;
+      retryButton.textContent = 'Retrying...';
+      try {
+        await apiPost('/server/remote-access/enable', { external_port: status.external_port });
+        toast('Remote access re-established', 'success');
+        loadRemoteAccessCard();
+      } catch (retryError) {
+        toast(retryError.message || 'Retry failed', 'error');
+        loadRemoteAccessCard();
+      }
+    });
+
+    // Test reachability button.
+    document.getElementById('remote-access-test-btn')?.addEventListener('click', async () => {
+      const testButton = document.getElementById('remote-access-test-btn');
+      testButton.disabled = true;
+      testButton.textContent = 'Testing...';
+      try {
+        const testResult = await apiPost('/server/remote-access/test', {});
+        if (testResult.reachable) {
+          toast('Port mapping is registered on your router', 'success');
+        } else {
+          toast('Port mapping not found on router. It may have expired or been removed.', 'warning');
+        }
+      } catch (testError) {
+        toast(testError.message || 'Reachability test failed', 'error');
+      }
+      testButton.disabled = false;
+      testButton.innerHTML = `${icon('check', 14)} Test Reachability`;
+    });
+
+    // Apply new external port.
+    document.getElementById('remote-access-apply-port-btn')?.addEventListener('click', async () => {
+      const portInput = document.getElementById('remote-access-port-input');
+      const newPort = parseInt(portInput.value, 10);
+      if (isNaN(newPort) || newPort < 1 || newPort > 65535) {
+        toast('Invalid port number (1-65535)', 'warning');
+        return;
+      }
+      const applyButton = document.getElementById('remote-access-apply-port-btn');
+      applyButton.disabled = true;
+      applyButton.textContent = 'Applying...';
+      try {
+        await apiPost('/server/remote-access/disable', {});
+        await apiPost('/server/remote-access/enable', { external_port: newPort });
+        toast(`Port changed to ${newPort}`, 'success');
+        loadRemoteAccessCard();
+      } catch (portChangeError) {
+        toast(portChangeError.message || 'Failed to change port', 'error');
+        loadRemoteAccessCard();
+      }
+    });
+
+    // Copy public URL button.
+    document.querySelector('.copy-remote-url')?.addEventListener('click', () => {
+      const urlElement = document.getElementById('remote-access-public-url');
+      if (!urlElement) return;
+      navigator.clipboard.writeText(urlElement.textContent.trim()).then(() => {
+        toast('Public URL copied to clipboard', 'success');
+      }).catch(() => {
+        toast('Failed to copy — select and copy manually', 'warning');
+      });
+    });
   }
 
   async function loadCloudSettingsCard() {

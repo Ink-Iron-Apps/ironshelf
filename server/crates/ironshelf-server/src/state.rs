@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::config::Config;
 use crate::routes::oidc::OidcStateStore;
 use crate::routes::update::SharedUpdateStatus;
+use crate::upnp::UpnpManager;
 
 /// Polymorphic library source.
 #[derive(Clone)]
@@ -192,4 +193,6 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Shared update status for the self-update feature (tracks download/restart progress).
     pub update_status: SharedUpdateStatus,
+    /// UPnP port forwarding manager for automatic remote access.
+    pub upnp_manager: Arc<RwLock<UpnpManager>>,
 }
