@@ -259,6 +259,23 @@ if (-not $Asset) {
 $DownloadUrl = $Asset.browser_download_url
 Write-Info "Download URL: $DownloadUrl"
 
+# --- Stop existing Ironshelf if running (must release file lock before overwriting) ---
+
+$ExistingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+if ($ExistingTask -and $ExistingTask.State -eq 'Running') {
+    Write-Info "Stopping running Ironshelf server..."
+    Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+}
+
+# Also stop any legacy Windows Service
+$ExistingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($ExistingService -and $ExistingService.Status -eq 'Running') {
+    Write-Info "Stopping legacy service..."
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
 # --- Download binary ---
 
 Write-Info "Creating install directory: $InstallDir"
