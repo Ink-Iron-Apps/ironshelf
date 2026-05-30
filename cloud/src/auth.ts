@@ -12,7 +12,7 @@ import type { Env, JwtPayload, CloudUser } from './types';
 // Password hashing (PBKDF2-SHA256)
 // ---------------------------------------------------------------------------
 
-const PBKDF2_ITERATIONS = 310_000; // OWASP 2023 recommendation for SHA-256
+const PBKDF2_ITERATIONS = 100_000; // Cloudflare Workers cap (max 100k)
 const SALT_BYTES = 32;
 const KEY_BYTES = 32;
 
