@@ -34,6 +34,8 @@ pub enum UpdatePhase {
     Downloading,
     Replacing,
     Restarting,
+    /// Windows only: binary downloaded, manual restart required.
+    ManualRestartRequired,
     Failed,
 }
 
@@ -345,7 +347,24 @@ async fn perform_update(
 
     replace_binary(&current_executable, &binary_bytes).await?;
 
-    // Phase: Restarting
+    // On Windows, the running binary cannot be reliably replaced or restarted
+    // in-process. Instead, we leave the new binary staged and tell the user
+    // to restart manually. The service manager (NSSM / Task Scheduler) will
+    // pick up the new binary on next start.
+    if cfg!(windows) {
+        let mut status = update_status.write().await;
+        status.phase = UpdatePhase::ManualRestartRequired;
+        status.message = format!(
+            "Update to v{target_version} downloaded successfully. \
+             Please restart the Ironshelf service to apply the update."
+        );
+        tracing::info!(
+            "update v{target_version} staged on Windows — manual restart required"
+        );
+        return Ok(());
+    }
+
+    // Phase: Restarting (Unix only — service manager restarts with new binary)
     {
         let mut status = update_status.write().await;
         status.phase = UpdatePhase::Restarting;
@@ -395,7 +414,9 @@ async fn download_with_progress(
 /// Replace the current binary with the new one.
 ///
 /// - **Unix**: Write to a temp file, then `rename()` over the current binary (atomic on same FS).
-/// - **Windows**: Rename current to `.old`, write new binary, then it takes effect on next start.
+/// - **Windows**: Stage the new binary as `<name>.new.exe` next to the running executable.
+///   The caller is responsible for signaling the user to restart; the service manager or
+///   a startup script should swap `<name>.new.exe` -> `<name>.exe` on next launch.
 async fn replace_binary(
     current_executable: &PathBuf,
     new_binary: &[u8],
@@ -424,23 +445,29 @@ async fn replace_binary(
     }
 
     if cfg!(windows) {
-        // Windows: cannot replace a running executable. Rename current to .old first.
-        let old_path = parent_directory.join("ironshelf-server.old.exe");
+        // Windows: cannot replace a running executable due to file locking.
+        // Stage the new binary next to the current one. On next service restart
+        // the launcher / batch script / user can swap the files.
+        let staged_path = parent_directory.join(
+            current_executable
+                .file_stem()
+                .map(|stem| format!("{}.new.exe", stem.to_string_lossy()))
+                .unwrap_or_else(|| "ironshelf-server.new.exe".to_string()),
+        );
 
-        // Remove any previous .old file.
-        let _ = tokio::fs::remove_file(&old_path).await;
+        // Remove any previous staged binary.
+        let _ = tokio::fs::remove_file(&staged_path).await;
 
-        tokio::fs::rename(current_executable, &old_path)
+        tokio::fs::rename(&temp_path, &staged_path)
             .await
             .map_err(|io_error| {
-                anyhow::anyhow!("Failed to rename current binary to .old: {io_error}")
+                anyhow::anyhow!("Failed to stage new binary at {}: {io_error}", staged_path.display())
             })?;
 
-        tokio::fs::rename(&temp_path, current_executable)
-            .await
-            .map_err(|io_error| {
-                anyhow::anyhow!("Failed to rename new binary into place: {io_error}")
-            })?;
+        tracing::info!(
+            "new binary staged at {} — swap on next restart",
+            staged_path.display()
+        );
     } else {
         // Unix: atomic rename replaces the inode. The running process keeps the old binary
         // in memory via its file descriptor until it exits.

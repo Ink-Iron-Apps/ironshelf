@@ -18,6 +18,9 @@
   let scanPollTimer = null;
   let conversionPollTimer = null;
 
+  // --- Server Version (fetched once from /health) ---
+  let cachedServerVersion = null;
+
   // --- Navigation Generation Counter (race condition guard) ---
   // Incremented on every route change. Async render functions capture it
   // before awaiting and bail out if it changed (user navigated elsewhere).
@@ -246,6 +249,30 @@
   function apiPut(path, body) { return api(path, { method: 'PUT', body: JSON.stringify(body) }); }
   function apiPatch(path, body) { return api(path, { method: 'PATCH', body: JSON.stringify(body) }); }
   function apiDelete(path) { return api(path, { method: 'DELETE' }); }
+
+  // --- Server Version ---
+
+  async function fetchServerVersion() {
+    if (cachedServerVersion) return cachedServerVersion;
+    try {
+      const healthResponse = await fetch('/health');
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        cachedServerVersion = healthData.version || null;
+        updateSidebarVersion();
+      }
+    } catch {
+      // Silently ignore — version display is non-critical.
+    }
+    return cachedServerVersion;
+  }
+
+  function updateSidebarVersion() {
+    const versionElement = document.getElementById('sidebar-version');
+    if (versionElement && cachedServerVersion) {
+      versionElement.textContent = `v${cachedServerVersion}`;
+    }
+  }
 
   // --- Toast System ---
 
@@ -1109,6 +1136,7 @@
             <a href="#/settings" class="sidebar-settings-btn${activePage === 'settings' ? ' active' : ''}" aria-label="Settings" title="Settings">
               <span class="nav-icon">${Icons.settings}</span>
             </a>
+            <span class="sidebar-version-label" id="sidebar-version">${cachedServerVersion ? `v${cachedServerVersion}` : ''}</span>
             <div class="sidebar-bottom-user">
               <div class="user-avatar" aria-hidden="true">${userInitial}</div>
               <span class="user-name">${currentUser ? escapeHtml(currentUser.username) : ''}</span>
@@ -2701,9 +2729,23 @@
             </dl>
           </div>
         </div>
+
+        <div class="settings-version-footer" id="settings-version-footer">
+          <span class="settings-version-text">${cachedServerVersion ? `Ironshelf v${cachedServerVersion}` : 'Ironshelf'}</span>
+        </div>
       `;
 
       renderShell(bodyContent, 'settings');
+
+      // If version was not yet fetched, populate it now
+      if (!cachedServerVersion) {
+        fetchServerVersion().then(() => {
+          const versionFooter = document.getElementById('settings-version-footer');
+          if (versionFooter && cachedServerVersion) {
+            versionFooter.querySelector('.settings-version-text').textContent = `Ironshelf v${cachedServerVersion}`;
+          }
+        });
+      }
 
       // Bind events
       document.getElementById('create-api-key-btn')?.addEventListener('click', () => {
@@ -3571,7 +3613,7 @@
     let updatePollTimer = null;
     let serverDownDetected = false;
     let reconnectAttempts = 0;
-    const maxReconnectAttempts = 60; // 2 minutes at 2-second intervals
+    const maxReconnectAttempts = 15; // 30 seconds at 2-second intervals
 
     updatePollTimer = setInterval(async () => {
       try {
@@ -3581,9 +3623,22 @@
           if (reconnectAttempts > maxReconnectAttempts) {
             clearInterval(updatePollTimer);
             updateCard.innerHTML = `
-              <div style="display:flex;align-items:center;gap:var(--space-3);color:var(--color-warning);font-size:var(--text-sm)">
+              <div class="update-progress">
+                <div class="update-progress-step is-complete">
+                  <span class="update-success-icon">${Icons.check}</span>
+                  <span>Downloaded</span>
+                </div>
+                <div class="update-progress-step is-complete">
+                  <span class="update-success-icon">${Icons.check}</span>
+                  <span>Binary replaced</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:flex-start;gap:var(--space-3);color:var(--color-warning);font-size:var(--text-sm);margin-top:var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.2)">
                 ${icon('alertCircle', 18)}
-                <span>Server has not come back online after 2 minutes. It may need manual restart.</span>
+                <div>
+                  <strong>Server is updating.</strong> Please refresh this page manually once the server restarts.
+                  <br><span style="opacity:0.7;font-size:var(--text-xs)">If the server does not come back, it may need to be restarted manually from the command line.</span>
+                </div>
               </div>
             `;
             return;
@@ -3668,6 +3723,39 @@
               restartStep.innerHTML = `<span class="update-spinner"></span><span>Restarting server...</span>`;
             }
             serverDownDetected = true;
+            break;
+
+          case 'manual_restart_required':
+            clearInterval(updatePollTimer);
+            if (downloadStep) {
+              downloadStep.className = 'update-progress-step is-complete';
+              downloadStep.innerHTML = `<span class="update-success-icon">${Icons.check}</span><span>Downloaded</span>`;
+            }
+            if (downloadBar) downloadBar.style.width = '100%';
+            if (replaceStep) {
+              replaceStep.className = 'update-progress-step is-complete';
+              replaceStep.innerHTML = `<span class="update-success-icon">${Icons.check}</span><span>Binary staged</span>`;
+            }
+            updateCard.innerHTML = `
+              <div class="update-progress">
+                <div class="update-progress-step is-complete">
+                  <span class="update-success-icon">${Icons.check}</span>
+                  <span>Downloaded v${escapeHtml(targetVersion)}</span>
+                </div>
+                <div class="update-progress-step is-complete">
+                  <span class="update-success-icon">${Icons.check}</span>
+                  <span>Binary staged</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:flex-start;gap:var(--space-3);font-size:var(--text-sm);margin-top:var(--space-4);padding:var(--space-3) var(--space-4);border-radius:var(--radius);background:rgba(59,179,201,0.08);border:1px solid rgba(59,179,201,0.2);color:var(--color-text-secondary)">
+                ${icon('info', 18)}
+                <div>
+                  <strong style="color:var(--color-text)">Update downloaded. Please restart the server to apply.</strong>
+                  <br>Restart the Ironshelf service or re-run the server executable, then refresh this page.
+                </div>
+              </div>
+            `;
+            toast('Update downloaded — restart the server to apply', 'success');
             break;
 
           case 'failed':
@@ -8383,6 +8471,7 @@
 
     if (await checkAuth()) {
       startNotificationPolling();
+      fetchServerVersion();
       toast('Signed in via Ironshelf Cloud', 'success');
       navigateTo('/');
     } else {
@@ -8397,6 +8486,7 @@
   window.addEventListener('DOMContentLoaded', async () => {
     if (await checkAuth()) {
       startNotificationPolling();
+      fetchServerVersion(); // fire-and-forget; populates sidebar + settings
       if (!getHashPath() || getHashPath() === '/login') {
         navigateTo('/');
       } else {

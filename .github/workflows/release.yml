@@ -219,9 +219,19 @@ jobs:
           LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
           if [ -z "$LAST_TAG" ]; then
-            COMMITS=$(git log --oneline --format="%s")
+            COMMITS=$(git log --no-merges --oneline --format="%s")
           else
-            COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="%s")
+            COMMITS=$(git log --no-merges "${LAST_TAG}..HEAD" --oneline --format="%s")
+          fi
+
+          # If --no-merges produced nothing (e.g. squash-merge workflow),
+          # fall back to parsing PR titles from merge commits.
+          if [ -z "$COMMITS" ]; then
+            if [ -z "$LAST_TAG" ]; then
+              COMMITS=$(git log --oneline --format="%s" | sed -n 's/^Merge pull request.*from [^/]*\///p; s/^.*(\(#[0-9]*\))$/\1/; t')
+            else
+              COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="%b%s" | grep -iE "^(feat|fix|refactor|perf|docs)" || true)
+            fi
           fi
 
           # Build release notes from conventional commits
@@ -230,7 +240,8 @@ jobs:
           OTHER=""
 
           while IFS= read -r line; do
-            # Skip merge commits and CI commits
+            # Skip empty lines, merge commits, and CI commits
+            [ -z "$line" ] && continue
             [[ "$line" =~ ^(Merge|Auto-merge|chore:\ bump) ]] && continue
 
             if [[ "$line" =~ ^feat ]]; then
