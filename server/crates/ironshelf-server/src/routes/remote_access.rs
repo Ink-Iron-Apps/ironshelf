@@ -13,6 +13,11 @@ use crate::state::AppState;
 use crate::tunnel::TunnelManager;
 
 /// Auto-install cloudflared for the current platform.
+/// Public so cloud_auth can call it during auto-tunnel-on-claim.
+pub async fn install_cloudflared_public() -> Result<(), String> {
+    install_cloudflared().await
+}
+
 async fn install_cloudflared() -> Result<(), String> {
     let result = if cfg!(windows) {
         // Try winget first, fall back to direct download
