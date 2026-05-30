@@ -15,13 +15,13 @@ use axum::middleware::Next;
 /// - `style-src` — allow self + inline (needed for many UI frameworks) + Google Fonts CSS.
 /// - `font-src` — Google Fonts static files.
 /// - `img-src` — self + data URIs (inline covers) + blob URIs (canvas exports).
-/// - `connect-src` — self only (API calls from web UI).
+/// - `connect-src` — self + cloud API + external metadata APIs.
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
     script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; \
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
     font-src https://fonts.gstatic.com; \
-    img-src 'self' data: blob:; \
-    connect-src 'self'";
+    img-src 'self' data: blob: https:; \
+    connect-src 'self' https://*.workers.dev https://*.trycloudflare.com";
 
 /// Middleware that appends security headers to every response.
 pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Body> {
