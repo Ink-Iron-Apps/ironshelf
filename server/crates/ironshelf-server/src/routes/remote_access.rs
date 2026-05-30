@@ -12,6 +12,58 @@ use crate::auth::AuthUser;
 use crate::state::AppState;
 use crate::tunnel::TunnelManager;
 
+/// Auto-install cloudflared for the current platform.
+async fn install_cloudflared() -> Result<(), String> {
+    let result = if cfg!(windows) {
+        // Try winget first, fall back to direct download
+        let winget_result = tokio::process::Command::new("winget")
+            .args(["install", "--id", "Cloudflare.cloudflared", "--accept-source-agreements", "--accept-package-agreements", "--silent"])
+            .output()
+            .await;
+
+        match winget_result {
+            Ok(output) if output.status.success() => Ok(()),
+            _ => {
+                // Fallback: direct download
+                let url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
+                let download_path = std::path::PathBuf::from(std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string()))
+                    .join("Ironshelf")
+                    .join("cloudflared.exe");
+
+                let response = reqwest::get(url).await.map_err(|e| format!("Download failed: {e}"))?;
+                let bytes = response.bytes().await.map_err(|e| format!("Download failed: {e}"))?;
+                tokio::fs::write(&download_path, &bytes).await.map_err(|e| format!("Write failed: {e}"))?;
+                Ok(())
+            }
+        }
+    } else if cfg!(target_os = "macos") {
+        let output = tokio::process::Command::new("brew")
+            .args(["install", "cloudflared"])
+            .output()
+            .await
+            .map_err(|e| format!("brew install failed: {e}"))?;
+        if output.status.success() { Ok(()) } else {
+            Err(String::from_utf8_lossy(&output.stderr).to_string())
+        }
+    } else {
+        // Linux: download binary directly
+        let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
+        let url = format!("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}");
+        let response = reqwest::get(&url).await.map_err(|e| format!("Download failed: {e}"))?;
+        let bytes = response.bytes().await.map_err(|e| format!("Download failed: {e}"))?;
+        tokio::fs::write("/usr/local/bin/cloudflared", &bytes).await.map_err(|e| format!("Write failed: {e}"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions("/usr/local/bin/cloudflared", std::fs::Permissions::from_mode(0o755));
+        }
+        Ok(())
+    };
+
+    result.map_err(|e| format!("Installation failed: {e}"))
+}
+
 /// `GET /api/v1/server/remote-access` — return combined status for UPnP and tunnel.
 pub async fn get_remote_access_status(
     State(application_state): State<AppState>,
@@ -180,6 +232,18 @@ pub async fn start_tunnel(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
         return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Auto-install cloudflared if not available
+    if !TunnelManager::is_cloudflared_available().await {
+        tracing::info!("cloudflared not found, attempting auto-install...");
+        if let Err(install_error) = install_cloudflared().await {
+            return Ok(Json(json!({
+                "active": false,
+                "public_url": null,
+                "error": format!("Failed to install cloudflared: {install_error}"),
+            })));
+        }
     }
 
     let mut tunnel_manager = application_state.tunnel_manager.write().await;
