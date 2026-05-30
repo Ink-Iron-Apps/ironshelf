@@ -542,6 +542,17 @@ a:hover {
   height: 18px;
 }
 
+.sidebar-version-label {
+  font-size: 11px;
+  color: var(--color-muted);
+  opacity: 0.6;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  letter-spacing: 0.01em;
+}
+
 /* --- Main Content --- */
 .main-content {
   flex: 1;
@@ -1912,6 +1923,20 @@ tbody td {
   word-break: break-all;
   color: var(--color-teal-bright);
   margin: var(--space-4) 0;
+}
+
+/* --- Settings Version Footer --- */
+.settings-version-footer {
+  text-align: center;
+  padding: var(--space-8) 0 var(--space-4);
+}
+
+.settings-version-text {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  opacity: 0.5;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  letter-spacing: 0.02em;
 }
 
 /* --- Server Update --- */

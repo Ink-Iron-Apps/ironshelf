@@ -34,6 +34,8 @@ pub enum UpdatePhase {
     Downloading,
     Replacing,
     Restarting,
+    /// Windows only: binary downloaded, manual restart required.
+    ManualRestartRequired,
     Failed,
 }
 
@@ -345,7 +347,72 @@ async fn perform_update(
 
     replace_binary(&current_executable, &binary_bytes).await?;
 
-    // Phase: Restarting
+    // On Windows, launch a detached helper script that:
+    // 1. Waits for this process to exit (file lock released)
+    // 2. Swaps .new.exe → .exe
+    // 3. Restarts the scheduled task
+    if cfg!(windows) {
+        {
+            let mut status = update_status.write().await;
+            status.phase = UpdatePhase::Restarting;
+            status.message = format!("Restarting server (v{target_version})...");
+        }
+
+        let exe_name = current_executable
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "ironshelf-server.exe".to_string());
+        let staged_name = current_executable
+            .file_stem()
+            .map(|s| format!("{}.new.exe", s.to_string_lossy()))
+            .unwrap_or_else(|| "ironshelf-server.new.exe".to_string());
+        let install_dir = current_executable
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| r"C:\Program Files\Ironshelf".to_string());
+
+        // Write a small PowerShell swap script next to the binary
+        let swap_script = format!(
+            r#"Start-Sleep -Seconds 3
+$maxWait = 30
+$waited = 0
+while ((Get-Process -Name 'ironshelf-server' -ErrorAction SilentlyContinue) -and $waited -lt $maxWait) {{
+    Start-Sleep -Seconds 1
+    $waited++
+}}
+$dir = '{install_dir}'
+$old = Join-Path $dir '{exe_name}'
+$new = Join-Path $dir '{staged_name}'
+$bak = Join-Path $dir 'ironshelf-server.old.exe'
+if (Test-Path $new) {{
+    if (Test-Path $bak) {{ Remove-Item $bak -Force }}
+    if (Test-Path $old) {{ Rename-Item $old $bak -Force }}
+    Rename-Item $new $old -Force
+}}
+Start-ScheduledTask -TaskName 'Ironshelf' -ErrorAction SilentlyContinue
+Remove-Item $MyInvocation.MyCommand.Source -Force
+"#
+        );
+
+        let script_path = std::path::Path::new(&install_dir).join("ironshelf-update-swap.ps1");
+        tokio::fs::write(&script_path, &swap_script).await.map_err(|io_error| {
+            anyhow::anyhow!("Failed to write swap script: {io_error}")
+        })?;
+
+        // Launch the script detached — it survives this process exiting
+        let _ = std::process::Command::new("powershell")
+            .args(["-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script_path)
+            .spawn();
+
+        tracing::info!("update swap script launched, shutting down for restart");
+
+        // Give the script a moment to start, then shutdown
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        std::process::exit(0);
+    }
+
+    // Phase: Restarting (Unix only — service manager restarts with new binary)
     {
         let mut status = update_status.write().await;
         status.phase = UpdatePhase::Restarting;
@@ -395,7 +462,9 @@ async fn download_with_progress(
 /// Replace the current binary with the new one.
 ///
 /// - **Unix**: Write to a temp file, then `rename()` over the current binary (atomic on same FS).
-/// - **Windows**: Rename current to `.old`, write new binary, then it takes effect on next start.
+/// - **Windows**: Stage the new binary as `<name>.new.exe` next to the running executable.
+///   The caller is responsible for signaling the user to restart; the service manager or
+///   a startup script should swap `<name>.new.exe` -> `<name>.exe` on next launch.
 async fn replace_binary(
     current_executable: &PathBuf,
     new_binary: &[u8],
@@ -424,23 +493,29 @@ async fn replace_binary(
     }
 
     if cfg!(windows) {
-        // Windows: cannot replace a running executable. Rename current to .old first.
-        let old_path = parent_directory.join("ironshelf-server.old.exe");
+        // Windows: cannot replace a running executable due to file locking.
+        // Stage the new binary next to the current one. On next service restart
+        // the launcher / batch script / user can swap the files.
+        let staged_path = parent_directory.join(
+            current_executable
+                .file_stem()
+                .map(|stem| format!("{}.new.exe", stem.to_string_lossy()))
+                .unwrap_or_else(|| "ironshelf-server.new.exe".to_string()),
+        );
 
-        // Remove any previous .old file.
-        let _ = tokio::fs::remove_file(&old_path).await;
+        // Remove any previous staged binary.
+        let _ = tokio::fs::remove_file(&staged_path).await;
 
-        tokio::fs::rename(current_executable, &old_path)
+        tokio::fs::rename(&temp_path, &staged_path)
             .await
             .map_err(|io_error| {
-                anyhow::anyhow!("Failed to rename current binary to .old: {io_error}")
+                anyhow::anyhow!("Failed to stage new binary at {}: {io_error}", staged_path.display())
             })?;
 
-        tokio::fs::rename(&temp_path, current_executable)
-            .await
-            .map_err(|io_error| {
-                anyhow::anyhow!("Failed to rename new binary into place: {io_error}")
-            })?;
+        tracing::info!(
+            "new binary staged at {} — swap on next restart",
+            staged_path.display()
+        );
     } else {
         // Unix: atomic rename replaces the inode. The running process keeps the old binary
         // in memory via its file descriptor until it exits.
