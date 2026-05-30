@@ -252,8 +252,8 @@
 
   // --- Server Version ---
 
-  async function fetchServerVersion() {
-    if (cachedServerVersion) return cachedServerVersion;
+  async function fetchServerVersion(forceRefresh = false) {
+    if (cachedServerVersion && !forceRefresh) return cachedServerVersion;
     try {
       const healthResponse = await fetch('/health');
       if (healthResponse.ok) {
@@ -3824,6 +3824,7 @@
                 </div>
               `;
               toast('Server updated successfully', 'success');
+              fetchServerVersion(true);
             }
           } catch {
             // Still down — keep polling
