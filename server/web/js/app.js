@@ -2957,7 +2957,8 @@
               <span class="cloud-status-indicator cloud-status-disconnected"></span>
               <strong>Not connected</strong>
             </div>
-            <p class="text-caption" style="margin-top:var(--space-2)">Claim this server to let users with Ironshelf Cloud accounts sign in.</p>
+            <p class="text-caption" style="margin-top:var(--space-2)">Claim this server to let users with Ironshelf Cloud accounts sign in. This is <strong>completely optional</strong> — your server works fully without it.</p>
+            <p class="text-caption" style="margin-top:var(--space-1);font-size:var(--text-xs);color:var(--color-muted)">Cloud only stores your server URL and who has access. No book data, reading history, or files ever leave your server.</p>
             <button class="btn btn-cloud mt-4" id="claim-server-btn" style="width:auto">${icon('globe', 16)} Claim this Server</button>
           </div>
         `;
