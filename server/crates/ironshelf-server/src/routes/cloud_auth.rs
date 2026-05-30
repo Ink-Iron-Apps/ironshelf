@@ -204,7 +204,7 @@ pub async fn cloud_login(
     // Decode and verify the JWT token using the claim_token as HMAC-SHA256 key
     let token_payload = verify_cloud_token(&request.cloud_token, &claim_token)
         .await
-        .map_err(|error_message| AppError::Unauthorized(error_message))?;
+        .map_err(AppError::Unauthorized)?;
 
     // Find or create a local user for this cloud user
     let cloud_username = format!("cloud_{}", token_payload.username);
