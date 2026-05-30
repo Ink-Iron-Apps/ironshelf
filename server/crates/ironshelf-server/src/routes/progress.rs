@@ -191,6 +191,36 @@ pub async fn create_bookmark(
     ))
 }
 
+/// GET /api/v1/me/bookmarks — list all bookmarks for the current user (across all books).
+pub async fn list_all_bookmarks(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Result<Json<Vec<Bookmark>>, AppError> {
+    let pool = state.ironshelf_db.pool();
+
+    let rows = sqlx::query(
+        "SELECT id, book_id, locator, note, created_at \
+         FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&user.user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::internal)?;
+
+    let bookmarks = rows
+        .iter()
+        .map(|row| Bookmark {
+            id: row.get("id"),
+            book_id: row.get("book_id"),
+            locator: row.get("locator"),
+            note: row.get("note"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(bookmarks))
+}
+
 /// DELETE /api/v1/books/:id/bookmarks/:bookmark_id
 pub async fn delete_bookmark(
     State(state): State<AppState>,
