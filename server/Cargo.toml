@@ -41,4 +41,4 @@ hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 quick-xml = "0.36"
 base64 = "0.22"
-igd-next = "0.15"
+igd-next = { version = "0.15", features = ["aio_tokio"] }
