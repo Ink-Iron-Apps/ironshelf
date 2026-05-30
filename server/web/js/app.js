@@ -3820,7 +3820,7 @@
                 </div>
                 <div class="update-available-banner" style="margin-top:var(--space-4);background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.2);color:var(--color-success)">
                   ${icon('check', 18)}
-                  <span>Successfully updated to v${escapeHtml(healthData.version || targetVersion)}</span>
+                  <span>Successfully updated to v${escapeHtml(targetVersion)}</span>
                 </div>
               `;
               toast('Server updated successfully', 'success');
