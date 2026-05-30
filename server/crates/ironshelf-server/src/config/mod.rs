@@ -72,6 +72,20 @@ pub struct Config {
     /// Defaults to the same value as `port`.
     #[serde(default)]
     pub external_port: Option<u16>,
+
+    /// Remote access method: "upnp", "tunnel", "manual", "none".
+    ///
+    /// - `"upnp"` — discover the local gateway via UPnP/IGD and add a TCP port mapping.
+    /// - `"tunnel"` — spawn a Cloudflare Quick Tunnel (`cloudflared tunnel --url ...`)
+    ///   for zero-config remote access through Cloudflare's edge network.
+    /// - `"manual"` — the user handles port forwarding or reverse proxy themselves;
+    ///   no automatic remote access is attempted.
+    /// - `"none"` — remote access is disabled (local network only).
+    ///
+    /// When `remote_access_enabled` is `true` but `remote_access_method` is not
+    /// set, falls back to `"upnp"` for backwards compatibility.
+    #[serde(default = "default_remote_access_method")]
+    pub remote_access_method: String,
 }
 
 fn default_port() -> u16 {
@@ -92,6 +106,10 @@ fn default_search_index_path() -> PathBuf {
 
 fn default_thumbnail_cache_path() -> PathBuf {
     PathBuf::from("./ironshelf-thumbnail-cache/")
+}
+
+fn default_remote_access_method() -> String {
+    "none".to_string()
 }
 
 impl Config {
@@ -133,6 +151,7 @@ impl Config {
                 oidc: None,
                 remote_access_enabled: false,
                 external_port: None,
+                remote_access_method: default_remote_access_method(),
             }
         };
 
@@ -166,6 +185,12 @@ impl Config {
         if let Ok(external_port) = std::env::var("IRONSHELF_EXTERNAL_PORT") {
             if let Ok(parsed_port) = external_port.parse() {
                 config.external_port = Some(parsed_port);
+            }
+        }
+        if let Ok(remote_access_method) = std::env::var("IRONSHELF_REMOTE_ACCESS_METHOD") {
+            let normalized_method = remote_access_method.to_lowercase();
+            if matches!(normalized_method.as_str(), "upnp" | "tunnel" | "manual" | "none") {
+                config.remote_access_method = normalized_method;
             }
         }
 

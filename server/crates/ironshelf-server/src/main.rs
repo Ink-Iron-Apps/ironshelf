@@ -9,6 +9,7 @@ mod routes;
 mod scheduler;
 mod state;
 pub mod thumbnail;
+pub mod tunnel;
 pub mod upnp;
 mod web;
 mod webhook_dispatcher;
@@ -80,6 +81,9 @@ async fn main() -> anyhow::Result<()> {
     let effective_external_port = config.external_port.unwrap_or(config.port);
     let upnp_manager = upnp::UpnpManager::new(config.port, effective_external_port);
 
+    // Cloudflare Quick Tunnel manager for zero-config remote access.
+    let tunnel_manager = tunnel::TunnelManager::new(config.port);
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
@@ -91,23 +95,61 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         update_status,
         upnp_manager: Arc::new(RwLock::new(upnp_manager)),
+        tunnel_manager: Arc::new(RwLock::new(tunnel_manager)),
     };
 
-    // If remote access is enabled via config, establish UPnP port mapping now.
-    if config.remote_access_enabled {
-        let mut upnp_guard = app_state.upnp_manager.write().await;
-        match upnp_guard.enable().await {
-            Ok(public_url) => {
-                tracing::info!("remote access: {public_url}");
+    // Determine which remote access method to use.
+    // `remote_access_enabled` (legacy bool) is treated as "upnp" when
+    // `remote_access_method` is still the default "none".
+    let effective_remote_access_method = if config.remote_access_enabled
+        && config.remote_access_method == "none"
+    {
+        "upnp"
+    } else {
+        config.remote_access_method.as_str()
+    };
+
+    match effective_remote_access_method {
+        "upnp" => {
+            let mut upnp_guard = app_state.upnp_manager.write().await;
+            match upnp_guard.enable().await {
+                Ok(public_url) => {
+                    tracing::info!("remote access (UPnP): {public_url}");
+                }
+                Err(upnp_error) => {
+                    tracing::warn!(
+                        "UPnP failed: {upnp_error} — you can manually forward port {} on your router",
+                        effective_external_port,
+                    );
+                }
             }
-            Err(upnp_error) => {
-                tracing::warn!(
-                    "UPnP failed: {upnp_error} — you can manually forward port {} on your router",
-                    effective_external_port,
-                );
-            }
+            drop(upnp_guard);
         }
-        drop(upnp_guard);
+        "tunnel" => {
+            let mut tunnel_guard = app_state.tunnel_manager.write().await;
+            match tunnel_guard.start().await {
+                Ok(public_url) => {
+                    tracing::info!("remote access (Cloudflare Tunnel): {public_url}");
+
+                    // If the server is claimed, update Ironshelf Cloud with the tunnel URL.
+                    let cloud_state = app_state.clone();
+                    let tunnel_url_for_cloud = public_url.clone();
+                    tokio::spawn(async move {
+                        update_cloud_server_url(&cloud_state, &tunnel_url_for_cloud).await;
+                    });
+                }
+                Err(tunnel_error) => {
+                    tracing::warn!("Cloudflare tunnel failed: {tunnel_error}");
+                }
+            }
+            drop(tunnel_guard);
+        }
+        "manual" => {
+            tracing::info!("remote access: manual mode — user manages port forwarding externally");
+        }
+        _ => {
+            tracing::info!("remote access: disabled");
+        }
     }
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
@@ -473,6 +515,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/remote-access/test",
             axum::routing::post(routes::remote_access::test_remote_access),
+        )
+        .route(
+            "/api/v1/server/remote-access/tunnel/start",
+            axum::routing::post(routes::remote_access::start_tunnel),
+        )
+        .route(
+            "/api/v1/server/remote-access/tunnel/stop",
+            axum::routing::post(routes::remote_access::stop_tunnel),
         );
 
     let protected_routes = Router::new()
@@ -580,6 +630,65 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("server shut down gracefully");
     Ok(())
+}
+
+/// If the server is claimed to Ironshelf Cloud, update the stored server URL
+/// so cloud routing points to the current tunnel/public address.
+pub(crate) async fn update_cloud_server_url(application_state: &AppState, new_public_url: &str) {
+    let server_id = match application_state
+        .ironshelf_db
+        .get_cloud_config("server_id")
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => return, // Not claimed — nothing to update.
+    };
+
+    let cloud_service_url = match application_state
+        .ironshelf_db
+        .get_cloud_config("cloud_service_url")
+        .await
+    {
+        Ok(Some(url)) => url,
+        _ => return,
+    };
+
+    let claim_token = match application_state
+        .ironshelf_db
+        .get_cloud_config("claim_token")
+        .await
+    {
+        Ok(Some(token)) => token,
+        _ => return,
+    };
+
+    let update_url = format!("{}/api/v1/servers/{}", cloud_service_url.trim_end_matches('/'), server_id);
+
+    match application_state
+        .http_client
+        .patch(&update_url)
+        .bearer_auth(&claim_token)
+        .json(&serde_json::json!({ "public_url": new_public_url }))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            tracing::info!(
+                "updated cloud server URL to {new_public_url}"
+            );
+        }
+        Ok(response) => {
+            tracing::warn!(
+                "failed to update cloud server URL: HTTP {}",
+                response.status()
+            );
+        }
+        Err(request_error) => {
+            tracing::warn!(
+                "failed to update cloud server URL: {request_error}"
+            );
+        }
+    }
 }
 
 /// Load all libraries from DB and open their sources.
