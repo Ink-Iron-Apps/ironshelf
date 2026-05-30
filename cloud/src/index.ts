@@ -43,7 +43,7 @@ export default {
     let response: Response;
     try {
       response = await routeRequest(method, path, request, env);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Unhandled error:', error);
       response = jsonResponse(
         { error: 'Internal server error' },

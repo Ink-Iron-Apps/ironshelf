@@ -5,8 +5,8 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "ironshelf-cloud"
-database_id = "placeholder-will-be-set-after-creation"
+database_id = "88fb0e02-2559-46d5-bf63-774e2ae0cb73"
 
 [vars]
-JWT_SECRET = "change-this-in-production"
 CORS_ORIGIN = "https://ironshelf.inknironapps.com"
+# JWT_SECRET is set via `wrangler secret put JWT_SECRET` — not in vars
