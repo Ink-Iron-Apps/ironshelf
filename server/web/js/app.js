@@ -2511,7 +2511,7 @@
         ${currentUser?.is_owner ? `
         <div class="settings-section" id="remote-access-section">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Remote Access</h3>
-          <p class="description">Automatically forward a port on your router via UPnP so this server is reachable from outside your local network.</p>
+          <p class="description">Make this server reachable from outside your local network. Choose a method below.</p>
           <div class="card remote-access-card" id="remote-access-card">
             <div class="remote-access-loading">
               <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
@@ -3032,77 +3032,53 @@
     try {
       const status = await apiGet('/server/remote-access');
 
-      if (status.enabled && status.active) {
-        // Active — show green status with public URL.
-        cardContainer.innerHTML = `
-          <div class="remote-access-status">
-            <div class="remote-access-status-header">
-              <span class="remote-access-indicator remote-access-connected"></span>
-              <strong>Connected</strong>
-            </div>
-            <dl class="remote-access-details">
-              <dt>Public URL</dt>
-              <dd>
-                <div class="device-url-row" style="margin:0">
-                  <code class="device-url" id="remote-access-public-url">${escapeHtml(status.public_url)}</code>
-                  <button class="btn btn-ghost btn-sm copy-remote-url" aria-label="Copy public URL">${icon('copy', 14)}</button>
-                </div>
-              </dd>
-              <dt>Public IP</dt>
-              <dd><code>${escapeHtml(status.public_ip || 'unknown')}</code></dd>
-              <dt>External Port</dt>
-              <dd>${status.external_port}</dd>
-              <dt>Internal Port</dt>
-              <dd>${status.internal_port}</dd>
-            </dl>
-            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
-              <button class="btn btn-secondary btn-sm" id="remote-access-test-btn">${icon('check', 14)} Test Reachability</button>
-              <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
-            </div>
-            <div class="remote-access-port-change" style="margin-top:var(--space-4)">
-              <label class="form-label" for="remote-access-port-input">External Port</label>
-              <div style="display:flex;gap:var(--space-2);align-items:center">
-                <input type="number" class="form-input" id="remote-access-port-input" value="${status.external_port}" min="1" max="65535" style="width:120px">
-                <button class="btn btn-secondary btn-sm" id="remote-access-apply-port-btn">Apply</button>
-              </div>
-            </div>
-          </div>
-        `;
-      } else if (status.enabled && !status.active) {
-        // Enabled but not active — show yellow/warning.
-        cardContainer.innerHTML = `
+      // Method selector (always shown at top).
+      const currentMethod = status.method || 'none';
+      const methodSelectorHtml = `
+        <div class="remote-access-method-selector" style="margin-bottom:var(--space-4)">
+          <label class="form-label" for="remote-access-method-select">Method</label>
+          <select class="form-input" id="remote-access-method-select" style="width:auto;min-width:280px">
+            <option value="none" ${currentMethod === 'none' ? 'selected' : ''}>None (local network only)</option>
+            <option value="upnp" ${currentMethod === 'upnp' ? 'selected' : ''}>UPnP (auto port forward)</option>
+            <option value="tunnel" ${currentMethod === 'tunnel' ? 'selected' : ''}>Cloudflare Tunnel (recommended)</option>
+            <option value="manual" ${currentMethod === 'manual' ? 'selected' : ''}>Manual (you handle forwarding)</option>
+          </select>
+        </div>
+      `;
+
+      // Build method-specific panel.
+      let methodPanelHtml = '';
+
+      if (currentMethod === 'tunnel' || status.tunnel?.active) {
+        methodPanelHtml = buildTunnelPanel(status);
+      } else if (currentMethod === 'upnp' || (status.upnp?.enabled)) {
+        methodPanelHtml = buildUpnpPanel(status);
+      } else if (currentMethod === 'manual') {
+        methodPanelHtml = `
           <div class="remote-access-status">
             <div class="remote-access-status-header">
               <span class="remote-access-indicator remote-access-connecting"></span>
-              <strong>Not reachable</strong>
+              <strong>Manual Mode</strong>
             </div>
-            ${status.error ? `<p class="remote-access-error">${escapeHtml(status.error)}</p>` : ''}
-            <p class="form-hint" style="margin-top:var(--space-2)">You can manually forward port ${status.external_port} on your router if UPnP is not supported.</p>
-            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3)">
-              <button class="btn btn-primary btn-sm" id="remote-access-retry-btn">${icon('refresh', 14)} Retry</button>
-              <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
-            </div>
+            <p class="form-hint" style="margin-top:var(--space-2)">
+              You are managing port forwarding or reverse proxy externally.
+              Configure your router or reverse proxy to forward traffic to this server's port.
+            </p>
           </div>
         `;
       } else {
-        // Disabled — show toggle to enable.
-        cardContainer.innerHTML = `
+        methodPanelHtml = `
           <div class="remote-access-status">
             <div class="remote-access-status-header">
               <span class="remote-access-indicator remote-access-disconnected"></span>
               <strong>Disabled</strong>
             </div>
-            <p class="form-hint" style="margin-top:var(--space-2)">Enable UPnP port forwarding to make this server reachable from outside your local network.</p>
-            <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
-              <button class="btn btn-primary btn-sm" id="remote-access-enable-btn">${icon('globe', 14)} Enable Remote Access</button>
-              <div style="display:flex;gap:var(--space-2);align-items:center">
-                <label class="form-label" for="remote-access-port-input-disabled" style="margin:0;white-space:nowrap">External Port:</label>
-                <input type="number" class="form-input" id="remote-access-port-input-disabled" value="${status.external_port}" min="1" max="65535" style="width:120px">
-              </div>
-            </div>
+            <p class="form-hint" style="margin-top:var(--space-2)">Select a method above to enable remote access.</p>
           </div>
         `;
       }
+
+      cardContainer.innerHTML = methodSelectorHtml + methodPanelHtml;
 
       // Bind event handlers.
       bindRemoteAccessEvents(status);
@@ -3116,11 +3092,10 @@
         }
         try {
           const refreshedStatus = await apiGet('/server/remote-access');
-          // Only re-render if state actually changed.
           const currentIndicator = document.querySelector('.remote-access-indicator');
           const wasActive = currentIndicator?.classList.contains('remote-access-connected');
           const wasConnecting = currentIndicator?.classList.contains('remote-access-connecting');
-          const isNowActive = refreshedStatus.enabled && refreshedStatus.active;
+          const isNowActive = refreshedStatus.active;
           const isNowConnecting = refreshedStatus.enabled && !refreshedStatus.active;
           if ((isNowActive && !wasActive) || (isNowConnecting && !wasConnecting) || (!refreshedStatus.enabled && (wasActive || wasConnecting))) {
             loadRemoteAccessCard();
@@ -3140,43 +3115,225 @@
     }
   }
 
+  function buildTunnelPanel(status) {
+    const tunnel = status.tunnel || {};
+
+    if (tunnel.active && tunnel.public_url) {
+      return `
+        <div class="remote-access-status">
+          <div class="remote-access-status-header">
+            <span class="remote-access-indicator remote-access-connected"></span>
+            <strong>Connected via Cloudflare Tunnel</strong>
+          </div>
+          <dl class="remote-access-details">
+            <dt>Public URL</dt>
+            <dd>
+              <div class="device-url-row" style="margin:0">
+                <code class="device-url" id="remote-access-public-url">${escapeHtml(tunnel.public_url)}</code>
+                <button class="btn btn-ghost btn-sm copy-remote-url" aria-label="Copy public URL">${icon('copy', 14)}</button>
+              </div>
+            </dd>
+          </dl>
+          <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+            <button class="btn btn-danger btn-sm" id="tunnel-stop-btn">${icon('x', 14)} Stop Tunnel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    if (!tunnel.available) {
+      return `
+        <div class="remote-access-status">
+          <div class="remote-access-status-header">
+            <span class="remote-access-indicator remote-access-disconnected"></span>
+            <strong>cloudflared not installed</strong>
+          </div>
+          <p class="form-hint" style="margin-top:var(--space-2)">
+            Cloudflare Tunnel requires the <code>cloudflared</code> binary.
+            <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noopener" style="color:var(--teal-bright)">Download cloudflared</a>
+            and ensure it is in your system PATH.
+          </p>
+          ${tunnel.error ? `<p class="remote-access-error" style="margin-top:var(--space-2)">${escapeHtml(tunnel.error)}</p>` : ''}
+        </div>
+      `;
+    }
+
+    // Available but not active.
+    return `
+      <div class="remote-access-status">
+        <div class="remote-access-status-header">
+          <span class="remote-access-indicator remote-access-disconnected"></span>
+          <strong>Tunnel not running</strong>
+        </div>
+        ${tunnel.error ? `<p class="remote-access-error" style="margin-top:var(--space-2)">${escapeHtml(tunnel.error)}</p>` : ''}
+        <p class="form-hint" style="margin-top:var(--space-2)">
+          Start a Cloudflare Quick Tunnel to get a public URL instantly. No account or configuration required.
+        </p>
+        <div class="remote-access-actions" style="margin-top:var(--space-4)">
+          <button class="btn btn-primary btn-sm" id="tunnel-start-btn">${icon('globe', 14)} Start Tunnel</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildUpnpPanel(status) {
+    const upnp = status.upnp || {};
+
+    if (upnp.enabled && upnp.active) {
+      return `
+        <div class="remote-access-status">
+          <div class="remote-access-status-header">
+            <span class="remote-access-indicator remote-access-connected"></span>
+            <strong>Connected via UPnP</strong>
+          </div>
+          <dl class="remote-access-details">
+            <dt>Public URL</dt>
+            <dd>
+              <div class="device-url-row" style="margin:0">
+                <code class="device-url" id="remote-access-public-url">${escapeHtml(upnp.public_url)}</code>
+                <button class="btn btn-ghost btn-sm copy-remote-url" aria-label="Copy public URL">${icon('copy', 14)}</button>
+              </div>
+            </dd>
+            <dt>Public IP</dt>
+            <dd><code>${escapeHtml(upnp.public_ip || 'unknown')}</code></dd>
+            <dt>External Port</dt>
+            <dd>${upnp.external_port}</dd>
+            <dt>Internal Port</dt>
+            <dd>${upnp.internal_port}</dd>
+          </dl>
+          <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+            <button class="btn btn-secondary btn-sm" id="remote-access-test-btn">${icon('check', 14)} Test Reachability</button>
+            <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
+          </div>
+          <div class="remote-access-port-change" style="margin-top:var(--space-4)">
+            <label class="form-label" for="remote-access-port-input">External Port</label>
+            <div style="display:flex;gap:var(--space-2);align-items:center">
+              <input type="number" class="form-input" id="remote-access-port-input" value="${upnp.external_port}" min="1" max="65535" style="width:120px">
+              <button class="btn btn-secondary btn-sm" id="remote-access-apply-port-btn">Apply</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (upnp.enabled && !upnp.active) {
+      return `
+        <div class="remote-access-status">
+          <div class="remote-access-status-header">
+            <span class="remote-access-indicator remote-access-connecting"></span>
+            <strong>UPnP not reachable</strong>
+          </div>
+          ${upnp.error ? `<p class="remote-access-error">${escapeHtml(upnp.error)}</p>` : ''}
+          <p class="form-hint" style="margin-top:var(--space-2)">You can manually forward port ${upnp.external_port} on your router if UPnP is not supported, or try Cloudflare Tunnel instead.</p>
+          <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3)">
+            <button class="btn btn-primary btn-sm" id="remote-access-retry-btn">${icon('refresh', 14)} Retry</button>
+            <button class="btn btn-danger btn-sm" id="remote-access-disable-btn">${icon('x', 14)} Disable</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // UPnP not enabled yet.
+    return `
+      <div class="remote-access-status">
+        <div class="remote-access-status-header">
+          <span class="remote-access-indicator remote-access-disconnected"></span>
+          <strong>UPnP disabled</strong>
+        </div>
+        <p class="form-hint" style="margin-top:var(--space-2)">Enable UPnP port forwarding to make this server reachable from outside your local network.</p>
+        <div class="remote-access-actions" style="margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+          <button class="btn btn-primary btn-sm" id="remote-access-enable-btn">${icon('globe', 14)} Enable UPnP</button>
+          <div style="display:flex;gap:var(--space-2);align-items:center">
+            <label class="form-label" for="remote-access-port-input-disabled" style="margin:0;white-space:nowrap">External Port:</label>
+            <input type="number" class="form-input" id="remote-access-port-input-disabled" value="${upnp.external_port}" min="1" max="65535" style="width:120px">
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function bindRemoteAccessEvents(status) {
-    // Enable button (when disabled).
+    const upnp = status.upnp || {};
+
+    // Method selector change.
+    document.getElementById('remote-access-method-select')?.addEventListener('change', async (changeEvent) => {
+      const selectedMethod = changeEvent.target.value;
+
+      // If switching away from an active method, stop the current one first.
+      if (status.tunnel?.active && selectedMethod !== 'tunnel') {
+        try { await apiPost('/server/remote-access/tunnel/stop', {}); } catch (_) {}
+      }
+      if (upnp.enabled && selectedMethod !== 'upnp') {
+        try { await apiPost('/server/remote-access/disable', {}); } catch (_) {}
+      }
+
+      // Reload the card to reflect new state.
+      loadRemoteAccessCard();
+    });
+
+    // --- Tunnel events ---
+    document.getElementById('tunnel-start-btn')?.addEventListener('click', async () => {
+      const startButton = document.getElementById('tunnel-start-btn');
+      startButton.disabled = true;
+      startButton.textContent = 'Starting tunnel...';
+      try {
+        const tunnelResult = await apiPost('/server/remote-access/tunnel/start', {});
+        if (tunnelResult.active) {
+          toast('Cloudflare tunnel started', 'success');
+        } else {
+          toast(tunnelResult.error || 'Failed to start tunnel', 'error');
+        }
+        loadRemoteAccessCard();
+      } catch (startError) {
+        toast(startError.message || 'Failed to start tunnel', 'error');
+        loadRemoteAccessCard();
+      }
+    });
+
+    document.getElementById('tunnel-stop-btn')?.addEventListener('click', async () => {
+      try {
+        await apiPost('/server/remote-access/tunnel/stop', {});
+        toast('Cloudflare tunnel stopped', 'success');
+        loadRemoteAccessCard();
+      } catch (stopError) {
+        toast(stopError.message || 'Failed to stop tunnel', 'error');
+      }
+    });
+
+    // --- UPnP events ---
     document.getElementById('remote-access-enable-btn')?.addEventListener('click', async () => {
       const portInput = document.getElementById('remote-access-port-input-disabled');
-      const externalPort = portInput ? parseInt(portInput.value, 10) : status.external_port;
+      const externalPort = portInput ? parseInt(portInput.value, 10) : upnp.external_port;
       const enableButton = document.getElementById('remote-access-enable-btn');
       enableButton.disabled = true;
       enableButton.textContent = 'Enabling...';
       try {
         await apiPost('/server/remote-access/enable', { external_port: externalPort });
-        toast('Remote access enabled', 'success');
+        toast('UPnP remote access enabled', 'success');
         loadRemoteAccessCard();
       } catch (enableError) {
-        toast(enableError.message || 'Failed to enable remote access', 'error');
+        toast(enableError.message || 'Failed to enable UPnP', 'error');
         loadRemoteAccessCard();
       }
     });
 
-    // Disable button.
     document.getElementById('remote-access-disable-btn')?.addEventListener('click', async () => {
       try {
         await apiPost('/server/remote-access/disable', {});
-        toast('Remote access disabled', 'success');
+        toast('UPnP remote access disabled', 'success');
         loadRemoteAccessCard();
       } catch (disableError) {
-        toast(disableError.message || 'Failed to disable remote access', 'error');
+        toast(disableError.message || 'Failed to disable UPnP', 'error');
       }
     });
 
-    // Retry button (when enabled but not active).
     document.getElementById('remote-access-retry-btn')?.addEventListener('click', async () => {
       const retryButton = document.getElementById('remote-access-retry-btn');
       retryButton.disabled = true;
       retryButton.textContent = 'Retrying...';
       try {
-        await apiPost('/server/remote-access/enable', { external_port: status.external_port });
-        toast('Remote access re-established', 'success');
+        await apiPost('/server/remote-access/enable', { external_port: upnp.external_port });
+        toast('UPnP re-established', 'success');
         loadRemoteAccessCard();
       } catch (retryError) {
         toast(retryError.message || 'Retry failed', 'error');
@@ -3184,7 +3341,6 @@
       }
     });
 
-    // Test reachability button.
     document.getElementById('remote-access-test-btn')?.addEventListener('click', async () => {
       const testButton = document.getElementById('remote-access-test-btn');
       testButton.disabled = true;
@@ -3203,7 +3359,6 @@
       testButton.innerHTML = `${icon('check', 14)} Test Reachability`;
     });
 
-    // Apply new external port.
     document.getElementById('remote-access-apply-port-btn')?.addEventListener('click', async () => {
       const portInput = document.getElementById('remote-access-port-input');
       const newPort = parseInt(portInput.value, 10);
@@ -3225,14 +3380,14 @@
       }
     });
 
-    // Copy public URL button.
+    // Copy public URL button (works for both UPnP and tunnel).
     document.querySelector('.copy-remote-url')?.addEventListener('click', () => {
       const urlElement = document.getElementById('remote-access-public-url');
       if (!urlElement) return;
       navigator.clipboard.writeText(urlElement.textContent.trim()).then(() => {
         toast('Public URL copied to clipboard', 'success');
       }).catch(() => {
-        toast('Failed to copy — select and copy manually', 'warning');
+        toast('Failed to copy -- select and copy manually', 'warning');
       });
     });
   }

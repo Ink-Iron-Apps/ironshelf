@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use crate::config::Config;
 use crate::routes::oidc::OidcStateStore;
 use crate::routes::update::SharedUpdateStatus;
+use crate::tunnel::TunnelManager;
 use crate::upnp::UpnpManager;
 
 /// Polymorphic library source.
@@ -195,4 +196,6 @@ pub struct AppState {
     pub update_status: SharedUpdateStatus,
     /// UPnP port forwarding manager for automatic remote access.
     pub upnp_manager: Arc<RwLock<UpnpManager>>,
+    /// Cloudflare Quick Tunnel manager for zero-config remote access.
+    pub tunnel_manager: Arc<RwLock<TunnelManager>>,
 }
