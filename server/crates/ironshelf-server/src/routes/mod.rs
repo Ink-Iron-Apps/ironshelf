@@ -25,6 +25,7 @@ pub mod personal_stats;
 pub mod progress;
 pub mod reading_goals;
 pub mod reading_queue;
+pub mod remote_access;
 pub mod search;
 pub mod series;
 pub mod server_info;

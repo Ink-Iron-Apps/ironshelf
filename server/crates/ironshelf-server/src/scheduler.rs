@@ -19,7 +19,8 @@ pub fn start(application_state: AppState) {
     tokio::spawn(metadata_auto_enrich_task(application_state.clone()));
     tokio::spawn(acquisition_wanted_search_task(application_state.clone()));
     tokio::spawn(acquisition_download_monitor_task(application_state.clone()));
-    tokio::spawn(acquisition_stale_cleanup_task(application_state));
+    tokio::spawn(acquisition_stale_cleanup_task(application_state.clone()));
+    tokio::spawn(upnp_refresh_task(application_state));
 }
 
 /// Every 30 minutes: rescan FolderSource libraries for new files.
@@ -344,6 +345,46 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
             "scheduler: metadata auto-enrich identified {} book(s) needing metadata",
             candidates.len()
         );
+    }
+}
+
+/// Every 30 minutes: renew the UPnP port mapping lease.
+/// If the mapping was lost (router reboot, DHCP change), attempts a full
+/// re-discovery and re-establishment.
+async fn upnp_refresh_task(application_state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30 * 60));
+    // Skip the immediate first tick.
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+
+        let is_enabled = {
+            let upnp_manager = application_state.upnp_manager.read().await;
+            upnp_manager.get_status().is_enabled
+        };
+
+        if !is_enabled {
+            continue;
+        }
+
+        tracing::debug!("scheduler: refreshing UPnP port mapping");
+
+        let mut upnp_manager = application_state.upnp_manager.write().await;
+        upnp_manager.refresh().await;
+
+        let status = upnp_manager.get_status();
+        if status.is_active {
+            tracing::debug!(
+                "scheduler: UPnP mapping active — {}",
+                status.public_url.as_deref().unwrap_or("unknown")
+            );
+        } else {
+            tracing::warn!(
+                "scheduler: UPnP mapping inactive — {}",
+                status.last_error.as_deref().unwrap_or("unknown error")
+            );
+        }
     }
 }
 

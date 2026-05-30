@@ -9,6 +9,7 @@ mod routes;
 mod scheduler;
 mod state;
 pub mod thumbnail;
+pub mod upnp;
 mod web;
 mod webhook_dispatcher;
 
@@ -74,6 +75,11 @@ async fn main() -> anyhow::Result<()> {
 
     let update_status = routes::update::new_update_status();
 
+    // UPnP port forwarding manager. The external port defaults to the server
+    // port if not explicitly configured.
+    let effective_external_port = config.external_port.unwrap_or(config.port);
+    let upnp_manager = upnp::UpnpManager::new(config.port, effective_external_port);
+
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
@@ -84,7 +90,25 @@ async fn main() -> anyhow::Result<()> {
         oidc_state_store,
         http_client,
         update_status,
+        upnp_manager: Arc::new(RwLock::new(upnp_manager)),
     };
+
+    // If remote access is enabled via config, establish UPnP port mapping now.
+    if config.remote_access_enabled {
+        let mut upnp_guard = app_state.upnp_manager.write().await;
+        match upnp_guard.enable().await {
+            Ok(public_url) => {
+                tracing::info!("remote access: {public_url}");
+            }
+            Err(upnp_error) => {
+                tracing::warn!(
+                    "UPnP failed: {upnp_error} — you can manually forward port {} on your router",
+                    effective_external_port,
+                );
+            }
+        }
+        drop(upnp_guard);
+    }
 
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
     scheduler::start(app_state.clone());
@@ -433,6 +457,22 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/converters",
             get(routes::converters::server_converters),
+        )
+        .route(
+            "/api/v1/server/remote-access",
+            get(routes::remote_access::get_remote_access_status),
+        )
+        .route(
+            "/api/v1/server/remote-access/enable",
+            axum::routing::post(routes::remote_access::enable_remote_access),
+        )
+        .route(
+            "/api/v1/server/remote-access/disable",
+            axum::routing::post(routes::remote_access::disable_remote_access),
+        )
+        .route(
+            "/api/v1/server/remote-access/test",
+            axum::routing::post(routes::remote_access::test_remote_access),
         );
 
     let protected_routes = Router::new()

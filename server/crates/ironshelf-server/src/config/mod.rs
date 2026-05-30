@@ -61,6 +61,17 @@ pub struct Config {
     /// Optional OIDC/SSO configuration for external identity provider login.
     #[serde(default)]
     pub oidc: Option<OidcConfig>,
+
+    /// Enable automatic UPnP port forwarding for remote access (like Plex).
+    /// When true, the server discovers the local gateway and adds a TCP port
+    /// mapping so the server is reachable from the public internet.
+    #[serde(default)]
+    pub remote_access_enabled: bool,
+
+    /// External port to request from the gateway for UPnP port forwarding.
+    /// Defaults to the same value as `port`.
+    #[serde(default)]
+    pub external_port: Option<u16>,
 }
 
 fn default_port() -> u16 {
@@ -120,6 +131,8 @@ impl Config {
                 tls_enabled: false,
                 trust_proxy_headers: false,
                 oidc: None,
+                remote_access_enabled: false,
+                external_port: None,
             }
         };
 
@@ -146,6 +159,14 @@ impl Config {
         }
         if let Ok(trust_proxy_headers) = std::env::var("IRONSHELF_TRUST_PROXY_HEADERS") {
             config.trust_proxy_headers = trust_proxy_headers == "true" || trust_proxy_headers == "1";
+        }
+        if let Ok(remote_access_enabled) = std::env::var("IRONSHELF_REMOTE_ACCESS") {
+            config.remote_access_enabled = remote_access_enabled == "true" || remote_access_enabled == "1";
+        }
+        if let Ok(external_port) = std::env::var("IRONSHELF_EXTERNAL_PORT") {
+            if let Ok(parsed_port) = external_port.parse() {
+                config.external_port = Some(parsed_port);
+            }
         }
 
         Ok(config)
