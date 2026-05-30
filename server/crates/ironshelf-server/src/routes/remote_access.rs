@@ -71,7 +71,7 @@ pub async fn enable_remote_access(
                 "public_ip": status.public_ip,
                 "external_port": status.external_port,
                 "internal_port": status.internal_port,
-                "error": null::<String>,
+                "error": null,
             })))
         }
         Err(enable_error) => {
@@ -79,8 +79,8 @@ pub async fn enable_remote_access(
             Ok(Json(json!({
                 "enabled": status.is_enabled,
                 "active": false,
-                "public_url": null::<String>,
-                "public_ip": null::<String>,
+                "public_url": null,
+                "public_ip": null,
                 "external_port": status.external_port,
                 "internal_port": status.internal_port,
                 "error": enable_error,
@@ -105,11 +105,11 @@ pub async fn disable_remote_access(
     Ok(Json(json!({
         "enabled": status.is_enabled,
         "active": status.is_active,
-        "public_url": null::<String>,
-        "public_ip": null::<String>,
+        "public_url": null,
+        "public_ip": null,
         "external_port": status.external_port,
         "internal_port": status.internal_port,
-        "error": null::<String>,
+        "error": null,
     })))
 }
 
