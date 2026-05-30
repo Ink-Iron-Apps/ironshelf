@@ -100,6 +100,37 @@ pub async fn claim_server(
 }
 
 // ---------------------------------------------------------------------------
+// DELETE /api/v1/auth/claim — unclaim the server (owner only)
+// ---------------------------------------------------------------------------
+
+pub async fn unclaim_server(
+    State(state): State<AppState>,
+) -> Result<Json<ClaimResponse>, AppError> {
+    let ironshelf_db = &state.ironshelf_db;
+
+    // Delete all cloud config entries
+    ironshelf_db
+        .delete_cloud_config("claim_token")
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to delete claim token: {e}")))?;
+    ironshelf_db
+        .delete_cloud_config("cloud_service_url")
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to delete cloud service URL: {e}")))?;
+    ironshelf_db
+        .delete_cloud_config("server_id")
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to delete server ID: {e}")))?;
+
+    tracing::info!("server unclaimed from cloud service");
+
+    Ok(Json(ClaimResponse {
+        claimed: false,
+        message: "Server unclaimed. Cloud login is now disabled.".to_string(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/auth/claim-status — check if server is claimed
 // ---------------------------------------------------------------------------
 
