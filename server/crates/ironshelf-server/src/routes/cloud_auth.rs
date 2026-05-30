@@ -93,9 +93,37 @@ pub async fn claim_server(
 
     tracing::info!("server claimed via cloud service");
 
+    // Auto-start tunnel for remote access (download cloudflared if needed)
+    let tunnel_state = state.clone();
+    tokio::spawn(async move {
+        tracing::info!("auto-starting cloudflare tunnel for remote access...");
+
+        // Install cloudflared if not available
+        if !crate::tunnel::TunnelManager::is_cloudflared_available().await {
+            tracing::info!("cloudflared not found, auto-installing...");
+            if let Err(install_error) = crate::routes::remote_access::install_cloudflared_public().await {
+                tracing::error!("failed to auto-install cloudflared: {install_error}");
+                return;
+            }
+        }
+
+        // Start tunnel
+        let mut tunnel_manager = tunnel_state.tunnel_manager.write().await;
+        match tunnel_manager.start().await {
+            Ok(public_url) => {
+                tracing::info!("tunnel started: {public_url}");
+                drop(tunnel_manager);
+                crate::update_cloud_server_url(&tunnel_state, &public_url).await;
+            }
+            Err(tunnel_error) => {
+                tracing::error!("failed to start tunnel: {tunnel_error}");
+            }
+        }
+    });
+
     Ok(Json(ClaimResponse {
         claimed: true,
-        message: "Server successfully claimed. Cloud login is now enabled.".to_string(),
+        message: "Server claimed. Remote access tunnel starting automatically.".to_string(),
     }))
 }
 
