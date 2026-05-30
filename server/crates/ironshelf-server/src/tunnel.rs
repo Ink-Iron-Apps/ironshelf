@@ -123,7 +123,6 @@ impl TunnelManager {
         })?;
 
         let mut reader = BufReader::new(stderr).lines();
-        let url_regex_pattern = r"https://[a-zA-Z0-9\-]+\.trycloudflare\.com";
 
         let parsed_url = tokio::time::timeout(
             std::time::Duration::from_secs(TUNNEL_STARTUP_TIMEOUT_SECONDS),

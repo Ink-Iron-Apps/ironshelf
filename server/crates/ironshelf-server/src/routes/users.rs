@@ -195,6 +195,33 @@ pub async fn create_invite(
     ))
 }
 
+/// GET /api/v1/users/invites — list pending (unused) invite codes
+pub async fn list_invites(
+    State(state): State<AppState>,
+    axum::Extension(current_user): axum::Extension<AuthUser>,
+) -> Result<Json<Vec<InviteResponse>>, AppError> {
+    require_user_management(&current_user, state.ironshelf_db.pool()).await?;
+
+    let pool = state.ironshelf_db.pool();
+
+    let rows = sqlx::query(
+        "SELECT code, created_at FROM invites WHERE used_by IS NULL ORDER BY created_at DESC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(AppError::internal)?;
+
+    let invites = rows
+        .iter()
+        .map(|row| InviteResponse {
+            code: row.get("code"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(invites))
+}
+
 // --- helpers ---
 
 /// Require the current user to be the instance owner.

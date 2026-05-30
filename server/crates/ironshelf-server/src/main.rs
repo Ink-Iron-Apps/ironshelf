@@ -229,6 +229,15 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/users/{id}/permissions",
             axum::routing::patch(routes::users::set_permissions),
+        )
+        .route(
+            "/api/v1/users/invites",
+            get(routes::users::list_invites),
+        )
+        .route(
+            "/api/v1/users/{id}/library-access",
+            get(routes::library_access::get_library_access)
+                .patch(routes::library_access::set_library_access),
         );
 
     let filesystem_routes = Router::new()
@@ -267,7 +276,31 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/books/{id}/cover", get(routes::files::get_cover))
         .route("/api/v1/books/{id}/file", get(routes::files::get_file))
         .route("/api/v1/books/{id}/metadata/search", get(routes::metadata::search_metadata))
-        .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata));
+        .route("/api/v1/books/{id}/metadata/apply", axum::routing::post(routes::metadata::apply_metadata))
+        .route(
+            "/api/v1/books/{id}/ratings",
+            get(routes::ratings_reviews::get_book_ratings)
+                .post(routes::ratings_reviews::set_book_rating),
+        )
+        .route(
+            "/api/v1/books/{id}/reviews",
+            get(routes::ratings_reviews::list_book_reviews)
+                .post(routes::ratings_reviews::create_review),
+        )
+        .route(
+            "/api/v1/reviews/{id}",
+            get(routes::ratings_reviews::get_review)
+                .patch(routes::ratings_reviews::update_review)
+                .delete(routes::ratings_reviews::delete_review),
+        )
+        .route(
+            "/api/v1/books/{id}/convert",
+            axum::routing::post(routes::conversions::start_conversion),
+        )
+        .route(
+            "/api/v1/conversions/{id}",
+            get(routes::conversions::get_conversion_status),
+        );
 
     let reading_routes = Router::new()
         .route(
@@ -291,6 +324,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/highlights/{id}",
             axum::routing::patch(routes::highlights::update_highlight)
                 .delete(routes::highlights::delete_highlight),
+        )
+        .route(
+            "/api/v1/me/bookmarks",
+            get(routes::progress::list_all_bookmarks),
         )
         .route(
             "/api/v1/me/highlights",
