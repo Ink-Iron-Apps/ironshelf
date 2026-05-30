@@ -237,7 +237,7 @@ pub async fn login(
     let secure_suffix = if is_tls { "; Secure" } else { "" };
 
     let cookie = format!(
-        "ironshelf_session={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800{}",
+        "ironshelf_session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800{}",
         session_id, secure_suffix
     );
 
