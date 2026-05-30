@@ -147,6 +147,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/auth/api-keys/{id}",
             axum::routing::delete(routes::auth::delete_api_key),
         )
+        .route(
+            "/api/v1/auth/unclaim",
+            axum::routing::delete(routes::cloud_auth::unclaim_server),
+        )
         .route("/api/v1/users", get(routes::users::list_users))
         .route(
             "/api/v1/users/invite",

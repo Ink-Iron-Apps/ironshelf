@@ -6,6 +6,7 @@
   'use strict';
 
   const API = '/api/v1';
+  const CLOUD_API = 'https://ironshelf-cloud.padragantrbs.workers.dev';
   let currentUser = null;
   let sidebarOpen = false;
 
@@ -2427,6 +2428,18 @@
         </div>
         ` : ''}
 
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" id="cloud-settings-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud</h3>
+          <p class="description">Link this server to Ironshelf Cloud so users with cloud accounts can sign in.</p>
+          <div class="cloud-claim-card" id="cloud-claim-card">
+            <div class="cloud-claim-loading">
+              <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
         <div class="settings-section">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('key', 20)} API Keys</h3>
           <p class="description">API keys authenticate the Flutter app or external tools. The key is shown once upon creation.</p>
@@ -2803,6 +2816,11 @@
       // Server update check (owner only)
       bindServerUpdateEvents();
 
+      // Cloud settings (owner only)
+      if (currentUser?.is_owner) {
+        loadCloudSettingsCard();
+      }
+
       // Device integration copy buttons
       document.querySelectorAll('.copy-device-url').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2883,6 +2901,180 @@
       }
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
+    }
+  }
+
+  async function loadCloudSettingsCard() {
+    const cardContainer = document.getElementById('cloud-claim-card');
+    if (!cardContainer) return;
+
+    try {
+      const claimStatus = await fetch(`${API}/auth/claim-status`).then(r => r.ok ? r.json() : null).catch(() => null);
+
+      if (claimStatus?.is_claimed) {
+        // Server is claimed — show status and unclaim button
+        const cloudUrl = claimStatus.cloud_service_url || CLOUD_API;
+        const serverId = claimStatus.server_id || 'unknown';
+
+        cardContainer.innerHTML = `
+          <div class="card cloud-status-card cloud-status-claimed">
+            <div class="cloud-status-header">
+              <span class="cloud-status-indicator cloud-status-connected"></span>
+              <strong>Linked to Ironshelf Cloud</strong>
+            </div>
+            <dl class="cloud-status-details">
+              <dt>Server ID</dt>
+              <dd><code>${escapeHtml(serverId)}</code></dd>
+              <dt>Cloud Service</dt>
+              <dd>${escapeHtml(cloudUrl)}</dd>
+            </dl>
+            <p class="text-caption" style="margin-top:var(--space-3)">Users with Ironshelf Cloud accounts can sign in to this server.</p>
+            <button class="btn btn-danger mt-4" id="unclaim-server-btn">${icon('x', 16)} Disconnect from Cloud</button>
+          </div>
+        `;
+
+        document.getElementById('unclaim-server-btn')?.addEventListener('click', () => {
+          showConfirmModal({
+            title: 'Disconnect from Ironshelf Cloud',
+            message: 'This will remove the cloud link. Users who signed in via Ironshelf Cloud will lose access on their next session. You can reclaim the server later.',
+            confirmText: 'Disconnect',
+            onConfirm: async () => {
+              try {
+                await apiDelete('/auth/unclaim');
+                toast('Server disconnected from Ironshelf Cloud', 'success');
+                loadCloudSettingsCard();
+              } catch (unclaimError) {
+                toast(unclaimError.message, 'error');
+              }
+            },
+          });
+        });
+      } else {
+        // Server is NOT claimed — show claim button
+        cardContainer.innerHTML = `
+          <div class="card cloud-status-card">
+            <div class="cloud-status-header">
+              <span class="cloud-status-indicator cloud-status-disconnected"></span>
+              <strong>Not connected</strong>
+            </div>
+            <p class="text-caption" style="margin-top:var(--space-2)">Claim this server to let users with Ironshelf Cloud accounts sign in.</p>
+            <button class="btn btn-cloud mt-4" id="claim-server-btn" style="width:auto">${icon('globe', 16)} Claim this Server</button>
+          </div>
+        `;
+
+        document.getElementById('claim-server-btn')?.addEventListener('click', () => {
+          const { close } = showModal({
+            title: 'Claim Server via Ironshelf Cloud',
+            description: 'Sign in with your Ironshelf Cloud account to claim this server.',
+            content: `
+              <form id="cloud-claim-form" novalidate>
+                <div class="form-group">
+                  <label class="form-label" for="claim-cloud-email">Cloud Email or Username</label>
+                  <input type="text" class="form-input" id="claim-cloud-email" required autocomplete="email" autofocus>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="claim-cloud-password">Cloud Password</label>
+                  <input type="password" class="form-input" id="claim-cloud-password" required autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="claim-server-name">Server Name</label>
+                  <input type="text" class="form-input" id="claim-server-name" placeholder="My Ironshelf Server" value="${escapeHtml(window.location.hostname)}">
+                  <p class="form-hint">A friendly name for this server in your cloud dashboard.</p>
+                </div>
+                <div id="claim-error" class="form-error hidden" role="alert"></div>
+                <div class="modal-actions">
+                  <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+                  <button type="submit" class="btn btn-primary" id="claim-submit-btn">${icon('globe', 16)} Claim Server</button>
+                </div>
+              </form>
+            `,
+          });
+
+          const claimForm = document.getElementById('cloud-claim-form');
+          claimForm.querySelector('[data-action="cancel"]').addEventListener('click', close);
+
+          claimForm.addEventListener('submit', async (formEvent) => {
+            formEvent.preventDefault();
+            const claimError = document.getElementById('claim-error');
+            const claimSubmitBtn = document.getElementById('claim-submit-btn');
+            claimError.classList.add('hidden');
+            claimSubmitBtn.disabled = true;
+            claimSubmitBtn.textContent = 'Claiming...';
+
+            try {
+              // 1. Authenticate with cloud
+              const cloudAuthResponse = await fetch(`${CLOUD_API}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  email_or_username: document.getElementById('claim-cloud-email').value,
+                  password: document.getElementById('claim-cloud-password').value,
+                }),
+              });
+
+              if (!cloudAuthResponse.ok) {
+                const cloudAuthError = await cloudAuthResponse.json().catch(() => ({}));
+                throw new Error(cloudAuthError.error || 'Cloud authentication failed');
+              }
+
+              const cloudAuthData = await cloudAuthResponse.json();
+              if (!cloudAuthData.ok || !cloudAuthData.data?.token) {
+                throw new Error('Invalid response from cloud service');
+              }
+
+              const cloudJwt = cloudAuthData.data.token;
+
+              // 2. Claim server via cloud API
+              const claimCloudResponse = await fetch(`${CLOUD_API}/servers/claim`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${cloudJwt}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  url: window.location.origin,
+                  name: document.getElementById('claim-server-name').value || window.location.hostname,
+                }),
+              });
+
+              if (!claimCloudResponse.ok) {
+                const claimCloudError = await claimCloudResponse.json().catch(() => ({}));
+                throw new Error(claimCloudError.error || 'Failed to claim server on cloud');
+              }
+
+              const claimCloudData = await claimCloudResponse.json();
+              const claimToken = claimCloudData.data?.claim_token;
+              const serverId = claimCloudData.data?.server_id;
+
+              if (!claimToken) {
+                throw new Error('Cloud did not return a claim token');
+              }
+
+              // 3. Store claim on local server
+              await apiPost('/auth/claim', {
+                claim_token: claimToken,
+                cloud_service_url: CLOUD_API,
+                server_id: serverId,
+              });
+
+              close();
+              toast('Server claimed successfully! Cloud login is now enabled.', 'success');
+              loadCloudSettingsCard();
+            } catch (claimAttemptError) {
+              claimError.textContent = claimAttemptError.message;
+              claimError.classList.remove('hidden');
+              claimSubmitBtn.disabled = false;
+              claimSubmitBtn.textContent = 'Claim Server';
+            }
+          });
+        });
+      }
+    } catch (loadError) {
+      cardContainer.innerHTML = `
+        <div class="card" style="color:var(--color-muted);text-align:center;padding:var(--space-6)">
+          Failed to load cloud status
+        </div>
+      `;
     }
   }
 
@@ -7669,7 +7861,7 @@
       claimStatus = await fetch(`${API}/auth/claim-status`).then(r => r.ok ? r.json() : null).catch(() => null);
     } catch { /* ignore */ }
 
-    const defaultCloudUrl = claimStatus?.cloud_service_url || 'https://ironshelf.inknironapps.com';
+    const defaultCloudUrl = claimStatus?.cloud_service_url || CLOUD_API;
 
     document.getElementById('app').innerHTML = `
       <div class="login-page">
