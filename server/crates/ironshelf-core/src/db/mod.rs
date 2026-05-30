@@ -2170,8 +2170,8 @@ impl IronshelfDb {
     // Reading Queue
     // =========================================================================
 
-    /// A reading queue entry with enriched book metadata (joined from library sources at route level).
-    /// At the DB level we only store user_id, book_id, position, added_at.
+    // Reading queue: stores user_id, book_id, position, added_at.
+    // Enriched metadata (title, cover) joined at route level from library sources.
 
     /// Get all reading queue entries for a user, ordered by position.
     pub async fn get_reading_queue(
