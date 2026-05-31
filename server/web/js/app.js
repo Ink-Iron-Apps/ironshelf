@@ -163,7 +163,11 @@
     const allowedAttributes = { a: ['href', 'title'], span: ['class'], div: ['class'] };
 
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(String(html), 'text/html');
+
+    // Some inputs (e.g. <frameset> or otherwise malformed markup) yield a
+    // document with no body. Fall back to escaped plain text instead of crashing.
+    if (!doc || !doc.body) return escapeHtml(String(html));
 
     function cleanNode(node) {
       if (node.nodeType === Node.TEXT_NODE) return;
