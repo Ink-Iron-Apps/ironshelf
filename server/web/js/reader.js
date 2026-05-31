@@ -397,9 +397,17 @@ const IronshelfReader = (() => {
       // Fetch saved progress
       const savedProgress = await fetchProgress(bookId);
 
-      // Create epub book from the file endpoint
+      // Download the EPUB as an ArrayBuffer and open it as an archive. Passing
+      // the URL directly makes epub.js treat it as an unpacked directory (it
+      // fetches META-INF/container.xml relative to the path) and hang; an
+      // ArrayBuffer forces archive mode and carries the session cookie.
       const bookUrl = `${API}/books/${bookId}/file?format=EPUB`;
-      currentBook = ePub(bookUrl);
+      const bookResponse = await fetch(bookUrl, { credentials: 'same-origin' });
+      if (!bookResponse.ok) {
+        throw new Error(`Failed to download book (${bookResponse.status})`);
+      }
+      const bookData = await bookResponse.arrayBuffer();
+      currentBook = ePub(bookData);
 
       // Wait for book to be ready
       await currentBook.ready;
