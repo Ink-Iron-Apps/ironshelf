@@ -66,11 +66,16 @@ pub async fn auth_middleware(
 async fn extract_auth_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<AuthUser, StatusCode> {
     let pool = state.ironshelf_db.pool();
 
-    // Try Bearer token first (API key: "Bearer irs_<prefix>.<secret>")
+    // Try Bearer token first. API keys look like "irs_<prefix>.<secret>"; any
+    // other Bearer value is treated as a session id (used by the hosted web UI,
+    // which is cross-origin and so can't rely on the session cookie).
     if let Some(auth_header) = headers.get(header::AUTHORIZATION) {
         let auth_str = auth_header.to_str().map_err(|_| StatusCode::UNAUTHORIZED)?;
         if let Some(token) = auth_str.strip_prefix("Bearer ") {
-            return validate_api_key(pool, token).await;
+            if token.starts_with("irs_") {
+                return validate_api_key(pool, token).await;
+            }
+            return validate_session(pool, token).await;
         }
     }
 
