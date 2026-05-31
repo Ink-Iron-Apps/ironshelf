@@ -1,0 +1,59 @@
+name: Mirror Web UI to ironshelf-web
+
+# Single source of truth: the web UI lives in server/web/. On changes, mirror
+# the JS/CSS/assets to the hosted dashboard repo (ironshelf-web) so it never
+# has to be edited separately. The hosted repo keeps its own index.html (which
+# sets window.IRONSHELF_HOSTED = true) and CNAME — those are NOT overwritten.
+#
+# Requires a WEB_MIRROR_TOKEN secret: a fine-grained PAT with Contents:
+# Read and write on LightWraith8268/ironshelf-web.
+on:
+  push:
+    branches: [claude/dev]
+    paths:
+      - 'server/web/js/**'
+      - 'server/web/css/**'
+      - 'server/web/favicon.svg'
+      - '.github/workflows/mirror-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-web
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ironshelf (source)
+        uses: actions/checkout@v5
+
+      - name: Checkout ironshelf-web (target)
+        uses: actions/checkout@v5
+        with:
+          repository: LightWraith8268/ironshelf-web
+          token: ${{ secrets.WEB_MIRROR_TOKEN }}
+          path: web-mirror
+          ref: main
+
+      - name: Sync web assets
+        run: |
+          rsync -a --delete server/web/js/ web-mirror/js/
+          rsync -a --delete server/web/css/ web-mirror/css/
+          cp server/web/favicon.svg web-mirror/favicon.svg 2>/dev/null || true
+
+      - name: Commit + push if changed
+        working-directory: web-mirror
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add js css favicon.svg
+            git commit -m "chore: mirror web UI from ironshelf@${GITHUB_SHA::7}"
+            git push
+          else
+            echo "No web changes to mirror."
+          fi

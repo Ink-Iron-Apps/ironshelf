@@ -6,6 +6,12 @@ const IronshelfPdfReader = (() => {
   'use strict';
 
   const API = '/api/v1';
+
+  function withToken(url) {
+    const token = localStorage.getItem("ironshelf_server_token");
+    if (!token) return url;
+    return url + (url.includes("?") ? "&" : "?") + "access_token=" + encodeURIComponent(token);
+  }
   const PDFJS_CDN = '/js/vendor/pdf.min.mjs';
   const PDFJS_WORKER_CDN = '/js/vendor/pdf.worker.min.mjs';
   const STORAGE_ZOOM_KEY = 'ironshelf_pdf_zoom';
@@ -63,7 +69,7 @@ const IronshelfPdfReader = (() => {
   // --- Progress API ---
   async function fetchProgress(bookId) {
     try {
-      const response = await fetch(`${API}/books/${bookId}/progress`, {
+      const response = await fetch(withToken(`${API}/books/${bookId}/progress`), {
         credentials: 'same-origin',
       });
       if (!response.ok) return null;
@@ -79,7 +85,7 @@ const IronshelfPdfReader = (() => {
 
   async function saveProgress(bookId, page, percent) {
     try {
-      await fetch(`${API}/books/${bookId}/progress`, {
+      await fetch(withToken(`${API}/books/${bookId}/progress`), {
         method: 'PUT',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -706,7 +712,7 @@ const IronshelfPdfReader = (() => {
       await loadPdfJs();
 
       const savedProgress = await fetchProgress(bookId);
-      const fileUrl = `${API}/books/${bookId}/file?format=PDF`;
+      const fileUrl = withToken(`${API}/books/${bookId}/file?format=PDF`);
 
       const loadingTask = pdfjsLib.getDocument(fileUrl);
       currentDocument = await loadingTask.promise;

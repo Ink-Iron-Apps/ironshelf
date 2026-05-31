@@ -5,8 +5,23 @@
 (() => {
   'use strict';
 
-  const API = '/api/v1';
+  // Hosted mode: this same UI runs both embedded in the server (same-origin,
+  // cookie auth) and on the hosted dashboard (cross-origin, Bearer-token auth).
+  // ironshelf-web's index.html sets window.IRONSHELF_HOSTED = true.
+  const HOSTED = !!window.IRONSHELF_HOSTED;
+  const SERVER_URL = HOSTED ? (localStorage.getItem('ironshelf_server_url') || '') : '';
+  const API = (HOSTED && SERVER_URL) ? `${SERVER_URL}/api/v1` : '/api/v1';
   const CLOUD_API = 'https://ironshelf-cloud.padragantrbs.workers.dev';
+
+  // Cross-origin media (<img>/downloads) can't set an Authorization header, so
+  // append the server token as a query param the server also accepts. Empty
+  // (no-op) on the same-origin server UI.
+  function mediaToken(separator = '?') {
+    if (!HOSTED) return '';
+    const token = localStorage.getItem('ironshelf_server_token');
+    return token ? `${separator}access_token=${encodeURIComponent(token)}` : '';
+  }
+
   let currentUser = null;
   let sidebarOpen = false;
 
@@ -241,10 +256,14 @@
   // --- API Helpers ---
 
   async function api(path, options = {}) {
+    // Hosted UI is cross-origin → authenticate with the stored server token as
+    // a Bearer header (cookies don't cross origins). Server UI uses the cookie.
+    const serverToken = HOSTED ? localStorage.getItem('ironshelf_server_token') : null;
     const response = await fetch(`${API}${path}`, {
       credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
+        ...(serverToken ? { 'Authorization': `Bearer ${serverToken}` } : {}),
         ...options.headers,
       },
       ...options,
@@ -1188,6 +1207,7 @@
     // Event bindings
     document.getElementById('logout-btn')?.addEventListener('click', async () => {
       await apiPost('/auth/logout', {}).catch(() => {});
+      if (HOSTED) localStorage.removeItem('ironshelf_server_token');
       currentUser = null;
       stopNotificationPolling();
       closeNotificationPanel();
@@ -1310,10 +1330,14 @@
       submitBtn.textContent = 'Signing in...';
 
       try {
-        await apiPost('/auth/login', {
+        const loginResult = await apiPost('/auth/login', {
           username: document.getElementById('login-username').value,
           password: document.getElementById('login-password').value,
         });
+        // Hosted UI is cross-origin: keep the session as a Bearer token.
+        if (HOSTED && loginResult?.session_id) {
+          localStorage.setItem('ironshelf_server_token', loginResult.session_id);
+        }
         await checkAuth();
         navigateTo('/');
       } catch (err) {
@@ -2338,7 +2362,7 @@
         { label: book.title, path: `/book/${bookId}` },
       ];
 
-      const coverUrl = book.has_cover ? `${API}/books/${bookId}/cover` : '';
+      const coverUrl = book.has_cover ? `${API}/books/${bookId}/cover${mediaToken()}` : '';
       const formats = book.formats || [];
       const tags = book.tags || [];
       const genres = book.genres || [];
@@ -2404,7 +2428,7 @@
                   </a>`;
                 })()}
                 ${formats.map(f => `
-                  <a href="${API}/books/${bookId}/file?format=${f.kind}" class="btn btn-primary" download aria-label="Download ${f.kind} format">
+                  <a href="${API}/books/${bookId}/file?format=${f.kind}${mediaToken("&")}" class="btn btn-primary" download aria-label="Download ${f.kind} format">
                     ${icon('download', 16)} ${escapeHtml(f.kind.toUpperCase())}
                   </a>
                 `).join('')}
@@ -4518,7 +4542,7 @@
             <div class="continue-reading-row">
         `;
         for (const book of continueBooks) {
-          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
           const progressPercent = Math.round((book.progress || 0) * 100);
           bodyContent += `
             <div class="continue-reading-card" data-read-book-id="${book.id}" data-read-format="${book.format || 'epub'}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
@@ -5003,7 +5027,7 @@
       } else {
         bodyContent += `<div class="grid grid-books">`;
         for (const book of books) {
-          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
           bodyContent += `
             <div class="book-card collection-book-card" data-book-id="${book.id}" role="link" tabindex="0" aria-label="${escapeHtml(book.title)}">
               <button class="remove-from-collection" data-remove-book-id="${book.id}" aria-label="Remove ${escapeHtml(book.title)} from collection" title="Remove from collection">
@@ -5548,7 +5572,7 @@
   // --- Helpers ---
 
   function renderBookCard(book, showSeriesIndex = false) {
-    const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+    const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
     return `
       <div class="book-card" data-book-id="${book.id}" role="link" tabindex="0" aria-label="${escapeHtml(book.title)}">
         ${showSeriesIndex && book.series_index ? `<span class="series-badge">#${book.series_index}</span>` : ''}
@@ -5933,7 +5957,7 @@
         bodyContent += `<div class="queue-list" id="queue-list">`;
         for (let i = 0; i < queueItems.length; i++) {
           const queueItem = queueItems[i];
-          const coverUrl = queueItem.has_cover ? `${API}/books/${queueItem.book_id || queueItem.id}/cover` : '';
+          const coverUrl = queueItem.has_cover ? `${API}/books/${queueItem.book_id || queueItem.id}/cover${mediaToken()}` : '';
           bodyContent += `
             <div class="queue-item" data-queue-id="${queueItem.id}" data-queue-position="${i}" draggable="true">
               <div class="queue-item-drag" aria-label="Drag to reorder" title="Drag to reorder">
@@ -6206,7 +6230,7 @@
           <h3 class="mt-6 mb-4">Completed</h3>
           <div class="year-in-books-grid">
             ${completedBooks.map(completedBook => {
-              const completedCoverUrl = completedBook.has_cover ? `${API}/books/${completedBook.id}/cover` : '';
+              const completedCoverUrl = completedBook.has_cover ? `${API}/books/${completedBook.id}/cover${mediaToken()}` : '';
               return `
                 <div class="mini-cover" data-book-id="${completedBook.id}" role="link" tabindex="0" title="${escapeHtml(completedBook.title || '')}">
                   ${completedCoverUrl ? `<img src="${completedCoverUrl}" alt="" loading="lazy">` : `<div style="width:100%;height:100%;background:var(--color-surface-active);display:flex;align-items:center;justify-content:center;color:var(--color-muted)">${Icons.book}</div>`}
@@ -7247,7 +7271,7 @@
               </div>
               <div class="duplicate-books-row">
                 ${duplicateBooks.map(duplicateBook => {
-                  const duplicateCoverUrl = duplicateBook.has_cover ? `${API}/books/${duplicateBook.id}/cover` : '';
+                  const duplicateCoverUrl = duplicateBook.has_cover ? `${API}/books/${duplicateBook.id}/cover${mediaToken()}` : '';
                   return `
                     <div class="duplicate-book-card">
                       <div class="book-cover" style="height:200px;width:133px;margin:0 auto var(--space-3)">
@@ -7369,7 +7393,7 @@
                       clearInterval(conversionPollTimer); conversionPollTimer = null;
                       statusEl.innerHTML = `
                         <span style="color:var(--color-success)">Conversion complete!</span>
-                        <a href="${API}/books/${bookId}/file?format=${targetFormat}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
+                        <a href="${API}/books/${bookId}/file?format=${targetFormat}${mediaToken("&")}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
                       `;
                       toast('Format conversion complete', 'success');
                     } else if (jobStatus?.status === 'failed') {
@@ -7388,7 +7412,7 @@
                 // Immediate result
                 statusEl.innerHTML = `
                   <span style="color:var(--color-success)">Conversion complete!</span>
-                  <a href="${API}/books/${bookId}/file?format=${targetFormat}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
+                  <a href="${API}/books/${bookId}/file?format=${targetFormat}${mediaToken("&")}" class="btn btn-primary btn-sm" download>${icon('download', 14)} Download ${targetFormat.toUpperCase()}</a>
                 `;
                 toast('Format conversion complete', 'success');
               }
@@ -9041,6 +9065,13 @@
   window.addEventListener('hashchange', route);
 
   window.addEventListener('DOMContentLoaded', async () => {
+    // Hosted dashboard: a cloud-reset deep link, or no server chosen yet, shows
+    // the connect/cloud screen instead of the normal app bootstrap.
+    if (HOSTED && (window.location.hash.includes('cloud-reset') || !SERVER_URL)) {
+      renderConnectServer();
+      return;
+    }
+
     if (await checkAuth()) {
       startNotificationPolling();
       fetchServerVersion(); // fire-and-forget; populates sidebar + settings
@@ -9103,7 +9134,7 @@
         bodyContent += `<p style="color:var(--color-text-dim);margin-bottom:var(--space-6)">These books have no description. Click a book to view it, then use "Enrich Metadata" to fetch information from Google Books or Open Library.</p>`;
         bodyContent += '<div class="grid grid-4">';
         for (const book of allBooks) {
-          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover` : '';
+          const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
           const authorNames = (book.author_names || []).join(', ');
           bodyContent += `
             <div class="book-card" data-book-id="${book.id}" role="link" tabindex="0">
@@ -9125,6 +9156,413 @@
       });
     } catch (err) {
       renderShell(renderError('Failed to load books', String(err?.message || err), renderMissingMetadata), 'libraries');
+    }
+  }
+
+  function renderConnectServer() {
+    const app = document.getElementById('app');
+    const savedUrl = localStorage.getItem('ironshelf_server_url') || '';
+
+    app.innerHTML = `
+      <div class="login-container">
+        <div class="login-card" style="max-width:520px">
+          <div class="login-brand" style="text-align:center;margin-bottom:var(--space-6)">
+            <img src="/favicon.svg" alt="" width="48" height="48" style="margin-bottom:var(--space-2)">
+            <h1 class="text-brand" style="font-size:var(--text-2xl)">Ironshelf</h1>
+            <p style="color:var(--color-text-dim);font-size:var(--text-sm)">Your books, everywhere</p>
+          </div>
+
+          <!-- Cloud Sign In -->
+          <div id="cloud-section" style="margin-bottom:var(--space-6)">
+            <div id="cloud-login-view">
+              <button class="btn btn-primary" style="width:100%;padding:var(--space-3)" id="cloud-signin-btn">
+                Sign in with Ironshelf Cloud
+              </button>
+              <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm);color:var(--color-muted)">
+                Access your servers from anywhere · <a href="#" id="cloud-register-link">Create account</a>
+              </p>
+            </div>
+
+            <!-- Cloud Login Form (hidden initially) -->
+            <form id="cloud-login-form" style="display:none">
+              <h3 style="margin-bottom:var(--space-4)">Sign in to Ironshelf Cloud</h3>
+              <div class="form-group">
+                <label>Email or Username</label>
+                <input type="text" class="form-input" name="email_or_username" required autofocus>
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" class="form-input" name="password" required>
+              </div>
+              <div id="cloud-login-status" style="margin-bottom:var(--space-3)"></div>
+              <button type="submit" class="btn btn-primary" style="width:100%">Sign In</button>
+              <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm)">
+                <a href="#" id="cloud-forgot-link">Forgot password?</a> · <a href="#" id="cloud-back-link">← Back</a>
+              </p>
+            </form>
+
+            <!-- Cloud Forgot Password Form (hidden initially) -->
+            <form id="cloud-forgot-form" style="display:none">
+              <h3 style="margin-bottom:var(--space-4)">Reset your password</h3>
+              <p style="color:var(--color-muted);font-size:var(--text-sm);margin-bottom:var(--space-3)">Enter your account email and we'll send you a reset link.</p>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" class="form-input" name="email" required autofocus>
+              </div>
+              <div id="cloud-forgot-status" style="margin-bottom:var(--space-3)"></div>
+              <button type="submit" class="btn btn-primary" style="width:100%">Send reset link</button>
+              <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm)">
+                <a href="#" id="cloud-forgot-back-link">← Back to sign in</a>
+              </p>
+            </form>
+
+            <!-- Cloud Reset Password Form (shown via emailed link) -->
+            <form id="cloud-reset-form" style="display:none">
+              <h3 style="margin-bottom:var(--space-4)">Choose a new password</h3>
+              <div class="form-group">
+                <label>New Password</label>
+                <input type="password" class="form-input" name="new_password" required minlength="8" placeholder="At least 8 characters">
+              </div>
+              <div class="form-group">
+                <label>Confirm Password</label>
+                <input type="password" class="form-input" name="confirm_password" required minlength="8">
+              </div>
+              <div id="cloud-reset-status" style="margin-bottom:var(--space-3)"></div>
+              <button type="submit" class="btn btn-primary" style="width:100%">Set new password</button>
+            </form>
+
+            <!-- Cloud Register Form (hidden initially) -->
+            <form id="cloud-register-form" style="display:none">
+              <h3 style="margin-bottom:var(--space-4)">Create Ironshelf Cloud Account</h3>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" class="form-input" name="email" required>
+              </div>
+              <div class="form-group">
+                <label>Username</label>
+                <input type="text" class="form-input" name="username" required placeholder="2-32 chars, alphanumeric">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" class="form-input" name="password" required minlength="8">
+              </div>
+              <div id="cloud-register-status" style="margin-bottom:var(--space-3)"></div>
+              <button type="submit" class="btn btn-primary" style="width:100%">Create Account</button>
+              <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm)">
+                Already have an account? <a href="#" id="cloud-login-link">Sign in</a>
+              </p>
+            </form>
+
+            <!-- Server Picker (shown after cloud auth) -->
+            <div id="cloud-server-picker" style="display:none">
+              <h3 style="margin-bottom:var(--space-4)">Your Servers</h3>
+              <div id="cloud-server-list"></div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-6)">
+            <hr style="flex:1;border:none;border-top:1px solid var(--color-border)">
+            <span style="color:var(--color-muted);font-size:var(--text-sm)">or connect directly</span>
+            <hr style="flex:1;border:none;border-top:1px solid var(--color-border)">
+          </div>
+
+          <!-- Direct Server URL -->
+          <form id="connect-form">
+            <div class="form-group">
+              <label for="server-url">Server URL</label>
+              <input type="url" class="form-input" id="server-url" name="server_url"
+                     placeholder="https://books.example.com or http://192.168.1.50:10810"
+                     value="${escapeHtml(savedUrl)}">
+              <p class="form-hint" style="margin-top:var(--space-1);font-size:var(--text-sm);color:var(--color-muted)">
+                Enter your server's URL to connect directly
+              </p>
+            </div>
+            <div id="connect-status" style="margin-bottom:var(--space-4)"></div>
+            <button type="submit" class="btn btn-ghost" style="width:100%" id="connect-btn">
+              Connect to Server
+            </button>
+          </form>
+
+          <div style="text-align:center;margin-top:var(--space-6);padding-top:var(--space-4);border-top:1px solid var(--color-border)">
+            <p style="font-size:var(--text-sm);color:var(--color-muted)">
+              Don't have a server? <a href="https://github.com/LightWraith8268/ironshelf" target="_blank" rel="noopener">Install Ironshelf</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('connect-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const urlInput = document.getElementById('server-url');
+      const statusDiv = document.getElementById('connect-status');
+      const connectBtn = document.getElementById('connect-btn');
+      let serverUrl = urlInput.value.trim().replace(/\/+$/, '');
+
+      if (!serverUrl) return;
+
+      connectBtn.disabled = true;
+      connectBtn.textContent = 'Connecting...';
+      statusDiv.innerHTML = '';
+
+      try {
+        // Test connection by hitting /health
+        const response = await fetch(`${serverUrl}/health`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        const health = await response.json();
+
+        if (health.status !== 'healthy' && health.status !== 'ok') {
+          throw new Error('Server is not healthy');
+        }
+
+        statusDiv.innerHTML = '<p style="color:var(--color-success)">&#10003; Connected to Ironshelf v' + escapeHtml(health.version || '?') + '</p>';
+
+        // Save and reload
+        localStorage.setItem('ironshelf_server_url', serverUrl);
+        setTimeout(() => window.location.reload(), 500);
+
+      } catch (err) {
+        statusDiv.innerHTML = '<p style="color:var(--color-danger)">&#10007; Could not connect: ' + escapeHtml(String(err.message || err)) + '</p>';
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect';
+      }
+    };
+
+    // --- Cloud auth event handlers ---
+
+    const cloudLoginView = document.getElementById('cloud-login-view');
+    const cloudLoginForm = document.getElementById('cloud-login-form');
+    const cloudRegisterForm = document.getElementById('cloud-register-form');
+    const cloudForgotForm = document.getElementById('cloud-forgot-form');
+    const cloudResetForm = document.getElementById('cloud-reset-form');
+    const cloudServerPicker = document.getElementById('cloud-server-picker');
+
+    function showView(view) {
+      cloudLoginView.style.display = view === 'buttons' ? '' : 'none';
+      cloudLoginForm.style.display = view === 'login' ? '' : 'none';
+      cloudRegisterForm.style.display = view === 'register' ? '' : 'none';
+      cloudForgotForm.style.display = view === 'forgot' ? '' : 'none';
+      cloudResetForm.style.display = view === 'reset' ? '' : 'none';
+      cloudServerPicker.style.display = view === 'servers' ? '' : 'none';
+    }
+
+    document.getElementById('cloud-signin-btn')?.addEventListener('click', () => showView('login'));
+    document.getElementById('cloud-register-link')?.addEventListener('click', (e) => { e.preventDefault(); showView('register'); });
+    document.getElementById('cloud-back-link')?.addEventListener('click', (e) => { e.preventDefault(); showView('buttons'); });
+    document.getElementById('cloud-login-link')?.addEventListener('click', (e) => { e.preventDefault(); showView('login'); });
+    document.getElementById('cloud-forgot-link')?.addEventListener('click', (e) => { e.preventDefault(); showView('forgot'); });
+    document.getElementById('cloud-forgot-back-link')?.addEventListener('click', (e) => { e.preventDefault(); showView('login'); });
+
+    // Cloud forgot password — request a reset email.
+    cloudForgotForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const statusDiv = document.getElementById('cloud-forgot-status');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      statusDiv.innerHTML = '';
+      submitBtn.disabled = true;
+      try {
+        await fetch(`${CLOUD_API}/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: form.get('email') }),
+        });
+        // Always show the same message (no account enumeration).
+        statusDiv.innerHTML = `<p style="color:var(--color-success)">If an account exists for that email, a reset link is on its way. Check your inbox — and your spam/junk folder if you don't see it within a few minutes.</p>`;
+      } catch (err) {
+        statusDiv.innerHTML = `<p style="color:var(--color-danger)">${escapeHtml(String(err.message))}</p>`;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    };
+
+    // Cloud reset password — set a new password using the emailed token.
+    let cloudResetToken = '';
+    cloudResetForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const statusDiv = document.getElementById('cloud-reset-status');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      statusDiv.innerHTML = '';
+      const newPassword = form.get('new_password');
+      if (newPassword !== form.get('confirm_password')) {
+        statusDiv.innerHTML = `<p style="color:var(--color-danger)">Passwords do not match.</p>`;
+        return;
+      }
+      submitBtn.disabled = true;
+      try {
+        const res = await fetch(`${CLOUD_API}/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: cloudResetToken, new_password: newPassword }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Reset failed');
+        statusDiv.innerHTML = `<p style="color:var(--color-success)">Password updated. You can sign in now.</p>`;
+        // Clear the token from the URL and return to sign-in.
+        if (window.history?.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+        setTimeout(() => showView('login'), 1200);
+      } catch (err) {
+        statusDiv.innerHTML = `<p style="color:var(--color-danger)">${escapeHtml(String(err.message))}</p>`;
+      } finally {
+        submitBtn.disabled = false;
+      }
+    };
+
+    // If arriving from a reset email (#/cloud-reset?token=...), show the reset form.
+    const resetTokenMatch = window.location.hash.match(/[?&]token=([^&]+)/);
+    if (window.location.hash.includes('cloud-reset') && resetTokenMatch) {
+      cloudResetToken = decodeURIComponent(resetTokenMatch[1]);
+      showView('reset');
+    }
+
+    // Cloud login
+    cloudLoginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const statusDiv = document.getElementById('cloud-login-status');
+      statusDiv.innerHTML = '';
+
+      try {
+        const res = await fetch(`${CLOUD_API}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email_or_username: form.get('email_or_username'),
+            password: form.get('password'),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Login failed');
+
+        localStorage.setItem('ironshelf_cloud_token', data.data.token);
+        localStorage.setItem('ironshelf_cloud_username', data.data.username);
+
+        // Load user's servers
+        await loadCloudServers(data.data.token);
+      } catch (err) {
+        statusDiv.innerHTML = `<p style="color:var(--color-danger)">${escapeHtml(String(err.message))}</p>`;
+      }
+    };
+
+    // Cloud register
+    cloudRegisterForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const statusDiv = document.getElementById('cloud-register-status');
+      statusDiv.innerHTML = '';
+
+      try {
+        const res = await fetch(`${CLOUD_API}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: form.get('email'),
+            username: form.get('username'),
+            password: form.get('password'),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Registration failed');
+
+        localStorage.setItem('ironshelf_cloud_token', data.data.token);
+        localStorage.setItem('ironshelf_cloud_username', data.data.username);
+
+        // Show servers (will be empty for new user)
+        await loadCloudServers(data.data.token);
+      } catch (err) {
+        statusDiv.innerHTML = `<p style="color:var(--color-danger)">${escapeHtml(String(err.message))}</p>`;
+      }
+    };
+
+    async function loadCloudServers(token) {
+      showView('servers');
+      const serverList = document.getElementById('cloud-server-list');
+      serverList.innerHTML = '<p style="color:var(--color-muted)">Loading servers...</p>';
+
+      try {
+        const [ownedRes, sharedRes] = await Promise.all([
+          fetch(`${CLOUD_API}/servers/mine`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${CLOUD_API}/servers/shared`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
+        const owned = (await ownedRes.json())?.data || [];
+        const shared = (await sharedRes.json())?.data || [];
+        const allServers = [...owned, ...shared];
+
+        if (allServers.length === 0) {
+          serverList.innerHTML = `
+            <div style="text-align:center;padding:var(--space-6);color:var(--color-muted)">
+              <p>No servers linked to your account yet.</p>
+              <p style="font-size:var(--text-sm);margin-top:var(--space-2)">
+                Install Ironshelf on your server, then claim it from Settings → Ironshelf Cloud.
+              </p>
+            </div>
+          `;
+          return;
+        }
+
+        serverList.innerHTML = allServers.map(server => `
+          <button class="cloud-server-btn" data-server-url="${escapeHtml(server.url)}" data-server-id="${escapeHtml(server.id)}" data-server-name="${escapeHtml(server.name)}">
+            <span class="cloud-server-name">${escapeHtml(server.name)}</span>
+            <span class="cloud-server-url">${escapeHtml(server.url)}</span>
+          </button>
+        `).join('');
+
+        // Click server → connect
+        serverList.querySelectorAll('.cloud-server-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const serverUrl = btn.dataset.serverUrl;
+            const serverId = btn.dataset.serverId;
+            btn.disabled = true;
+            btn.querySelector('.cloud-server-url').textContent = 'Connecting...';
+
+            try {
+              // Get access token from cloud
+              const tokenRes = await fetch(`${CLOUD_API}/servers/${serverId}/token`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const tokenData = await tokenRes.json();
+              if (!tokenRes.ok) throw new Error(tokenData.error || 'Failed to get access token');
+
+              // Login to server with cloud token
+              const loginRes = await fetch(`${serverUrl}/api/v1/auth/cloud-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cloud_token: tokenData.data.server_access_token }),
+              });
+
+              if (!loginRes.ok) {
+                const err = await loginRes.json().catch(() => ({}));
+                throw new Error(err.error || 'Server rejected cloud login');
+              }
+
+              // Store the server session as a Bearer token (cross-origin: no
+              // cookie), then save the URL and reload into the connected UI.
+              const loginData = await loginRes.json().catch(() => ({}));
+              if (loginData?.session_id) {
+                localStorage.setItem('ironshelf_server_token', loginData.session_id);
+              }
+              localStorage.setItem('ironshelf_server_url', serverUrl);
+              window.location.reload();
+            } catch (err) {
+              btn.disabled = false;
+              btn.querySelector('.cloud-server-url').textContent = err.message;
+              btn.querySelector('.cloud-server-url').style.color = 'var(--color-danger)';
+            }
+          });
+        });
+      } catch (err) {
+        serverList.innerHTML = `<p style="color:var(--color-danger)">Failed to load servers: ${escapeHtml(String(err.message))}</p>`;
+      }
     }
   }
 
