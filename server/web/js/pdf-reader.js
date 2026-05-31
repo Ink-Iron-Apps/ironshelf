@@ -6,8 +6,8 @@ const IronshelfPdfReader = (() => {
   'use strict';
 
   const API = '/api/v1';
-  const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
-  const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+  const PDFJS_CDN = '/js/vendor/pdf.min.mjs';
+  const PDFJS_WORKER_CDN = '/js/vendor/pdf.worker.min.mjs';
   const STORAGE_ZOOM_KEY = 'ironshelf_pdf_zoom';
   const STORAGE_MODE_KEY = 'ironshelf_pdf_mode';
   const STORAGE_DARK_KEY = 'ironshelf_pdf_dark';
