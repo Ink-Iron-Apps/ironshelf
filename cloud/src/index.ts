@@ -10,7 +10,13 @@
 
 import type { Env } from './types';
 import { jsonResponse } from './auth';
-import { handleRegister, handleLogin, handleMe, handleChangePassword } from './routes/auth';
+import {
+  handleRegister,
+  handleLogin,
+  handleMe,
+  handleChangePassword,
+  handleAdminResetPassword,
+} from './routes/auth';
 import {
   handleClaimServer,
   handleListMyServers,
@@ -74,6 +80,9 @@ async function routeRequest(
   }
   if (method === 'PUT' && path === '/auth/password') {
     return handleChangePassword(request, env);
+  }
+  if (method === 'POST' && path === '/auth/admin/reset-password') {
+    return handleAdminResetPassword(request, env);
   }
 
   // --- Token validation (servers call this) ---
