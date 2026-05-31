@@ -89,13 +89,21 @@ pub async fn get_remote_access_status(
     // Check cloudflared availability asynchronously.
     tunnel_status.is_available = TunnelManager::is_cloudflared_available().await;
 
-    // Determine the active method based on current state.
-    let active_method = if tunnel_status.is_active {
-        "tunnel"
+    // Determine the active method: live state first, then the persisted choice
+    // (DB), falling back to the config-file default.
+    let persisted_method = application_state
+        .ironshelf_db
+        .get_cloud_config("remote_access_method")
+        .await
+        .ok()
+        .flatten()
+        .filter(|method| !method.is_empty());
+    let active_method: String = if tunnel_status.is_active {
+        "tunnel".to_string()
     } else if upnp_status.is_enabled {
-        "upnp"
+        "upnp".to_string()
     } else {
-        &application_state.config.remote_access_method
+        persisted_method.unwrap_or_else(|| application_state.config.remote_access_method.clone())
     };
 
     // Build backward-compatible top-level fields from whichever method is active.
@@ -255,6 +263,12 @@ pub async fn start_tunnel(
 
     match tunnel_manager.start().await {
         Ok(public_url) => {
+            // Persist the choice so the tunnel auto-starts on the next boot.
+            let _ = application_state
+                .ironshelf_db
+                .set_cloud_config("remote_access_method", "tunnel")
+                .await;
+
             // If the server is claimed, update the cloud URL in the background.
             let cloud_state = application_state.clone();
             let tunnel_url = public_url.clone();
@@ -288,6 +302,12 @@ pub async fn stop_tunnel(
 
     let mut tunnel_manager = application_state.tunnel_manager.write().await;
     tunnel_manager.stop().await;
+    drop(tunnel_manager);
+
+    let _ = application_state
+        .ironshelf_db
+        .set_cloud_config("remote_access_method", "none")
+        .await;
 
     Ok(Json(json!({
         "active": false,
