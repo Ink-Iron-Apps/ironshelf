@@ -2587,6 +2587,49 @@
         </div>
 
         ${currentUser?.is_owner ? `
+        <div class="settings-section" data-cat="library" id="calibre-writeback-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('database', 20)} Calibre Write-Back</h3>
+          <p class="description">Optionally write applied metadata changes back to your Calibre library. Direct database writes are never used — choose Calibre's <code>calibredb</code> CLI or its Content Server API. Leave off to keep changes as Ironshelf-only overrides.</p>
+          <div class="form-group">
+            <label class="form-label" for="calibre-wb-mode">Mode</label>
+            <select class="form-input" id="calibre-wb-mode" style="width:auto;min-width:300px">
+              <option value="none" ${serverSettings.calibre_writeback_mode === 'none' ? 'selected' : ''}>Off — Ironshelf overrides only</option>
+              <option value="calibredb" ${serverSettings.calibre_writeback_mode === 'calibredb' ? 'selected' : ''}>calibredb CLI</option>
+              <option value="content_server" ${serverSettings.calibre_writeback_mode === 'content_server' ? 'selected' : ''}>Calibre Content Server API</option>
+            </select>
+          </div>
+          <div id="calibre-wb-calibredb-fields" class="${serverSettings.calibre_writeback_mode === 'calibredb' ? '' : 'hidden'}">
+            <div class="form-group">
+              <label class="form-label" for="calibre-wb-path">calibredb path</label>
+              <input type="text" class="form-input" id="calibre-wb-path" placeholder="calibredb" value="${escapeHtml(serverSettings.calibredb_path || '')}">
+              <p class="form-hint">Leave as <code>calibredb</code> if it's on the server's PATH. The Calibre desktop app must be closed while writing (it locks the library).</p>
+            </div>
+          </div>
+          <div id="calibre-wb-cs-fields" class="${serverSettings.calibre_writeback_mode === 'content_server' ? '' : 'hidden'}">
+            <div class="form-group">
+              <label class="form-label" for="calibre-wb-url">Content Server URL</label>
+              <input type="url" class="form-input" id="calibre-wb-url" placeholder="http://localhost:8080" value="${escapeHtml(serverSettings.calibre_cs_url || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calibre-wb-library">Library ID</label>
+              <input type="text" class="form-input" id="calibre-wb-library" placeholder="Calibre_Library" value="${escapeHtml(serverSettings.calibre_cs_library_id || '')}">
+              <p class="form-hint">The library name as it appears in the Content Server URL (e.g. <code>Calibre_Library</code>).</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calibre-wb-username">Username</label>
+              <input type="text" class="form-input" id="calibre-wb-username" autocomplete="off" value="${escapeHtml(serverSettings.calibre_cs_username || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="calibre-wb-password">Password</label>
+              <input type="password" class="form-input" id="calibre-wb-password" autocomplete="new-password" placeholder="${serverSettings.calibre_cs_password_set ? '•••••••• (unchanged)' : ''}">
+              <p class="form-hint">Leave blank to keep the current password. Content Server must allow writes (run with user accounts that have write permission).</p>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="calibre-wb-save">${icon('check', 16)} Save</button>
+        </div>
+        ` : ''}
+
+        ${currentUser?.is_owner ? `
         <div class="settings-section" id="author-photos-section" data-cat="general">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('users', 20)} Author Photos</h3>
           <p class="description">Download author portraits from Open Library and cache them on this server. Disabling stops all lookups and clears the cache.</p>
@@ -2949,6 +2992,38 @@
           }
         });
       });
+
+      // Calibre write-back settings
+      const calibreWbMode = document.getElementById('calibre-wb-mode');
+      if (calibreWbMode) {
+        const calibredbFields = document.getElementById('calibre-wb-calibredb-fields');
+        const csFields = document.getElementById('calibre-wb-cs-fields');
+        calibreWbMode.addEventListener('change', () => {
+          calibredbFields?.classList.toggle('hidden', calibreWbMode.value !== 'calibredb');
+          csFields?.classList.toggle('hidden', calibreWbMode.value !== 'content_server');
+        });
+        document.getElementById('calibre-wb-save')?.addEventListener('click', async () => {
+          const saveBtn = document.getElementById('calibre-wb-save');
+          saveBtn.disabled = true;
+          const payload = {
+            calibre_writeback_mode: calibreWbMode.value,
+            calibredb_path: document.getElementById('calibre-wb-path')?.value || '',
+            calibre_cs_url: document.getElementById('calibre-wb-url')?.value || '',
+            calibre_cs_library_id: document.getElementById('calibre-wb-library')?.value || '',
+            calibre_cs_username: document.getElementById('calibre-wb-username')?.value || '',
+          };
+          const newPassword = document.getElementById('calibre-wb-password')?.value;
+          if (newPassword) payload.calibre_cs_password = newPassword;
+          try {
+            cachedServerSettings = await apiPut('/server/settings', payload);
+            toast('Calibre write-back settings saved', 'success');
+          } catch (saveError) {
+            toast(saveError.message || 'Failed to save settings', 'error');
+          } finally {
+            saveBtn.disabled = false;
+          }
+        });
+      }
 
       // Bind events
       document.getElementById('create-api-key-btn')?.addEventListener('click', () => {

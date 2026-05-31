@@ -2,6 +2,7 @@
 
 pub mod acquisition;
 pub mod auth;
+pub mod calibre_writeback;
 pub mod cloud_auth;
 pub mod authors;
 pub mod books;
