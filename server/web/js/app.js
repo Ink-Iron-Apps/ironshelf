@@ -1024,7 +1024,6 @@
 
     const mainNavItems = [
       { id: 'home', label: 'Home', icon: 'home', path: '/' },
-      { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
       { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
@@ -1071,7 +1070,6 @@
     // Bottom nav: only essential items for mobile
     const bottomNavItems = [
       { id: 'home', label: 'Home', icon: 'home', path: '/' },
-      { id: 'libraries', label: 'Libraries', icon: 'library', path: '/libraries' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
       { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
@@ -1378,7 +1376,7 @@
   async function renderLibraries() {
     if (!await checkAuth()) return;
     setTitle(['Libraries']);
-    breadcrumbTrail = [{ label: 'Libraries', path: '/libraries' }];
+    breadcrumbTrail = [{ label: 'Settings', path: '/settings' }, { label: 'Libraries', path: '/libraries' }];
 
     // Show skeleton
     renderShell(`
@@ -1386,7 +1384,7 @@
         <h1>Libraries</h1>
       </div>
       ${skeletonList(3)}
-    `, 'libraries');
+    `, 'settings');
 
     try {
       const libraries = await apiGet('/libraries');
@@ -1432,7 +1430,7 @@
         bodyContent += '</div>';
       }
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       // Bind events
       document.querySelectorAll('[data-library-id]').forEach(card => {
@@ -1461,7 +1459,7 @@
       document.getElementById('add-library-btn')?.addEventListener('click', showAddLibraryModal);
       document.getElementById('add-library-empty-btn')?.addEventListener('click', showAddLibraryModal);
     } catch (err) {
-      renderShell(renderError('Failed to load libraries', err.message, () => renderLibraries()), 'libraries');
+      renderShell(renderError('Failed to load libraries', err.message, () => renderLibraries()), 'settings');
     }
   }
 
@@ -2050,7 +2048,7 @@
         bodyContent += renderPagination(libraryPage, totalPages);
       }
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       // Bind
       document.querySelectorAll('[data-author-id]').forEach(item => {
@@ -2179,7 +2177,7 @@
         }
       }
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       // Bind
       document.querySelectorAll('[data-series-id]').forEach(item => {
@@ -2252,7 +2250,7 @@
         bodyContent += `</div>`;
       }
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       document.querySelectorAll('[data-book-id]').forEach(card => {
         const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
@@ -2405,7 +2403,7 @@
         </div>
       `;
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       // Post-render event bindings — wrapped in try-catch so one failed
       // binding does not kill the entire page render.
@@ -2497,6 +2495,12 @@
 
       let bodyContent = `
         <div class="page-header"><h1>Settings</h1></div>
+
+        <div class="settings-section" id="libraries-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('library', 20)} Libraries</h3>
+          <p class="description">Browse, add, scan, and manage your libraries. Pin a library to keep it in the sidebar for quick access.</p>
+          <a href="#/libraries" class="btn btn-primary">${icon('library', 16)} Manage Libraries</a>
+        </div>
 
         ${currentUser?.is_owner ? `
         <div class="settings-section" id="server-update-section">
@@ -8716,7 +8720,7 @@
         bodyContent += '</div>';
       }
 
-      renderShell(bodyContent, 'libraries');
+      renderShell(bodyContent, 'settings');
 
       document.querySelectorAll('[data-book-id]').forEach(card => {
         const handler = () => navigateTo(`/book/${card.dataset.bookId}`);
