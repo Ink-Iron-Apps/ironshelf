@@ -9,6 +9,13 @@ permissions:
   pull-requests: write
   actions: write
 
+# Collapse rapid successive pushes to claude/dev into one merge+dispatch.
+# Latest push wins; superseded runs are cancelled before they double-dispatch
+# the release workflow.
+concurrency:
+  group: auto-merge
+  cancel-in-progress: true
+
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
