@@ -188,27 +188,47 @@ fn author_image_response(bytes: Vec<u8>, content_type: &str) -> Response {
 
 /// Fetch an author portrait from Open Library. Returns (bytes, content_type)
 /// or None when no portrait is available. Never errors — failures map to None.
+/// Normalize "Last, First" (Calibre sort form) to "First Last" for searching.
+fn normalize_author_name(name: &str) -> String {
+    if let Some((last, first)) = name.split_once(',') {
+        let first = first.trim();
+        let last = last.trim();
+        if !first.is_empty() && !last.is_empty() {
+            return format!("{first} {last}");
+        }
+    }
+    name.trim().to_string()
+}
+
 async fn fetch_author_photo(
     client: &reqwest::Client,
     name: &str,
 ) -> Option<(Vec<u8>, String)> {
+    let query_name = normalize_author_name(name);
     // 1. Resolve the author's Open Library ID (OLID) by name.
     let search = client
         .get("https://openlibrary.org/search/authors.json")
-        .query(&[("q", name)])
+        .query(&[("q", query_name.as_str())])
         .send()
         .await
+        .map_err(|error| tracing::debug!("author photo: OL search failed for {name}: {error}"))
         .ok()?;
     if !search.status().is_success() {
+        tracing::debug!("author photo: OL search {} for {name}", search.status());
         return None;
     }
     let search_json: serde_json::Value = search.json().await.ok()?;
-    let olid = search_json
-        .get("docs")?
-        .as_array()?
-        .iter()
-        .find_map(|doc| doc.get("key").and_then(|key| key.as_str()))?
-        .to_string();
+    let olid = match search_json
+        .get("docs")
+        .and_then(|docs| docs.as_array())
+        .and_then(|docs| docs.iter().find_map(|doc| doc.get("key").and_then(|key| key.as_str())))
+    {
+        Some(key) => key.to_string(),
+        None => {
+            tracing::debug!("author photo: no Open Library match for '{name}'");
+            return None;
+        }
+    };
 
     // 2. Fetch the large portrait. `default=false` makes the CDN 404 instead of
     //    returning a blank placeholder when no image exists.
