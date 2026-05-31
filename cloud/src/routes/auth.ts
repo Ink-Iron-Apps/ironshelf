@@ -7,6 +7,7 @@ import {
   hashPassword,
   verifyPassword,
   createJwt,
+  verifyJwt,
   requireUser,
   jsonResponse,
   generateId,
@@ -274,4 +275,126 @@ export async function handleAdminResetPassword(request: Request, env: Env): Prom
     .run();
 
   return jsonResponse({ ok: true, data: { user_id: user.id } });
+}
+
+// ---------------------------------------------------------------------------
+// Self-service password reset (email link)
+// ---------------------------------------------------------------------------
+
+const RESET_TOKEN_TTL_SECONDS = 30 * 60; // 30 minutes
+
+/// Send a password-reset email via Resend. Returns true on success. Never
+/// throws — failures are logged and reported as false.
+async function sendResetEmail(env: Env, toEmail: string, resetLink: string): Promise<boolean> {
+  if (!env.RESEND_API_KEY) return false;
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;color:#0F1115">
+      <h2 style="font-family:'EB Garamond',Georgia,serif">Reset your Ironshelf Cloud password</h2>
+      <p>We received a request to reset your password. Click the button below to choose a new one. This link expires in 30 minutes.</p>
+      <p><a href="${resetLink}" style="display:inline-block;background:#095F73;color:#E8E4DA;padding:12px 20px;border-radius:8px;text-decoration:none">Reset password</a></p>
+      <p style="color:#6b7280;font-size:13px">If you didn't request this, you can safely ignore this email. Or paste this link into your browser:<br>${resetLink}</p>
+    </div>`;
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Ironshelf <noreply@inknironapps.com>',
+        reply_to: 'support@inknironapps.com',
+        to: [toEmail],
+        subject: 'Reset your Ironshelf Cloud password',
+        html,
+      }),
+    });
+    if (!response.ok) {
+      console.error('Resend send failed:', response.status, await response.text().catch(() => ''));
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Resend send error:', error);
+    return false;
+  }
+}
+
+interface ForgotPasswordBody {
+  email: string;
+}
+
+/// POST /auth/forgot-password — email a reset link if the account exists.
+/// Always returns ok (does not reveal whether the email is registered).
+export async function handleForgotPassword(request: Request, env: Env): Promise<Response> {
+  let body: ForgotPasswordBody;
+  try {
+    body = await request.json() as ForgotPasswordBody;
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const email = (body.email || '').trim().toLowerCase();
+  if (!email) {
+    return jsonResponse({ error: 'email is required' }, 400);
+  }
+
+  const user = await env.DB.prepare(
+    'SELECT id, username FROM users WHERE email = ?',
+  )
+    .bind(email)
+    .first<{ id: string; username: string }>();
+
+  if (user) {
+    const token = await createJwt(
+      { sub: user.id, username: user.username, purpose: 'reset' },
+      env.JWT_SECRET,
+      RESET_TOKEN_TTL_SECONDS,
+    );
+    const baseUrl = (env.APP_BASE_URL || 'https://ironshelf.inknironapps.com').replace(/\/+$/, '');
+    const resetLink = `${baseUrl}/#/cloud-reset?token=${encodeURIComponent(token)}`;
+    await sendResetEmail(env, email, resetLink);
+  }
+
+  // Uniform response regardless of whether the account exists.
+  return jsonResponse({ ok: true });
+}
+
+interface ResetPasswordBody {
+  token: string;
+  new_password: string;
+}
+
+/// POST /auth/reset-password — set a new password using a reset token.
+export async function handleResetPassword(request: Request, env: Env): Promise<Response> {
+  let body: ResetPasswordBody;
+  try {
+    body = await request.json() as ResetPasswordBody;
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { token, new_password } = body;
+  if (!token || !new_password) {
+    return jsonResponse({ error: 'token and new_password are required' }, 400);
+  }
+  if (new_password.length < 8 || new_password.length > 1024) {
+    return jsonResponse({ error: 'New password must be 8-1024 characters' }, 400);
+  }
+
+  const payload = await verifyJwt(token, env.JWT_SECRET);
+  if (!payload || payload.purpose !== 'reset') {
+    return jsonResponse({ error: 'Invalid or expired reset link' }, 400);
+  }
+
+  const newHash = await hashPassword(new_password);
+  const result = await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+    .bind(newHash, payload.sub)
+    .run();
+
+  if (!result.success) {
+    return jsonResponse({ error: 'Failed to reset password' }, 500);
+  }
+
+  return jsonResponse({ ok: true });
 }

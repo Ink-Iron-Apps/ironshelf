@@ -16,6 +16,8 @@ import {
   handleMe,
   handleChangePassword,
   handleAdminResetPassword,
+  handleForgotPassword,
+  handleResetPassword,
 } from './routes/auth';
 import {
   handleClaimServer,
@@ -83,6 +85,12 @@ async function routeRequest(
   }
   if (method === 'POST' && path === '/auth/admin/reset-password') {
     return handleAdminResetPassword(request, env);
+  }
+  if (method === 'POST' && path === '/auth/forgot-password') {
+    return handleForgotPassword(request, env);
+  }
+  if (method === 'POST' && path === '/auth/reset-password') {
+    return handleResetPassword(request, env);
   }
 
   // --- Token validation (servers call this) ---
