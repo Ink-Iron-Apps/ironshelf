@@ -7,15 +7,12 @@ export interface Env {
   /// `wrangler secret put ADMIN_TOKEN`. When unset, the reset endpoint is
   /// disabled (returns 404).
   ADMIN_TOKEN?: string;
-  /// SMTP mailbox for sending password-reset emails (e.g. Hostinger). Set via
-  /// `wrangler secret put SMTP_HOST|SMTP_USERNAME|SMTP_PASSWORD` (and optionally
-  /// SMTP_PORT / SMTP_FROM). When unset, forgot-password silently succeeds but
-  /// no email is sent.
-  SMTP_HOST?: string;
-  SMTP_PORT?: string;
-  SMTP_USERNAME?: string;
-  SMTP_PASSWORD?: string;
-  SMTP_FROM?: string;
+  /// Resend API key for sending password-reset emails (Workers can't do SMTP).
+  /// Set via `wrangler secret put RESEND_API_KEY`. When unset, forgot-password
+  /// returns ok but no email is sent.
+  RESEND_API_KEY?: string;
+  /// Optional From header, e.g. "Ironshelf <noreply@inknironapps.com>".
+  MAIL_FROM?: string;
   /// Base URL of the hosted web UI used to build reset links. Defaults to
   /// https://ironshelf.inknironapps.com when unset.
   APP_BASE_URL?: string;
