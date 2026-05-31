@@ -7,6 +7,13 @@ export interface Env {
   /// `wrangler secret put ADMIN_TOKEN`. When unset, the reset endpoint is
   /// disabled (returns 404).
   ADMIN_TOKEN?: string;
+  /// Resend API key for sending password-reset emails. Set via
+  /// `wrangler secret put RESEND_API_KEY`. When unset, forgot-password silently
+  /// succeeds but no email is sent.
+  RESEND_API_KEY?: string;
+  /// Base URL of the hosted web UI used to build reset links. Defaults to
+  /// https://ironshelf.inknironapps.com when unset.
+  APP_BASE_URL?: string;
 }
 
 /// Central user account.
@@ -46,6 +53,8 @@ export interface JwtPayload {
   username: string;
   iat: number;
   exp: number;
+  /// Set to "reset" on short-lived password-reset tokens.
+  purpose?: string;
 }
 
 /// JWT payload for server access tokens (short-lived relay tokens).
