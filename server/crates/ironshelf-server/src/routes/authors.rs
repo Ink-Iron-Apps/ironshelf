@@ -200,7 +200,22 @@ fn normalize_author_name(name: &str) -> String {
     name.trim().to_string()
 }
 
+/// Try Open Library first, then Wikidata/Wikimedia, for an author portrait.
 async fn fetch_author_photo(
+    client: &reqwest::Client,
+    name: &str,
+) -> Option<(Vec<u8>, String)> {
+    if let Some(image) = fetch_author_photo_openlibrary(client, name).await {
+        return Some(image);
+    }
+    if let Some(image) = fetch_author_photo_wikidata(client, name).await {
+        return Some(image);
+    }
+    tracing::debug!("author photo: no portrait found for '{name}'");
+    None
+}
+
+async fn fetch_author_photo_openlibrary(
     client: &reqwest::Client,
     name: &str,
 ) -> Option<(Vec<u8>, String)> {
@@ -250,8 +265,89 @@ async fn fetch_author_photo(
         }
     }
 
-    tracing::debug!("author photo: matched but no portrait for '{name}'");
+    tracing::debug!("author photo: no Open Library portrait for '{name}'");
     None
+}
+
+/// Resolve an author portrait via Wikidata (image property P18) → Wikimedia
+/// Commons. Far better coverage than Open Library for recognizable authors.
+async fn fetch_author_photo_wikidata(
+    client: &reqwest::Client,
+    name: &str,
+) -> Option<(Vec<u8>, String)> {
+    let query_name = normalize_author_name(name);
+
+    // 1. Find candidate entities by name.
+    let search = client
+        .get("https://www.wikidata.org/w/api.php")
+        .query(&[
+            ("action", "wbsearchentities"),
+            ("search", query_name.as_str()),
+            ("language", "en"),
+            ("type", "item"),
+            ("format", "json"),
+            ("limit", "5"),
+        ])
+        .send()
+        .await
+        .ok()?;
+    if !search.status().is_success() {
+        return None;
+    }
+    let search_json: serde_json::Value = search.json().await.ok()?;
+    let candidates = search_json.get("search")?.as_array()?;
+
+    // Prefer a candidate whose description reads like a writer; else the first.
+    let is_writerish = |description: &str| {
+        let lower = description.to_lowercase();
+        ["author", "writer", "novelist", "poet", "playwright", "essayist", "journalist"]
+            .iter()
+            .any(|word| lower.contains(word))
+    };
+    let qid = candidates
+        .iter()
+        .find_map(|candidate| {
+            let id = candidate.get("id")?.as_str()?;
+            let description = candidate.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            if is_writerish(description) {
+                Some(id.to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .find_map(|candidate| candidate.get("id").and_then(|id| id.as_str()).map(String::from))
+        })?;
+
+    // 2. Read the P18 (image) claim → Commons filename.
+    let entities = client
+        .get("https://www.wikidata.org/w/api.php")
+        .query(&[
+            ("action", "wbgetentities"),
+            ("ids", qid.as_str()),
+            ("props", "claims"),
+            ("format", "json"),
+        ])
+        .send()
+        .await
+        .ok()?;
+    if !entities.status().is_success() {
+        return None;
+    }
+    let entities_json: serde_json::Value = entities.json().await.ok()?;
+    let filename = entities_json
+        .pointer(&format!("/entities/{qid}/claims/P18/0/mainsnak/datavalue/value"))
+        .and_then(|value| value.as_str())?
+        .to_string();
+
+    // 3. Fetch the image from Commons (Special:FilePath redirects to the file).
+    let url = format!(
+        "https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=400",
+        urlencoding::encode(&filename)
+    );
+    try_fetch_cover(client, &url).await
 }
 
 /// Fetch a cover URL, returning (bytes, content_type) only for a real image.
