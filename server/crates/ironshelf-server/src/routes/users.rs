@@ -222,6 +222,55 @@ pub async fn list_invites(
     Ok(Json(invites))
 }
 
+#[derive(Deserialize)]
+pub struct ResetUserPasswordRequest {
+    pub new_password: String,
+}
+
+/// PUT /api/v1/users/{id}/password — owner / manage_users sets a user's password.
+pub async fn reset_user_password(
+    State(state): State<AppState>,
+    axum::Extension(current_user): axum::Extension<AuthUser>,
+    Path(target_user_id): Path<String>,
+    Json(request): Json<ResetUserPasswordRequest>,
+) -> Result<StatusCode, AppError> {
+    require_user_management(&current_user, state.ironshelf_db.pool()).await?;
+
+    if request.new_password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    let pool = state.ironshelf_db.pool();
+
+    // Verify the target exists.
+    sqlx::query("SELECT id FROM users WHERE id = ?")
+        .bind(&target_user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::internal)?
+        .ok_or_else(|| AppError::not_found("user"))?;
+
+    let password_hash = crate::auth::hash_password(&request.new_password)
+        .map_err(|_| AppError::Internal("Failed to hash password".to_string()))?;
+
+    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+        .bind(&password_hash)
+        .bind(&target_user_id)
+        .execute(pool)
+        .await
+        .map_err(AppError::internal)?;
+
+    // Invalidate existing sessions so the old password's sessions don't persist.
+    let _ = sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+        .bind(&target_user_id)
+        .execute(pool)
+        .await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // --- helpers ---
 
 /// Require the current user to be the instance owner.
