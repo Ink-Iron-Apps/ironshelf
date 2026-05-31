@@ -419,6 +419,23 @@ pub async fn link_cloud(
     })))
 }
 
+/// POST /api/v1/auth/unlink-cloud — remove the cloud link from the current user.
+pub async fn unlink_cloud(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    sqlx::query(
+        "UPDATE users SET oidc_issuer = NULL, oidc_subject = NULL \
+         WHERE id = ? AND oidc_issuer = 'ironshelf-cloud'",
+    )
+    .bind(&auth_user.user_id)
+    .execute(state.ironshelf_db.pool())
+    .await
+    .map_err(AppError::internal)?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// Verify a cloud access token JWT signed with HMAC-SHA256 using the claim_token.
 ///
 /// Token format: standard JWT with HS256 algorithm.
