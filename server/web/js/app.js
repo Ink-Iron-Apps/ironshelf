@@ -2525,12 +2525,11 @@
   // Plex-style settings categories. Order shown in the left nav; categories
   // with no present sections (e.g. owner-only ones for a normal user) are
   // automatically omitted.
-  const SETTINGS_CATEGORY_ORDER = ['general', 'library', 'network', 'cloud', 'devices', 'users', 'account', 'notifications', 'reader', 'data'];
+  const SETTINGS_CATEGORY_ORDER = ['general', 'library', 'network', 'devices', 'users', 'account', 'notifications', 'reader', 'data'];
   const SETTINGS_CATEGORY_META = {
     general: { label: 'General', icon: 'settings' },
     library: { label: 'Library', icon: 'library' },
-    network: { label: 'Remote Access', icon: 'globe' },
-    cloud: { label: 'Ironshelf Cloud', icon: 'globe' },
+    network: { label: 'Cloud & Remote Access', icon: 'globe' },
     devices: { label: 'Devices & API', icon: 'link' },
     users: { label: 'Users', icon: 'users' },
     account: { label: 'Account', icon: 'lock' },
@@ -2653,26 +2652,24 @@
         ` : ''}
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section" id="remote-access-section" data-cat="network">
-          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Remote Access</h3>
-          <p class="description">Make this server reachable from outside your local network. Choose a method below.</p>
-          <div class="card remote-access-card" id="remote-access-card">
-            <div class="remote-access-loading">
-              <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
-            </div>
-          </div>
-        </div>
-        ` : ''}
-
-        ${currentUser?.is_owner ? `
-        <div class="settings-section" id="cloud-settings-section" data-cat="cloud">
-          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud</h3>
-          <p class="description">Link this server to Ironshelf Cloud so users with cloud accounts can sign in.</p>
+        <div class="settings-section" id="cloud-settings-section" data-cat="network">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud &amp; Remote Access</h3>
+          <p class="description">Connect this server to Ironshelf Cloud for remote access. Enabling it starts a Cloudflare Tunnel automatically and lets users sign in with their cloud account from anywhere.</p>
           <div class="cloud-claim-card" id="cloud-claim-card">
             <div class="cloud-claim-loading">
               <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
             </div>
           </div>
+
+          <details class="remote-access-advanced" style="margin-top:var(--space-4)">
+            <summary style="cursor:pointer;color:var(--color-muted)">Advanced — remote access method</summary>
+            <p class="description" style="margin-top:var(--space-3)">Choose how this server is reachable from outside your network. Cloudflare Tunnel (used by Cloud) is recommended; UPnP or manual port-forwarding are alternatives.</p>
+            <div class="card remote-access-card" id="remote-access-card">
+              <div class="remote-access-loading">
+                <div class="skeleton skeleton-text" style="width:100%;height:48px"></div>
+              </div>
+            </div>
+          </details>
         </div>
         ` : ''}
 
@@ -3748,9 +3745,9 @@
               <span class="cloud-status-indicator cloud-status-disconnected"></span>
               <strong>Not connected</strong>
             </div>
-            <p class="text-caption" style="margin-top:var(--space-2)">Claim this server to let users with Ironshelf Cloud accounts sign in. This is <strong>completely optional</strong> — your server works fully without it.</p>
+            <p class="text-caption" style="margin-top:var(--space-2)">Enable Ironshelf Cloud to reach this server from anywhere — it starts a Cloudflare Tunnel automatically and lets users sign in with their cloud account. This is <strong>completely optional</strong> — your server works fully without it.</p>
             <p class="text-caption" style="margin-top:var(--space-1);font-size:var(--text-xs);color:var(--color-muted)">Cloud only stores your server URL and who has access. No book data, reading history, or files ever leave your server.</p>
-            <button class="btn btn-cloud mt-4" id="claim-server-btn" style="width:auto">${icon('globe', 16)} Claim this Server</button>
+            <button class="btn btn-cloud mt-4" id="claim-server-btn" style="width:auto">${icon('globe', 16)} Enable Ironshelf Cloud</button>
           </div>
         `;
 
