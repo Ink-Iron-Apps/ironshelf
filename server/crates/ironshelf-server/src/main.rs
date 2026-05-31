@@ -44,6 +44,13 @@ async fn main() -> anyhow::Result<()> {
     ironshelf_db.migrate().await?;
     tracing::info!("ironshelf db ready at {}", config.database_path.display());
 
+    // CLI subcommands run against the DB and exit, without starting the server.
+    // Usage: ironshelf-server reset-password <username> [new-password]
+    let cli_args: Vec<String> = std::env::args().collect();
+    if cli_args.get(1).map(String::as_str) == Some("reset-password") {
+        return run_reset_password(&ironshelf_db, &cli_args).await;
+    }
+
     let libraries = load_libraries_from_db(&ironshelf_db).await;
     tracing::info!("{} libraries loaded from database", libraries.len());
 
@@ -229,6 +236,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/users/{id}/permissions",
             axum::routing::patch(routes::users::set_permissions),
+        )
+        .route(
+            "/api/v1/users/{id}/password",
+            axum::routing::put(routes::users::reset_user_password),
         )
         .route(
             "/api/v1/users/invites",
@@ -778,6 +789,55 @@ pub async fn load_libraries_from_db(ironshelf_db: &IronshelfDb) -> Vec<LoadedLib
     }
 
     libraries
+}
+
+/// CLI: reset a local user's password. Reads the new password from argv[3] or,
+/// if absent, prompts on stdin. Clears the user's sessions afterward.
+async fn run_reset_password(db: &IronshelfDb, args: &[String]) -> anyhow::Result<()> {
+    let username = args
+        .get(2)
+        .ok_or_else(|| anyhow::anyhow!("usage: ironshelf-server reset-password <username> [new-password]"))?;
+
+    let new_password = match args.get(3) {
+        Some(password) => password.clone(),
+        None => {
+            use std::io::Write;
+            eprint!("New password for {username}: ");
+            std::io::stderr().flush().ok();
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            line.trim_end_matches(['\r', '\n']).to_string()
+        }
+    };
+
+    if new_password.len() < 8 {
+        anyhow::bail!("password must be at least 8 characters");
+    }
+
+    let password_hash =
+        auth::hash_password(&new_password).map_err(|_| anyhow::anyhow!("failed to hash password"))?;
+
+    let pool = db.pool();
+    let result = sqlx::query("UPDATE users SET password_hash = ? WHERE username = ?")
+        .bind(&password_hash)
+        .bind(username)
+        .execute(pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        anyhow::bail!("no user named '{username}'");
+    }
+
+    // Sign out existing sessions for that user.
+    let _ = sqlx::query(
+        "DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)",
+    )
+    .bind(username)
+    .execute(pool)
+    .await;
+
+    println!("Password updated for '{username}'. Existing sessions were signed out.");
+    Ok(())
 }
 
 async fn shutdown_signal() {

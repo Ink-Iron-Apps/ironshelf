@@ -4154,6 +4154,7 @@
                     <td><span class="badge ${u.is_owner ? 'badge-teal' : 'badge-muted'}">${u.is_owner ? 'Owner' : 'User'}</span></td>
                     <td class="text-caption">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                     <td class="text-right" style="display:flex;gap:var(--space-1);justify-content:flex-end">
+                      <button class="btn btn-ghost btn-sm reset-pw-btn" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" aria-label="Reset password for ${escapeHtml(u.username)}" title="Reset password">${icon('lock', 14)}</button>
                       ${!u.is_owner ? `<button class="btn btn-ghost btn-sm library-access-btn" data-user-id="${u.id}" aria-label="Library access for ${escapeHtml(u.username)}" title="Library access">${icon('library', 14)}</button>` : ''}
                       ${!u.is_owner ? `<button class="btn btn-ghost btn-sm delete-user-btn" data-user-id="${u.id}" aria-label="Remove ${escapeHtml(u.username)}">${icon('trash', 14)}</button>` : ''}
                     </td>
@@ -4247,6 +4248,53 @@
     document.querySelectorAll('.library-access-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         showLibraryAccessModal(btn.dataset.userId);
+      });
+    });
+
+    // Reset password buttons
+    document.querySelectorAll('.reset-pw-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const userId = btn.dataset.userId;
+        const username = btn.dataset.username;
+        const { close } = showModal({
+          title: `Reset Password — ${username}`,
+          description: 'Set a new password for this user. Their existing sessions will be signed out.',
+          content: `
+            <form id="reset-user-pw-form" novalidate>
+              <div class="form-group">
+                <label class="form-label" for="reset-user-new-pw">New Password</label>
+                <input type="password" class="form-input" id="reset-user-new-pw" required minlength="8" autocomplete="new-password" autofocus>
+                <p class="form-hint">Minimum 8 characters.</p>
+              </div>
+              <div id="reset-user-pw-error" class="form-error hidden" role="alert"></div>
+              <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+                <button type="submit" class="btn btn-primary">Set Password</button>
+              </div>
+            </form>
+          `,
+        });
+        const form = document.getElementById('reset-user-pw-form');
+        form.querySelector('[data-action="cancel"]').addEventListener('click', close);
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const errorEl = document.getElementById('reset-user-pw-error');
+          errorEl.classList.add('hidden');
+          const newPassword = document.getElementById('reset-user-new-pw').value;
+          if (newPassword.length < 8) {
+            errorEl.textContent = 'Password must be at least 8 characters.';
+            errorEl.classList.remove('hidden');
+            return;
+          }
+          try {
+            await apiPut(`/users/${userId}/password`, { new_password: newPassword });
+            close();
+            toast(`Password reset for ${username}`, 'success');
+          } catch (err) {
+            errorEl.textContent = err.message || 'Failed to reset password.';
+            errorEl.classList.remove('hidden');
+          }
+        });
       });
     });
   }
