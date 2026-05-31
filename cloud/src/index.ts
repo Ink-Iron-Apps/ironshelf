@@ -37,7 +37,7 @@ export default {
 
     // CORS preflight
     if (method === 'OPTIONS') {
-      return handleCors(env);
+      return handleCors(request, env);
     }
 
     let response: Response;
@@ -52,7 +52,7 @@ export default {
     }
 
     // Add CORS headers to all responses
-    return addCorsHeaders(response, env);
+    return addCorsHeaders(response, request, env);
   },
 };
 
@@ -135,23 +135,34 @@ async function routeRequest(
   return jsonResponse({ error: 'Not found' }, 404);
 }
 
-function handleCors(env: Env): Response {
+// Self-hosted Ironshelf servers are reached at arbitrary origins (localhost,
+// LAN IPs, Cloudflare Tunnel URLs, custom domains), so a single fixed
+// CORS_ORIGIN cannot cover them. Reflect the caller's Origin instead. This is
+// safe here: cloud auth/claim send credentials in the request body, not via
+// cookies, so no credentialed cross-origin state is exposed.
+function resolveAllowOrigin(request: Request, env: Env): string {
+  return request.headers.get('Origin') || env.CORS_ORIGIN || '*';
+}
+
+function handleCors(request: Request, env: Env): Response {
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': env.CORS_ORIGIN || '*',
+      'Access-Control-Allow-Origin': resolveAllowOrigin(request, env),
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
+      'Vary': 'Origin',
     },
   });
 }
 
-function addCorsHeaders(response: Response, env: Env): Response {
+function addCorsHeaders(response: Response, request: Request, env: Env): Response {
   const newHeaders = new Headers(response.headers);
-  newHeaders.set('Access-Control-Allow-Origin', env.CORS_ORIGIN || '*');
+  newHeaders.set('Access-Control-Allow-Origin', resolveAllowOrigin(request, env));
   newHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   newHeaders.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  newHeaders.append('Vary', 'Origin');
 
   return new Response(response.body, {
     status: response.status,

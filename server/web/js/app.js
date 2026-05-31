@@ -3029,7 +3029,7 @@
 
   let remoteAccessPollingInterval = null;
 
-  async function loadRemoteAccessCard() {
+  async function loadRemoteAccessCard(methodOverride = null) {
     const cardContainer = document.getElementById('remote-access-card');
     if (!cardContainer) return;
 
@@ -3042,8 +3042,10 @@
     try {
       const status = await apiGet('/server/remote-access');
 
-      // Method selector (always shown at top).
-      const currentMethod = status.method || 'none';
+      // Method selector (always shown at top). An explicit override (from the
+      // dropdown) wins so selecting a method shows its panel even before it is
+      // started — the server only reports a non-none method once one is active.
+      const currentMethod = methodOverride || status.method || 'none';
       const methodSelectorHtml = `
         <div class="remote-access-method-selector" style="margin-bottom:var(--space-4)">
           <label class="form-label" for="remote-access-method-select">Method</label>
@@ -3276,8 +3278,8 @@
         try { await apiPost('/server/remote-access/disable', {}); } catch (_) {}
       }
 
-      // Reload the card to reflect new state.
-      loadRemoteAccessCard();
+      // Show the selected method's panel (with its Start/enable controls).
+      loadRemoteAccessCard(selectedMethod);
     });
 
     // --- Tunnel events ---
