@@ -21,6 +21,18 @@
   // --- Server Version (fetched once from /health) ---
   let cachedServerVersion = null;
 
+  // --- Server settings (feature toggles, fetched once) ---
+  let cachedServerSettings = null;
+  async function getServerSettings(forceRefresh = false) {
+    if (cachedServerSettings && !forceRefresh) return cachedServerSettings;
+    try {
+      cachedServerSettings = await apiGet('/server/settings');
+    } catch (_) {
+      cachedServerSettings = { author_images_enabled: true };
+    }
+    return cachedServerSettings;
+  }
+
   // --- Navigation Generation Counter (race condition guard) ---
   // Incremented on every route change. Async render functions capture it
   // before awaiting and bail out if it changed (user navigated elsewhere).
@@ -2131,8 +2143,20 @@
         { label: author.name, path: `/author/${authorId}` },
       ];
 
+      const serverSettings = await getServerSettings();
+      const authorInitial = (author.name || '?').trim().charAt(0).toUpperCase() || '?';
+      const authorAvatarHtml = `
+        <div class="author-avatar" id="author-avatar">
+          <span class="author-avatar-initial">${escapeHtml(authorInitial)}</span>
+          ${serverSettings.author_images_enabled
+            ? `<img class="author-avatar-img" id="author-avatar-img" alt="" src="${API}/authors/${authorId}/photo">`
+            : ''}
+        </div>
+      `;
+
       let bodyContent = `
-        <div class="page-header">
+        <div class="page-header author-page-header">
+          ${authorAvatarHtml}
           <h1>${escapeHtml(author.name)}</h1>
         </div>
       `;
@@ -2188,6 +2212,14 @@
       }
 
       renderShell(bodyContent, 'settings');
+
+      // Reveal the portrait only once it loads; drop it (showing the initial)
+      // on error. Bound here because CSP blocks inline event handlers.
+      const authorAvatarImg = document.getElementById('author-avatar-img');
+      if (authorAvatarImg) {
+        authorAvatarImg.addEventListener('load', () => authorAvatarImg.classList.add('loaded'));
+        authorAvatarImg.addEventListener('error', () => authorAvatarImg.remove());
+      }
 
       // Bind
       document.querySelectorAll('[data-series-id]').forEach(item => {
@@ -2502,6 +2534,7 @@
 
     try {
       const keys = await apiGet('/auth/api-keys').catch(() => []);
+      const serverSettings = await getServerSettings(true);
 
       let bodyContent = `
         <div class="page-header"><h1>Settings</h1></div>
@@ -2511,6 +2544,17 @@
           <p class="description">Browse, add, scan, and manage your libraries. Pin a library to keep it in the sidebar for quick access.</p>
           <a href="#/libraries" class="btn btn-primary">${icon('library', 16)} Manage Libraries</a>
         </div>
+
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" id="author-photos-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('users', 20)} Author Photos</h3>
+          <p class="description">Download author portraits from Open Library and cache them on this server. Disabling stops all lookups and clears the cache.</p>
+          <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" id="author-photos-toggle" ${serverSettings.author_images_enabled ? 'checked' : ''}>
+            <span>Enable author photos</span>
+          </label>
+        </div>
+        ` : ''}
 
         ${currentUser?.is_owner ? `
         <div class="settings-section" id="server-update-section">
@@ -2762,6 +2806,22 @@
           }
         });
       }
+
+      // Author photos toggle
+      document.getElementById('author-photos-toggle')?.addEventListener('change', async (toggleEvent) => {
+        const enabled = toggleEvent.target.checked;
+        toggleEvent.target.disabled = true;
+        try {
+          const updated = await apiPut('/server/settings', { author_images_enabled: enabled });
+          cachedServerSettings = updated;
+          toast(enabled ? 'Author photos enabled' : 'Author photos disabled (cache cleared)', 'success');
+        } catch (toggleError) {
+          toggleEvent.target.checked = !enabled;
+          toast(toggleError.message || 'Failed to update setting', 'error');
+        } finally {
+          toggleEvent.target.disabled = false;
+        }
+      });
 
       // Bind events
       document.getElementById('create-api-key-btn')?.addEventListener('click', () => {

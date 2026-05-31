@@ -1,10 +1,29 @@
 use axum::extract::{Path, Query, State};
-use axum::Json;
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::pagination::{Paginated, PaginationParams, SortDirection, SortParams};
 use crate::state::AppState;
+
+/// cloud_config key for the "download author photos" toggle. Defaults to
+/// enabled unless explicitly set to "false".
+pub const AUTHOR_IMAGES_SETTING_KEY: &str = "author_images_enabled";
+
+/// Whether author-photo fetching/serving is enabled (default: true).
+pub async fn author_images_enabled(state: &AppState) -> bool {
+    state
+        .ironshelf_db
+        .get_cloud_config(AUTHOR_IMAGES_SETTING_KEY)
+        .await
+        .ok()
+        .flatten()
+        .map(|value| value != "false")
+        .unwrap_or(true)
+}
 
 #[derive(Serialize)]
 pub struct AuthorDetail {
@@ -140,4 +159,178 @@ pub async fn author_standalone(
     }
 
     Ok(Json(vec![]))
+}
+
+/// Resolve an author's display name by id across all loaded libraries.
+async fn author_name_by_id(state: &AppState, author_id: i64) -> Option<String> {
+    let libraries = state.libraries.read().await;
+    for library in libraries.iter() {
+        if let Ok(authors) = library.source.authors().await {
+            if let Some(author) = authors.into_iter().find(|a| a.id == author_id) {
+                return Some(author.name);
+            }
+        }
+    }
+    None
+}
+
+fn author_image_response(bytes: Vec<u8>, content_type: &str) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::CACHE_CONTROL, "public, max-age=604800".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Fetch an author portrait from Open Library. Returns (bytes, content_type)
+/// or None when no portrait is available. Never errors — failures map to None.
+async fn fetch_author_photo(
+    client: &reqwest::Client,
+    name: &str,
+) -> Option<(Vec<u8>, String)> {
+    // 1. Resolve the author's Open Library ID (OLID) by name.
+    let search = client
+        .get("https://openlibrary.org/search/authors.json")
+        .query(&[("q", name)])
+        .send()
+        .await
+        .ok()?;
+    if !search.status().is_success() {
+        return None;
+    }
+    let search_json: serde_json::Value = search.json().await.ok()?;
+    let olid = search_json
+        .get("docs")?
+        .as_array()?
+        .iter()
+        .find_map(|doc| doc.get("key").and_then(|key| key.as_str()))?
+        .to_string();
+
+    // 2. Fetch the large portrait. `default=false` makes the CDN 404 instead of
+    //    returning a blank placeholder when no image exists.
+    let photo_url = format!(
+        "https://covers.openlibrary.org/a/olid/{}-L.jpg?default=false",
+        olid
+    );
+    let photo = client.get(&photo_url).send().await.ok()?;
+    if !photo.status().is_success() {
+        return None;
+    }
+    let content_type = photo
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    if !content_type.starts_with("image/") {
+        return None;
+    }
+    let bytes = photo.bytes().await.ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some((bytes.to_vec(), content_type))
+}
+
+/// GET /api/v1/authors/:id/photo
+///
+/// Serves a cached author portrait, fetching from Open Library on first request.
+/// Returns 404 when the feature is disabled or no portrait is available.
+pub async fn get_author_photo(
+    State(state): State<AppState>,
+    Path(author_id): Path<i64>,
+) -> Result<Response, AppError> {
+    if !author_images_enabled(&state).await {
+        return Err(AppError::not_found("author photo"));
+    }
+
+    let name = author_name_by_id(&state, author_id)
+        .await
+        .ok_or(AppError::not_found("author"))?;
+    let author_key = name.trim().to_lowercase();
+
+    // Serve from cache when present.
+    if let Some(cached) = state
+        .ironshelf_db
+        .get_author_image(&author_key)
+        .await
+        .map_err(AppError::internal)?
+    {
+        if cached.not_found {
+            return Err(AppError::not_found("author photo"));
+        }
+        if let Some(bytes) = cached.image {
+            return Ok(author_image_response(bytes, &cached.content_type));
+        }
+    }
+
+    // Fetch from upstream and cache the result (including "not found").
+    match fetch_author_photo(&state.http_client, &name).await {
+        Some((bytes, content_type)) => {
+            let _ = state
+                .ironshelf_db
+                .set_author_image(&author_key, Some(bytes.as_slice()), &content_type, false)
+                .await;
+            Ok(author_image_response(bytes, &content_type))
+        }
+        None => {
+            let _ = state
+                .ironshelf_db
+                .set_author_image(&author_key, None, "image/jpeg", true)
+                .await;
+            Err(AppError::not_found("author photo"))
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ServerSettings {
+    pub author_images_enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateServerSettings {
+    pub author_images_enabled: Option<bool>,
+}
+
+/// GET /api/v1/server/settings — read server-wide feature toggles.
+pub async fn get_server_settings(
+    State(state): State<AppState>,
+) -> Result<Json<ServerSettings>, AppError> {
+    Ok(Json(ServerSettings {
+        author_images_enabled: author_images_enabled(&state).await,
+    }))
+}
+
+/// PUT /api/v1/server/settings — update server-wide feature toggles (owner only).
+pub async fn update_server_settings(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(body): Json<UpdateServerSettings>,
+) -> Result<Json<ServerSettings>, AppError> {
+    if !auth_user.is_owner {
+        return Err(AppError::Forbidden(
+            "Only the server owner can change settings".to_string(),
+        ));
+    }
+
+    if let Some(enabled) = body.author_images_enabled {
+        state
+            .ironshelf_db
+            .set_cloud_config(AUTHOR_IMAGES_SETTING_KEY, if enabled { "true" } else { "false" })
+            .await
+            .map_err(AppError::internal)?;
+        // Drop cached portraits when turning the feature off.
+        if !enabled {
+            let _ = state.ironshelf_db.clear_author_images().await;
+        }
+    }
+
+    Ok(Json(ServerSettings {
+        author_images_enabled: author_images_enabled(&state).await,
+    }))
 }
