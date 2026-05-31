@@ -54,16 +54,37 @@ pub async fn auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let auth_user = extract_auth_user(&state, request.headers()).await?;
+    // Allow auth via an `access_token` query param so cross-origin `<img>` /
+    // download requests (which can't set an Authorization header) work.
+    let query_token = request.uri().query().and_then(parse_access_token);
+    let auth_user =
+        extract_auth_user(&state, request.headers(), query_token.as_deref()).await?;
     request.extensions_mut().insert(auth_user);
     Ok(next.run(request).await)
+}
+
+/// Pull the `access_token` value out of a URL query string. Tokens are session
+/// ids or `irs_` API keys (no percent-encoded characters), so no decoding.
+fn parse_access_token(query: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if key == "access_token" {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 /// Extract authenticated user from request headers.
 ///
 /// Takes `&HeaderMap` (not `&Request`) to avoid borrowing the non-Sync request
 /// body across await points, which would make the future non-Send.
-async fn extract_auth_user(state: &AppState, headers: &axum::http::HeaderMap) -> Result<AuthUser, StatusCode> {
+async fn extract_auth_user(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    query_token: Option<&str>,
+) -> Result<AuthUser, StatusCode> {
     let pool = state.ironshelf_db.pool();
 
     // Try Bearer token first. API keys look like "irs_<prefix>.<secret>"; any
@@ -85,6 +106,14 @@ async fn extract_auth_user(state: &AppState, headers: &axum::http::HeaderMap) ->
         if let Some(session_id) = extract_session_cookie(cookie_str) {
             return validate_session(pool, &session_id).await;
         }
+    }
+
+    // Try the access_token query param (used by cross-origin <img>/downloads).
+    if let Some(token) = query_token {
+        if token.starts_with("irs_") {
+            return validate_api_key(pool, token).await;
+        }
+        return validate_session(pool, token).await;
     }
 
     Err(StatusCode::UNAUTHORIZED)
