@@ -32,6 +32,7 @@ Ironshelf is a self-hosted ebook management server that finally gets library bro
 - **Import/export** — Portable data: export and import reading progress, bookmarks, collections, and library configuration.
 - **Metadata enrichment** — Search and apply metadata from Google Books and Open Library to improve book information.
 - **Activity and stats** — Reading statistics and activity tracking for users and the server.
+- **Remote access & Ironshelf Cloud** — Reach your server from anywhere via a built-in Cloudflare Tunnel and optional cloud sign-in. The hosted dashboard requires the server be reachable over **HTTPS** (the tunnel provides this); plain `http://` LAN addresses are blocked by the browser. See [DEPLOYMENT.md](docs/DEPLOYMENT.md#ironshelf-cloud--the-hosted-dashboard-https-required).
 - **Cloudflare Access support** — Pass service token headers through to secure your instance behind zero-trust networking.
 - **Rate limiting and security headers** — Built-in protection against abuse with per-IP rate limiting and CSP/security headers.
 - **Single binary deployment** — One executable, one config file, no Docker required. Run it directly or drop it into systemd.

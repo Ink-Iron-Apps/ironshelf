@@ -278,6 +278,24 @@ No server-side configuration is needed beyond setting `trust_proxy_headers = tru
 
 OPDS reader apps (KOReader, Moon+ Reader) that support custom headers can also use Cloudflare Access service tokens.
 
+## Ironshelf Cloud & the Hosted Dashboard (HTTPS required)
+
+Ironshelf Cloud and the hosted dashboard at `https://ironshelf.inknironapps.com` let you reach your self-hosted server from anywhere. Because the dashboard is served over **HTTPS**, your server must also be reachable over **HTTPS** — browsers block an HTTPS page from connecting to an insecure `http://` address ("mixed content"). This applies to both the cloud sign-in flow and the "connect directly" option.
+
+**What works:**
+
+- **Cloudflare Tunnel** (recommended). Enable it from **Settings → Cloud & Remote Access → Enable Ironshelf Cloud**, which starts a tunnel automatically and gives your server a `https://<random>.trycloudflare.com` URL. Claiming the server reports this HTTPS URL to the cloud.
+- Any **HTTPS reverse proxy** (nginx/Caddy/Apache with TLS) or a custom domain with a valid certificate.
+
+**What does NOT work from the hosted dashboard:**
+
+- Plain `http://` addresses, including `http://<LAN-IP>:10810`. The browser blocks them as mixed content, so covers, downloads, and the reader will fail even if the page partially loads.
+- The only exception is `http://localhost`, which browsers treat as secure — useful when the dashboard and server run on the same machine, but not for remote access.
+
+**For local-network-only use** (no tunnel, no cloud), skip the hosted dashboard and open the server's **own** web UI directly at `http://<server-ip>:10810` — it is same-origin and has no HTTPS requirement.
+
+Practically: if you want remote access via the dashboard or cloud login, keep the Cloudflare Tunnel enabled (or front the server with HTTPS) and connect using that HTTPS URL.
+
 ## Updating
 
 Ironshelf uses SQLite with automatic, idempotent migrations. Updating is a straightforward binary replacement.
