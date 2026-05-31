@@ -1,6 +1,7 @@
 name = "ironshelf-cloud"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
+account_id = "0eda678cda43e70dba0009e165937044"
 
 [[d1_databases]]
 binding = "DB"
