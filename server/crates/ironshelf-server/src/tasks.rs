@@ -81,7 +81,24 @@ impl TaskRegistry {
         }
     }
 
+    /// Return running tasks plus finished ones from the last few minutes.
+    /// Finished tasks older than the retention window are pruned so completed
+    /// jobs don't linger in the UI indefinitely.
     pub fn list(&self) -> Vec<TaskInfo> {
-        self.tasks.lock().unwrap().clone()
+        const FINISHED_RETENTION_SECS: i64 = 300; // 5 minutes
+        let now = chrono::Utc::now();
+        let mut guard = self.tasks.lock().unwrap();
+        guard.retain(|task| {
+            if task.status == "running" {
+                return true;
+            }
+            chrono::DateTime::parse_from_rfc3339(&task.updated_at)
+                .map(|finished_at| {
+                    (now - finished_at.with_timezone(&chrono::Utc)).num_seconds()
+                        < FINISHED_RETENTION_SECS
+                })
+                .unwrap_or(false)
+        });
+        guard.clone()
     }
 }
