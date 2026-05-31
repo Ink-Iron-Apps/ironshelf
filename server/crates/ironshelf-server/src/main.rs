@@ -105,18 +105,35 @@ async fn main() -> anyhow::Result<()> {
         tunnel_manager: Arc::new(RwLock::new(tunnel_manager)),
     };
 
-    // Determine which remote access method to use.
-    // `remote_access_enabled` (legacy bool) is treated as "upnp" when
-    // `remote_access_method` is still the default "none".
-    let effective_remote_access_method = if config.remote_access_enabled
-        && config.remote_access_method == "none"
-    {
-        "upnp"
-    } else {
-        config.remote_access_method.as_str()
+    // Determine which remote access method to use, in priority order:
+    //   1. a method persisted in the DB by the UI (start tunnel / select method),
+    //   2. "tunnel" if the server is claimed to the cloud (so remote access and
+    //      the cloud URL survive restarts),
+    //   3. the legacy config-file setting (remote_access_enabled → upnp).
+    let persisted_remote_method = app_state
+        .ironshelf_db
+        .get_cloud_config("remote_access_method")
+        .await
+        .ok()
+        .flatten();
+    let is_claimed = app_state
+        .ironshelf_db
+        .get_cloud_config("claim_token")
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    let effective_remote_access_method: String = match persisted_remote_method {
+        Some(method) if method != "none" => method,
+        _ if is_claimed => "tunnel".to_string(),
+        _ if config.remote_access_enabled && config.remote_access_method == "none" => {
+            "upnp".to_string()
+        }
+        _ => config.remote_access_method.clone(),
     };
 
-    match effective_remote_access_method {
+    match effective_remote_access_method.as_str() {
         "upnp" => {
             let mut upnp_guard = app_state.upnp_manager.write().await;
             match upnp_guard.enable().await {
