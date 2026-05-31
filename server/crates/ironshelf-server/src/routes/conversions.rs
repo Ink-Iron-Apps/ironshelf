@@ -248,7 +248,7 @@ async fn run_conversion(
                 "UPDATE conversion_jobs SET status = 'failed', error_message = ?, \
                  completed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
             )
-            .bind(&conversion_error.to_string())
+            .bind(conversion_error.to_string())
             .bind(job_id)
             .execute(pool)
             .await;
