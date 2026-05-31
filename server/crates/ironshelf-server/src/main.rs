@@ -217,6 +217,10 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::post(routes::cloud_auth::link_cloud),
         )
         .route(
+            "/api/v1/auth/unlink-cloud",
+            axum::routing::post(routes::cloud_auth::unlink_cloud),
+        )
+        .route(
             "/api/v1/auth/api-keys",
             get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
         )

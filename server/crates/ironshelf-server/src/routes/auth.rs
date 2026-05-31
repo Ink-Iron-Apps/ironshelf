@@ -290,11 +290,22 @@ pub async fn me(
         .await
         .unwrap_or_default();
 
+    // Whether this local user is linked to an Ironshelf Cloud account.
+    let cloud_linked = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM users WHERE id = ? AND oidc_issuer = 'ironshelf-cloud'",
+    )
+    .bind(&user.user_id)
+    .fetch_one(state.ironshelf_db.pool())
+    .await
+    .unwrap_or(0)
+        > 0;
+
     Ok(Json(serde_json::json!({
         "user_id": user.user_id,
         "username": user.username,
         "is_owner": user.is_owner,
         "permissions": permissions,
+        "cloud_linked": cloud_linked,
     })))
 }
 

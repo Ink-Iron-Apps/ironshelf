@@ -2865,7 +2865,10 @@
         <div class="settings-section" data-cat="account">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud Account</h3>
           <p class="description">Link your Ironshelf Cloud account to this user so you can sign into this server with your cloud login. They become one account.</p>
-          <button class="btn btn-secondary" id="link-cloud-btn">${icon('globe', 16)} Link Ironshelf Cloud Account</button>
+          ${currentUser?.cloud_linked
+            ? `<p style="display:flex;align-items:center;gap:var(--space-2);color:var(--color-teal-bright)">${icon('check', 16)} Linked to Ironshelf Cloud.</p>
+               <button class="btn btn-danger" id="unlink-cloud-btn">${icon('x', 16)} Unlink Cloud Account</button>`
+            : `<button class="btn btn-secondary" id="link-cloud-btn">${icon('globe', 16)} Link Ironshelf Cloud Account</button>`}
         </div>
 
         <div class="settings-section" data-cat="account">
@@ -2985,11 +2988,32 @@
             const linkResult = await apiPost('/auth/link-cloud', { cloud_token: tokenData.data.server_access_token });
             close();
             toast(`Linked cloud account "${linkResult.cloud_username || ''}" to your user`, 'success');
+            if (currentUser) currentUser.cloud_linked = true;
+            renderSettings(parseRoute(getHashPath()).params.id);
           } catch (linkError) {
             errorEl.textContent = linkError.message || 'Failed to link cloud account';
             errorEl.classList.remove('hidden');
             submitBtn.disabled = false;
           }
+        });
+      });
+
+      // Unlink cloud account
+      document.getElementById('unlink-cloud-btn')?.addEventListener('click', () => {
+        showConfirmModal({
+          title: 'Unlink Cloud Account',
+          message: 'Signing in with your cloud account will no longer log into this user.',
+          confirmText: 'Unlink',
+          onConfirm: async () => {
+            try {
+              await apiPost('/auth/unlink-cloud', {});
+              if (currentUser) currentUser.cloud_linked = false;
+              toast('Cloud account unlinked', 'success');
+              renderSettings(parseRoute(getHashPath()).params.id);
+            } catch (unlinkError) {
+              toast(unlinkError.message || 'Failed to unlink', 'error');
+            }
+          },
         });
       });
 
