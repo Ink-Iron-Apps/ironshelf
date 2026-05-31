@@ -1045,12 +1045,29 @@
       adminNavItems.push({ id: 'users', label: 'Users', icon: 'users', path: '/users' });
     }
 
-    const navHtml = mainNavItems.map(item => `
+    const renderNavItem = (item) => `
       <a href="#${item.path}" class="${activePage === item.id ? 'active' : ''}" aria-current="${activePage === item.id ? 'page' : 'false'}">
         ${icon(item.icon)}
         <span>${item.label}</span>
       </a>
-    `).join('');
+    `;
+
+    // Pinned libraries sit directly below Home, above the rest of the nav.
+    const pinnedLibraries = getPinnedLibraries();
+    const pinnedLibrariesHtml = pinnedLibraries.length === 0 ? '' : `
+      <div class="sidebar-section-label">Libraries</div>
+      ${pinnedLibraries.map(lib => {
+        const sourceIcon = lib.source_kind === 'calibre' ? 'book' : 'folder';
+        return `<a href="#/library/${lib.id}" aria-label="${escapeHtml(lib.name)} library">
+          ${icon(sourceIcon)}
+          <span>${escapeHtml(lib.name)}</span>
+        </a>`;
+      }).join('')}
+    `;
+
+    const navHtml = mainNavItems
+      .map((item, index) => index === 0 ? renderNavItem(item) + pinnedLibrariesHtml : renderNavItem(item))
+      .join('');
 
     const isAdminActive = adminNavItems.some(item => activePage === item.id);
     const adminSectionHtml = adminNavItems.length > 0 ? `
@@ -1116,22 +1133,6 @@
           <nav class="sidebar-nav" id="sidebar-main-nav">
             ${navHtml}
           </nav>
-          ${(() => {
-            const pinnedLibraries = getPinnedLibraries();
-            if (pinnedLibraries.length === 0) return '';
-            return `
-              <div class="sidebar-section-label">Libraries</div>
-              <nav class="sidebar-nav sidebar-pinned-libraries">
-                ${pinnedLibraries.map(lib => {
-                  const sourceIcon = lib.source_kind === 'calibre' ? 'book' : 'folder';
-                  return `<a href="#/library/${lib.id}" class="" aria-label="${escapeHtml(lib.name)} library">
-                    ${icon(sourceIcon)}
-                    <span>${escapeHtml(lib.name)}</span>
-                  </a>`;
-                }).join('')}
-              </nav>
-            `;
-          })()}
           ${adminSectionHtml}
           <div class="sidebar-spacer"></div>
           <div class="sidebar-bottom">
