@@ -64,10 +64,19 @@ const IronshelfReader = (() => {
     epubJsLoaded = true;
   }
 
+  // Cross-origin (hosted dashboard) auth: append the server token as a query
+  // param since fetch here doesn't carry the dashboard's Authorization header.
+  // On the same-origin server UI there's no token, so URLs are unchanged.
+  function withToken(url) {
+    const token = localStorage.getItem('ironshelf_server_token');
+    if (!token) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'access_token=' + encodeURIComponent(token);
+  }
+
   // --- Progress API ---
   async function fetchProgress(bookId) {
     try {
-      const response = await fetch(`${API}/books/${bookId}/progress`, {
+      const response = await fetch(withToken(`${API}/books/${bookId}/progress`), {
         credentials: 'same-origin',
       });
       if (!response.ok) return null;
@@ -83,7 +92,7 @@ const IronshelfReader = (() => {
 
   async function saveProgress(bookId, locator, percent) {
     try {
-      await fetch(`${API}/books/${bookId}/progress`, {
+      await fetch(withToken(`${API}/books/${bookId}/progress`), {
         method: 'PUT',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -401,7 +410,7 @@ const IronshelfReader = (() => {
       // the URL directly makes epub.js treat it as an unpacked directory (it
       // fetches META-INF/container.xml relative to the path) and hang; an
       // ArrayBuffer forces archive mode and carries the session cookie.
-      const bookUrl = `${API}/books/${bookId}/file?format=EPUB`;
+      const bookUrl = withToken(`${API}/books/${bookId}/file?format=EPUB`);
       const bookResponse = await fetch(bookUrl, { credentials: 'same-origin' });
       if (!bookResponse.ok) {
         throw new Error(`Failed to download book (${bookResponse.status})`);

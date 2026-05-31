@@ -6,6 +6,12 @@ const IronshelfCbzReader = (() => {
   'use strict';
 
   const API = '/api/v1';
+
+  function withToken(url) {
+    const token = localStorage.getItem("ironshelf_server_token");
+    if (!token) return url;
+    return url + (url.includes("?") ? "&" : "?") + "access_token=" + encodeURIComponent(token);
+  }
   const JSZIP_CDN = '/js/vendor/jszip.min.js';
   const STORAGE_FIT_KEY = 'ironshelf_cbz_fit';
   const STORAGE_DISPLAY_KEY = 'ironshelf_cbz_display';
@@ -54,7 +60,7 @@ const IronshelfCbzReader = (() => {
   // --- Progress API ---
   async function fetchProgress(bookId) {
     try {
-      const response = await fetch(`${API}/books/${bookId}/progress`, {
+      const response = await fetch(withToken(`${API}/books/${bookId}/progress`), {
         credentials: 'same-origin',
       });
       if (!response.ok) return null;
@@ -70,7 +76,7 @@ const IronshelfCbzReader = (() => {
 
   async function saveProgress(bookId, page, percent) {
     try {
-      await fetch(`${API}/books/${bookId}/progress`, {
+      await fetch(withToken(`${API}/books/${bookId}/progress`), {
         method: 'PUT',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -664,7 +670,7 @@ const IronshelfCbzReader = (() => {
       await loadJsZip();
 
       const savedProgress = await fetchProgress(bookId);
-      const fileUrl = `${API}/books/${bookId}/file?format=CBZ`;
+      const fileUrl = withToken(`${API}/books/${bookId}/file?format=CBZ`);
 
       // Download the CBZ file
       const response = await fetch(fileUrl, { credentials: 'same-origin' });
