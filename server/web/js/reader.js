@@ -6,7 +6,10 @@ const IronshelfReader = (() => {
   'use strict';
 
   const API = '/api/v1';
-  const EPUB_JS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js';
+  // Vendored locally (embedded in the binary) so reading works offline and
+  // without external CDNs. epub.js depends on JSZip, loaded first.
+  const JSZIP_JS = '/js/vendor/jszip.min.js';
+  const EPUB_JS = '/js/vendor/epub.min.js';
   const STORAGE_THEME_KEY = 'ironshelf_reader_theme';
   const STORAGE_FONT_SIZE_KEY = 'ironshelf_reader_font_size';
 
@@ -43,15 +46,22 @@ const IronshelfReader = (() => {
   }
 
   // --- CDN Loader ---
-  function loadEpubJs() {
-    if (epubJsLoaded && window.ePub) return Promise.resolve();
+  function loadScript(src) {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = EPUB_JS_CDN;
-      script.onload = () => { epubJsLoaded = true; resolve(); };
-      script.onerror = () => reject(new Error('Failed to load epub.js from CDN'));
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
       document.head.appendChild(script);
     });
+  }
+
+  async function loadEpubJs() {
+    if (epubJsLoaded && window.ePub) return;
+    // JSZip must be present before epub.js initializes.
+    if (!window.JSZip) await loadScript(JSZIP_JS);
+    await loadScript(EPUB_JS);
+    epubJsLoaded = true;
   }
 
   // --- Progress API ---

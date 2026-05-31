@@ -1122,7 +1122,7 @@
         <div class="sidebar-overlay" id="sidebar-overlay"></div>
         <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
           <div class="sidebar-brand">
-            <span class="text-brand">Iron<em>&</em>shelf</span>
+            <span class="text-brand">Ironshelf</span>
           </div>
           <div class="sidebar-notification-wrap" id="notification-bell-wrap">
             <button class="notification-bell-btn" id="notification-bell" aria-label="Notifications" title="Notifications">
@@ -1266,7 +1266,7 @@
       <div class="login-page">
         <div class="login-card">
           <div class="brand">
-            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <h1 class="text-brand">Ironshelf</h1>
             <p>Your self-hosted library</p>
           </div>
           ${serverInfoHtml}
@@ -1325,7 +1325,7 @@
       <div class="login-page">
         <div class="login-card">
           <div class="brand">
-            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <h1 class="text-brand">Ironshelf</h1>
             <p>Create your account</p>
           </div>
           ${isInviteRequired ? `<div class="login-server-info"><span class="badge badge-warning">${icon('lock', 12)} Invite required</span></div>` : ''}
@@ -7395,7 +7395,9 @@
 
       try {
         const searchParams = new URLSearchParams();
-        if (searchQuery) searchParams.set('q', searchQuery);
+        // The server requires a non-empty q; when only an author is given
+        // (e.g. "Find More by Author"), use the author name as the query too.
+        searchParams.set('q', searchQuery || searchAuthor);
         if (searchAuthor) searchParams.set('author', searchAuthor);
         const results = await apiGet(`/acquisition/search?${searchParams.toString()}`);
         const resultItems = Array.isArray(results) ? results : (results?.items || results?.results || []);
@@ -8471,7 +8473,7 @@
       <div class="login-page">
         <div class="login-card">
           <div class="brand">
-            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <h1 class="text-brand">Ironshelf</h1>
             <p>Sign in with Ironshelf Cloud</p>
           </div>
           <form id="cloud-login-form" novalidate>
@@ -8554,7 +8556,7 @@
       <div class="login-page">
         <div class="login-card" style="max-width: 500px">
           <div class="brand">
-            <h1 class="text-brand">Iron<em>&</em>shelf</h1>
+            <h1 class="text-brand">Ironshelf</h1>
             <p>Select a server to connect to</p>
           </div>
           <div class="cloud-servers-loading">

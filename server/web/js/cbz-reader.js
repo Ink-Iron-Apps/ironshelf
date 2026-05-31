@@ -6,7 +6,7 @@ const IronshelfCbzReader = (() => {
   'use strict';
 
   const API = '/api/v1';
-  const JSZIP_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+  const JSZIP_CDN = '/js/vendor/jszip.min.js';
   const STORAGE_FIT_KEY = 'ironshelf_cbz_fit';
   const STORAGE_DISPLAY_KEY = 'ironshelf_cbz_display';
   const STORAGE_DIRECTION_KEY = 'ironshelf_cbz_direction';
