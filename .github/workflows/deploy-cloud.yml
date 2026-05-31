@@ -1,0 +1,43 @@
+name: Deploy Cloud Worker
+
+# Deploys the Ironshelf Cloud worker (cloud/) to Cloudflare Workers.
+# Triggers on changes under cloud/ pushed to claude/dev (the working branch —
+# pushes here are real user pushes and reliably fire workflows, unlike the
+# GITHUB_TOKEN merge commit on main). Also runnable manually.
+on:
+  push:
+    branches: [claude/dev]
+    paths:
+      - 'cloud/**'
+      - '.github/workflows/deploy-cloud.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; newer push supersedes an in-flight deploy.
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloud/package-lock.json
+
+      - name: Install dependencies
+        working-directory: cloud
+        run: npm ci
+
+      - name: Deploy to Cloudflare Workers
+        working-directory: cloud
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
