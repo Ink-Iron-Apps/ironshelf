@@ -67,6 +67,9 @@ export async function sendMail(env: Env, message: MailMessage): Promise<boolean>
       { hostname: host, port },
       { secureTransport: 'on', allowHalfOpen: false },
     );
+    // Wait for the TCP+TLS connection to be established before reading/writing;
+    // otherwise the first read races the handshake ("Stream was cancelled").
+    await socket.opened;
     const writer = socket.writable.getWriter();
     const reader = socket.readable.getReader();
     const state = { buffer: '' };
