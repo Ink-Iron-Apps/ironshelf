@@ -5,7 +5,9 @@
 const IronshelfReader = (() => {
   'use strict';
 
-  const API = '/api/v1';
+  const HOSTED = !!window.IRONSHELF_HOSTED;
+  const SERVER_URL = HOSTED ? (localStorage.getItem('ironshelf_server_url') || '') : '';
+  const API = (HOSTED && SERVER_URL) ? `/api/v1` : '/api/v1';
   // Vendored locally (embedded in the binary) so reading works offline and
   // without external CDNs. epub.js depends on JSZip, loaded first.
   const JSZIP_JS = '/js/vendor/jszip.min.js';
