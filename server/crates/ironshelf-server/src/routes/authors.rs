@@ -352,6 +352,9 @@ pub async fn prefetch_author_photos(
     let total = names.len();
     let refresh = params.refresh.unwrap_or(false);
     let task_state = state.clone();
+    let task_id = state
+        .tasks
+        .start("author_photos", "Downloading author photos", total as u64);
 
     // Run in the background — fetching hundreds of portraits would exceed
     // request/proxy timeouts. Photos appear as they're cached.
@@ -360,35 +363,49 @@ pub async fn prefetch_author_photos(
             let _ = task_state.ironshelf_db.clear_author_images().await;
         }
         let mut fetched = 0usize;
+        let mut processed = 0u64;
         for name in names {
             let key = name.trim().to_lowercase();
-            if !refresh {
-                if let Ok(Some(_)) = task_state.ironshelf_db.get_author_image(&key).await {
-                    continue; // already attempted
+            let already = !refresh
+                && matches!(task_state.ironshelf_db.get_author_image(&key).await, Ok(Some(_)));
+            if !already {
+                match fetch_author_photo(&task_state.http_client, &name).await {
+                    Some((bytes, content_type)) => {
+                        let _ = task_state
+                            .ironshelf_db
+                            .set_author_image(&key, Some(bytes.as_slice()), &content_type, false)
+                            .await;
+                        fetched += 1;
+                    }
+                    None => {
+                        let _ = task_state
+                            .ironshelf_db
+                            .set_author_image(&key, None, "image/jpeg", true)
+                            .await;
+                    }
                 }
+                // Be gentle with Open Library.
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             }
-            match fetch_author_photo(&task_state.http_client, &name).await {
-                Some((bytes, content_type)) => {
-                    let _ = task_state
-                        .ironshelf_db
-                        .set_author_image(&key, Some(bytes.as_slice()), &content_type, false)
-                        .await;
-                    fetched += 1;
-                }
-                None => {
-                    let _ = task_state
-                        .ironshelf_db
-                        .set_author_image(&key, None, "image/jpeg", true)
-                        .await;
-                }
-            }
-            // Be gentle with Open Library.
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            processed += 1;
+            task_state.tasks.set_progress(&task_id, processed);
         }
+        task_state.tasks.finish(
+            &task_id,
+            "completed",
+            Some(format!("{fetched} portraits fetched of {total} authors")),
+        );
         tracing::info!("author photo prefetch complete: {fetched} fetched of {total}");
     });
 
     Ok(Json(serde_json::json!({ "started": true, "total": total })))
+}
+
+/// GET /api/v1/server/tasks — list running + recent background tasks.
+pub async fn list_background_tasks(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::tasks::TaskInfo>> {
+    Json(state.tasks.list())
 }
 
 #[derive(Serialize)]

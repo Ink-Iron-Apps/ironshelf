@@ -2613,6 +2613,41 @@
     sections.forEach((section) => { section.hidden = section.dataset.cat !== activeCategory; });
   }
 
+  // --- Background task monitor ---
+  let backgroundTasksPollInterval = null;
+  async function loadBackgroundTasks() {
+    const container = document.getElementById('background-tasks-list');
+    if (!container) {
+      if (backgroundTasksPollInterval) { clearInterval(backgroundTasksPollInterval); backgroundTasksPollInterval = null; }
+      return;
+    }
+    try {
+      const tasks = await apiGet('/server/tasks');
+      const list = Array.isArray(tasks) ? tasks : [];
+      if (list.length === 0) {
+        container.innerHTML = `<p class="text-caption" style="color:var(--color-muted)">No recent tasks.</p>`;
+        return;
+      }
+      container.innerHTML = list.slice().reverse().slice(0, 10).map((task) => {
+        const pct = task.total > 0 ? Math.round((task.current / task.total) * 100) : (task.status === 'completed' ? 100 : 0);
+        const statusColor = task.status === 'completed' ? 'var(--color-success)'
+          : task.status === 'failed' ? 'var(--color-danger)' : 'var(--color-teal-bright)';
+        const statusText = task.status === 'running' ? `running ${task.current}/${task.total}` : task.status;
+        return `
+          <div class="card" style="margin-bottom:var(--space-2);padding:var(--space-3)">
+            <div style="display:flex;justify-content:space-between;gap:var(--space-2);align-items:center">
+              <strong>${escapeHtml(task.label)}</strong>
+              <span style="color:${statusColor};font-size:var(--text-sm)">${escapeHtml(statusText)}</span>
+            </div>
+            <div class="progress-bar" style="margin-top:var(--space-2)"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+            ${task.message ? `<p class="text-caption" style="margin-top:var(--space-1);color:var(--color-muted)">${escapeHtml(task.message)}</p>` : ''}
+          </div>`;
+      }).join('');
+    } catch {
+      // ignore — non-critical
+    }
+  }
+
   async function renderSettings(activeCategory) {
     if (!await checkAuth()) return;
     setTitle(['Settings']);
@@ -2696,6 +2731,14 @@
             <button class="btn btn-ghost" id="refetch-author-photos-btn">${icon('refresh', 16)} Re-fetch all (clear cache)</button>
           </div>
           <p class="form-hint" style="margin-top:var(--space-2)">Fetches a portrait for every author from Open Library in the background. "Re-fetch all" clears cached results first — use it if photos are missing after a network/tunnel issue.</p>
+        </div>
+        ` : ''}
+
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" id="background-tasks-section" data-cat="general">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('activity', 20)} Background Tasks</h3>
+          <p class="description">Long-running jobs such as author-photo downloads. Updates live while this page is open.</p>
+          <div id="background-tasks-list"><p class="text-caption" style="color:var(--color-muted)">Loading…</p></div>
         </div>
         ` : ''}
 
@@ -3316,6 +3359,13 @@
       // Cloud settings (owner only)
       if (currentUser?.is_owner) {
         loadCloudSettingsCard();
+      }
+
+      // Background tasks monitor (owner only) — poll while Settings is open.
+      if (currentUser?.is_owner) {
+        loadBackgroundTasks();
+        if (backgroundTasksPollInterval) clearInterval(backgroundTasksPollInterval);
+        backgroundTasksPollInterval = setInterval(loadBackgroundTasks, 3000);
       }
 
       // Device integration copy buttons
