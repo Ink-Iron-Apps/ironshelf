@@ -50,17 +50,16 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
   // Normalize URL: strip trailing slash
   const normalizedUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/+$/, '');
 
-  // Check if this URL is already claimed
+  // Check if this URL is already claimed. The same owner re-claiming is allowed
+  // (re-adopt: refresh the claim token) — this makes reconnecting after an
+  // unclaim work, since unclaim only clears local state on the server itself.
   const existingServer = await env.DB.prepare(
     'SELECT id, owner_id FROM servers WHERE url = ?',
   )
     .bind(normalizedUrl)
     .first<{ id: string; owner_id: string }>();
 
-  if (existingServer) {
-    if (existingServer.owner_id === user.id) {
-      return jsonResponse({ error: 'You have already claimed this server' }, 409);
-    }
+  if (existingServer && existingServer.owner_id !== user.id) {
     return jsonResponse({ error: 'This server URL is already claimed by another user' }, 409);
   }
 
@@ -86,32 +85,41 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
     // Server not reachable — we still allow claiming but mark as unverified
   }
 
-  const serverId = generateId();
   const claimToken = generateToken(48);
+  const lastSeen = isReachable ? new Date().toISOString() : null;
 
-  await env.DB.prepare(
-    `INSERT INTO servers (id, owner_id, name, url, claim_token, is_verified, version, last_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      serverId,
-      user.id,
-      server_name.trim(),
-      normalizedUrl,
-      claimToken,
-      isReachable ? 1 : 0,
-      serverVersion,
-      isReachable ? new Date().toISOString() : null,
+  let serverId: string;
+  if (existingServer) {
+    // Re-adopt: issue a fresh claim token and refresh metadata.
+    serverId = existingServer.id;
+    await env.DB.prepare(
+      `UPDATE servers SET name = ?, claim_token = ?, is_verified = ?, version = ?, last_seen_at = ?
+       WHERE id = ?`,
     )
-    .run();
-
-  // Also grant the owner full access in the server_access table
-  await env.DB.prepare(
-    `INSERT INTO server_access (server_id, user_id, permissions, granted_by)
-     VALUES (?, ?, ?, ?)`,
-  )
-    .bind(serverId, user.id, 'owner', user.id)
-    .run();
+      .bind(server_name.trim(), claimToken, isReachable ? 1 : 0, serverVersion, lastSeen, serverId)
+      .run();
+    // Ensure the owner still has an access row.
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO server_access (server_id, user_id, permissions, granted_by)
+       VALUES (?, ?, ?, ?)`,
+    )
+      .bind(serverId, user.id, 'owner', user.id)
+      .run();
+  } else {
+    serverId = generateId();
+    await env.DB.prepare(
+      `INSERT INTO servers (id, owner_id, name, url, claim_token, is_verified, version, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(serverId, user.id, server_name.trim(), normalizedUrl, claimToken, isReachable ? 1 : 0, serverVersion, lastSeen)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO server_access (server_id, user_id, permissions, granted_by)
+       VALUES (?, ?, ?, ?)`,
+    )
+      .bind(serverId, user.id, 'owner', user.id)
+      .run();
+  }
 
   return jsonResponse({
     ok: true,
@@ -124,7 +132,7 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
         ? 'Server claimed and verified. Store the claim_token on your server to complete setup.'
         : 'Server claimed but could not be reached. Store the claim_token on your server and verify later.',
     },
-  }, 201);
+  }, existingServer ? 200 : 201);
 }
 
 // ---------------------------------------------------------------------------
