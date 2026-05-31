@@ -50,6 +50,11 @@ impl CalibreSource {
         Ok(Self { pool, library_path })
     }
 
+    /// Filesystem path of the Calibre library directory (contains metadata.db).
+    pub fn library_path(&self) -> &Path {
+        &self.library_path
+    }
+
     /// All authors in the library, sorted by sort name.
     pub async fn authors(&self) -> Result<Vec<Author>, CalibreError> {
         let rows = sqlx::query(

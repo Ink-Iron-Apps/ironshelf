@@ -290,20 +290,56 @@ pub async fn get_author_photo(
 #[derive(Serialize)]
 pub struct ServerSettings {
     pub author_images_enabled: bool,
+    /// Calibre write-back mode: "none" | "calibredb" | "content_server".
+    pub calibre_writeback_mode: String,
+    pub calibredb_path: String,
+    pub calibre_cs_url: String,
+    pub calibre_cs_username: String,
+    pub calibre_cs_library_id: String,
+    /// True if a Content Server password is stored (the value is never returned).
+    pub calibre_cs_password_set: bool,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateServerSettings {
     pub author_images_enabled: Option<bool>,
+    pub calibre_writeback_mode: Option<String>,
+    pub calibredb_path: Option<String>,
+    pub calibre_cs_url: Option<String>,
+    pub calibre_cs_username: Option<String>,
+    pub calibre_cs_password: Option<String>,
+    pub calibre_cs_library_id: Option<String>,
+}
+
+/// Read a cloud_config string value, defaulting to empty.
+async fn read_config(state: &AppState, key: &str) -> String {
+    state
+        .ironshelf_db
+        .get_cloud_config(key)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+async fn build_server_settings(state: &AppState) -> ServerSettings {
+    let mode = read_config(state, "calibre_writeback_mode").await;
+    ServerSettings {
+        author_images_enabled: author_images_enabled(state).await,
+        calibre_writeback_mode: if mode.is_empty() { "none".to_string() } else { mode },
+        calibredb_path: read_config(state, "calibredb_path").await,
+        calibre_cs_url: read_config(state, "calibre_cs_url").await,
+        calibre_cs_username: read_config(state, "calibre_cs_username").await,
+        calibre_cs_library_id: read_config(state, "calibre_cs_library_id").await,
+        calibre_cs_password_set: !read_config(state, "calibre_cs_password").await.is_empty(),
+    }
 }
 
 /// GET /api/v1/server/settings — read server-wide feature toggles.
 pub async fn get_server_settings(
     State(state): State<AppState>,
 ) -> Result<Json<ServerSettings>, AppError> {
-    Ok(Json(ServerSettings {
-        author_images_enabled: author_images_enabled(&state).await,
-    }))
+    Ok(Json(build_server_settings(&state).await))
 }
 
 /// PUT /api/v1/server/settings — update server-wide feature toggles (owner only).
@@ -318,19 +354,51 @@ pub async fn update_server_settings(
         ));
     }
 
+    let db = &state.ironshelf_db;
+
     if let Some(enabled) = body.author_images_enabled {
-        state
-            .ironshelf_db
-            .set_cloud_config(AUTHOR_IMAGES_SETTING_KEY, if enabled { "true" } else { "false" })
+        db.set_cloud_config(AUTHOR_IMAGES_SETTING_KEY, if enabled { "true" } else { "false" })
             .await
             .map_err(AppError::internal)?;
-        // Drop cached portraits when turning the feature off.
         if !enabled {
-            let _ = state.ironshelf_db.clear_author_images().await;
+            let _ = db.clear_author_images().await;
         }
     }
 
-    Ok(Json(ServerSettings {
-        author_images_enabled: author_images_enabled(&state).await,
-    }))
+    if let Some(mode) = &body.calibre_writeback_mode {
+        let mode = mode.trim();
+        if !["none", "calibredb", "content_server"].contains(&mode) {
+            return Err(AppError::BadRequest(format!(
+                "invalid calibre_writeback_mode: {mode}"
+            )));
+        }
+        db.set_cloud_config("calibre_writeback_mode", mode)
+            .await
+            .map_err(AppError::internal)?;
+    }
+
+    for (key, value) in [
+        ("calibredb_path", &body.calibredb_path),
+        ("calibre_cs_url", &body.calibre_cs_url),
+        ("calibre_cs_username", &body.calibre_cs_username),
+        ("calibre_cs_library_id", &body.calibre_cs_library_id),
+    ] {
+        if let Some(value) = value {
+            db.set_cloud_config(key, value.trim())
+                .await
+                .map_err(AppError::internal)?;
+        }
+    }
+
+    // Only overwrite the password when a non-empty value is supplied, so the
+    // UI can leave it blank to keep the existing one.
+    if let Some(password) = &body.calibre_cs_password {
+        if !password.is_empty() {
+            db.set_cloud_config("calibre_cs_password", password)
+                .await
+                .map_err(AppError::internal)?;
+        }
+    }
+
+    Ok(Json(build_server_settings(&state).await))
 }

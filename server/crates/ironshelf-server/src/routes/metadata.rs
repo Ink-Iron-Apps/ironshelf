@@ -87,6 +87,8 @@ pub struct ApplyMetadataRequest {
 pub struct ApplyMetadataResponse {
     pub book_id: i64,
     pub applied: bool,
+    /// Whether the change was also written back to Calibre (when enabled).
+    pub calibre_updated: bool,
 }
 
 #[derive(Serialize)]
@@ -294,9 +296,20 @@ pub async fn apply_metadata(
             .map_err(AppError::internal)?;
     }
 
+    // Best-effort write-back to Calibre (no-op unless enabled in settings).
+    let calibre_updated = match crate::routes::calibre_writeback::push_overrides(&state, book_id).await
+    {
+        Ok(updated) => updated,
+        Err(error) => {
+            tracing::warn!("calibre write-back failed for book {book_id}: {error}");
+            false
+        }
+    };
+
     Ok(Json(ApplyMetadataResponse {
         book_id,
         applied: true,
+        calibre_updated,
     }))
 }
 
