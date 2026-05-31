@@ -2820,6 +2820,12 @@
         ` : ''}
 
         <div class="settings-section" data-cat="account">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud Account</h3>
+          <p class="description">Link your Ironshelf Cloud account to this user so you can sign into this server with your cloud login. They become one account.</p>
+          <button class="btn btn-secondary" id="link-cloud-btn">${icon('globe', 16)} Link Ironshelf Cloud Account</button>
+        </div>
+
+        <div class="settings-section" data-cat="account">
           <h3>Account</h3>
           <div class="card">
             <dl class="book-detail-metadata" style="margin:0;padding:0;background:transparent;border:0">
@@ -2866,6 +2872,82 @@
         } finally {
           toggleEvent.target.disabled = false;
         }
+      });
+
+      // Link Ironshelf Cloud account to this local user
+      document.getElementById('link-cloud-btn')?.addEventListener('click', () => {
+        const { close } = showModal({
+          title: 'Link Ironshelf Cloud Account',
+          description: 'Sign in with your Ironshelf Cloud account. It will become a sign-in for this server, mapped to your current user.',
+          content: `
+            <form id="link-cloud-form" novalidate>
+              <div class="form-group">
+                <label class="form-label" for="link-cloud-email">Cloud Email or Username</label>
+                <input type="text" class="form-input" id="link-cloud-email" required autocomplete="username" autofocus>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="link-cloud-password">Cloud Password</label>
+                <input type="password" class="form-input" id="link-cloud-password" required autocomplete="current-password">
+              </div>
+              <div id="link-cloud-error" class="form-error hidden" role="alert"></div>
+              <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="link-cloud-submit">${icon('globe', 16)} Link Account</button>
+              </div>
+            </form>
+          `,
+        });
+        const form = document.getElementById('link-cloud-form');
+        form.querySelector('[data-action="cancel"]').addEventListener('click', close);
+        form.addEventListener('submit', async (submitEvent) => {
+          submitEvent.preventDefault();
+          const errorEl = document.getElementById('link-cloud-error');
+          const submitBtn = document.getElementById('link-cloud-submit');
+          errorEl.classList.add('hidden');
+          submitBtn.disabled = true;
+          try {
+            // 1. Authenticate with cloud.
+            const authResponse = await fetch(`${CLOUD_API}/auth/login`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email_or_username: document.getElementById('link-cloud-email').value,
+                password: document.getElementById('link-cloud-password').value,
+              }),
+            });
+            const authData = await authResponse.json().catch(() => ({}));
+            if (!authResponse.ok || !authData.data?.token) {
+              throw new Error(authData.error || 'Cloud sign-in failed');
+            }
+            const cloudJwt = authData.data.token;
+
+            // 2. This server must be claimed (need its cloud server_id).
+            const claimStatus = await apiGet('/auth/claim-status').catch(() => null);
+            const serverId = claimStatus?.server_id;
+            if (!claimStatus?.is_claimed || !serverId) {
+              throw new Error('Claim this server to Ironshelf Cloud first (Settings → Ironshelf Cloud).');
+            }
+
+            // 3. Get a server-scoped access token (signed with the claim token).
+            const tokenResponse = await fetch(`${CLOUD_API}/servers/${serverId}/token`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cloudJwt}` },
+            });
+            const tokenData = await tokenResponse.json().catch(() => ({}));
+            if (!tokenResponse.ok || !tokenData.data?.server_access_token) {
+              throw new Error(tokenData.error || 'Could not get a server access token (is your cloud account linked to this server?)');
+            }
+
+            // 4. Link on this server.
+            const linkResult = await apiPost('/auth/link-cloud', { cloud_token: tokenData.data.server_access_token });
+            close();
+            toast(`Linked cloud account "${linkResult.cloud_username || ''}" to your user`, 'success');
+          } catch (linkError) {
+            errorEl.textContent = linkError.message || 'Failed to link cloud account';
+            errorEl.classList.remove('hidden');
+            submitBtn.disabled = false;
+          }
+        });
       });
 
       // Bind events
