@@ -13,10 +13,11 @@
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -234,46 +235,79 @@ pub async fn cloud_login(
         .await
         .map_err(AppError::Unauthorized)?;
 
-    // Find or create a local user for this cloud user
+    // Resolve the local user for this cloud identity:
+    //   1) a local user explicitly linked to this cloud account (oidc_subject),
+    //   2) else the legacy auto-created cloud_<username> user,
+    //   3) else auto-create one.
+    // Resolved users are stamped with the cloud subject so future logins (and
+    // Settings → Link Cloud) map to one identity.
+    let cloud_subject = token_payload.user_id.clone();
     let cloud_username = format!("cloud_{}", token_payload.username);
-    let existing_user = sqlx::query(
-        "SELECT id, username, is_owner FROM users WHERE username = ?",
+
+    let linked_user = sqlx::query(
+        "SELECT id, username, is_owner FROM users WHERE oidc_issuer = 'ironshelf-cloud' AND oidc_subject = ?",
     )
-    .bind(&cloud_username)
+    .bind(&cloud_subject)
     .fetch_optional(pool)
     .await
     .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
 
-    let (user_id, username, is_owner) = if let Some(row) = existing_user {
+    let (user_id, username, is_owner) = if let Some(row) = linked_user {
         (
             row.get::<String, _>("id"),
             row.get::<String, _>("username"),
             row.get::<bool, _>("is_owner"),
         )
     } else {
-        // Auto-create a local user for the cloud user.
-        // Cloud users are never owners (the local admin must elevate if needed).
-        let new_user_id = uuid::Uuid::new_v4().to_string();
-        // Use a random password hash since cloud users authenticate via token, not password.
-        let placeholder_hash = format!("cloud_auth_only_{}", uuid::Uuid::new_v4());
-
-        sqlx::query(
-            "INSERT INTO users (id, username, password_hash, is_owner) VALUES (?, ?, ?, 0)",
+        // Legacy fallback: find or create the cloud_<username> user.
+        let existing_user = sqlx::query(
+            "SELECT id, username, is_owner FROM users WHERE username = ?",
         )
-        .bind(&new_user_id)
         .bind(&cloud_username)
-        .bind(&placeholder_hash)
-        .execute(pool)
+        .fetch_optional(pool)
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to create cloud user: {e}")))?;
+        .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
 
-        tracing::info!(
-            username = %cloud_username,
-            cloud_user_id = %token_payload.user_id,
-            "created local user for cloud login"
-        );
+        let resolved = if let Some(row) = existing_user {
+            (
+                row.get::<String, _>("id"),
+                row.get::<String, _>("username"),
+                row.get::<bool, _>("is_owner"),
+            )
+        } else {
+            // Auto-create a local user. Cloud users are never owners.
+            let new_user_id = uuid::Uuid::new_v4().to_string();
+            let placeholder_hash = format!("cloud_auth_only_{}", uuid::Uuid::new_v4());
 
-        (new_user_id, cloud_username.clone(), false)
+            sqlx::query(
+                "INSERT INTO users (id, username, password_hash, is_owner) VALUES (?, ?, ?, 0)",
+            )
+            .bind(&new_user_id)
+            .bind(&cloud_username)
+            .bind(&placeholder_hash)
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to create cloud user: {e}")))?;
+
+            tracing::info!(
+                username = %cloud_username,
+                cloud_user_id = %cloud_subject,
+                "created local user for cloud login"
+            );
+
+            (new_user_id, cloud_username.clone(), false)
+        };
+
+        // Stamp the cloud subject so this user is stable + linkable.
+        let _ = sqlx::query(
+            "UPDATE users SET oidc_issuer = 'ironshelf-cloud', oidc_subject = ? WHERE id = ?",
+        )
+        .bind(&cloud_subject)
+        .bind(&resolved.0)
+        .execute(pool)
+        .await;
+
+        resolved
     };
 
     // Create a session for the user
@@ -323,6 +357,66 @@ struct CloudTokenPayload {
     username: String,
     server_id: String,
     permissions: String,
+}
+
+#[derive(Deserialize)]
+pub struct LinkCloudRequest {
+    pub cloud_token: String,
+}
+
+/// POST /api/v1/auth/link-cloud — link the current local user to a cloud account
+/// so that signing in with that cloud account logs into THIS local user (one
+/// identity). Requires a local session. The cloud identity is detached from any
+/// other local user (e.g. an auto-created cloud_ placeholder) first.
+pub async fn link_cloud(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(request): Json<LinkCloudRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let ironshelf_db = &state.ironshelf_db;
+    let pool = ironshelf_db.pool();
+
+    let claim_token = ironshelf_db
+        .get_cloud_config("claim_token")
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to read cloud config: {e}")))?
+        .ok_or_else(|| {
+            AppError::BadRequest("Server is not claimed — cannot link cloud accounts".to_string())
+        })?;
+
+    let token_payload = verify_cloud_token(&request.cloud_token, &claim_token)
+        .await
+        .map_err(AppError::Unauthorized)?;
+
+    // Detach this cloud identity from any other local user so it maps to one.
+    let _ = sqlx::query(
+        "UPDATE users SET oidc_issuer = NULL, oidc_subject = NULL \
+         WHERE oidc_issuer = 'ironshelf-cloud' AND oidc_subject = ? AND id != ?",
+    )
+    .bind(&token_payload.user_id)
+    .bind(&auth_user.user_id)
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "UPDATE users SET oidc_issuer = 'ironshelf-cloud', oidc_subject = ? WHERE id = ?",
+    )
+    .bind(&token_payload.user_id)
+    .bind(&auth_user.user_id)
+    .execute(pool)
+    .await
+    .map_err(AppError::internal)?;
+
+    tracing::info!(
+        local_user = %auth_user.user_id,
+        cloud_user = %token_payload.user_id,
+        "linked cloud account to local user"
+    );
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "cloud_username": token_payload.username,
+    })))
 }
 
 /// Verify a cloud access token JWT signed with HMAC-SHA256 using the claim_token.

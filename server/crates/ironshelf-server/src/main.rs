@@ -213,6 +213,10 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::put(routes::password::change_password),
         )
         .route(
+            "/api/v1/auth/link-cloud",
+            axum::routing::post(routes::cloud_auth::link_cloud),
+        )
+        .route(
             "/api/v1/auth/api-keys",
             get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
         )
