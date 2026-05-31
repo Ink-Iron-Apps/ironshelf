@@ -821,7 +821,7 @@
       read: () => openReader(parsed.params.id, detectReaderFormat(parsed.params.sub) || 'epub'),
       collections: renderCollections,
       collection: () => renderCollectionDetail(parsed.params.id),
-      settings: renderSettings,
+      settings: () => renderSettings(parsed.params.id),
       users: renderUsers,
       stats: renderStats,
       activity: renderActivity,
@@ -2522,7 +2522,44 @@
 
   // --- Settings ---
 
-  async function renderSettings() {
+  // Plex-style settings categories. Order shown in the left nav; categories
+  // with no present sections (e.g. owner-only ones for a normal user) are
+  // automatically omitted.
+  const SETTINGS_CATEGORY_ORDER = ['general', 'library', 'network', 'cloud', 'devices', 'users', 'account', 'notifications', 'reader', 'data'];
+  const SETTINGS_CATEGORY_META = {
+    general: { label: 'General', icon: 'settings' },
+    library: { label: 'Library', icon: 'library' },
+    network: { label: 'Remote Access', icon: 'globe' },
+    cloud: { label: 'Ironshelf Cloud', icon: 'globe' },
+    devices: { label: 'Devices & API', icon: 'link' },
+    users: { label: 'Users', icon: 'users' },
+    account: { label: 'Account', icon: 'lock' },
+    notifications: { label: 'Notifications', icon: 'bell' },
+    reader: { label: 'Reader', icon: 'book' },
+    data: { label: 'Data', icon: 'download' },
+  };
+
+  function setupSettingsNav(requestedCategory) {
+    const nav = document.getElementById('settings-nav');
+    if (!nav) return;
+    const sections = Array.from(document.querySelectorAll('.settings-content [data-cat]'));
+    const present = [];
+    sections.forEach((section) => {
+      if (!present.includes(section.dataset.cat)) present.push(section.dataset.cat);
+    });
+    const ordered = SETTINGS_CATEGORY_ORDER.filter((cat) => present.includes(cat));
+    if (ordered.length === 0) return;
+    const activeCategory = ordered.includes(requestedCategory) ? requestedCategory : ordered[0];
+
+    nav.innerHTML = ordered.map((cat) => {
+      const meta = SETTINGS_CATEGORY_META[cat] || { label: cat, icon: 'settings' };
+      return `<a href="#/settings/${cat}" class="settings-nav-item${cat === activeCategory ? ' active' : ''}">${icon(meta.icon, 18)}<span>${escapeHtml(meta.label)}</span></a>`;
+    }).join('');
+
+    sections.forEach((section) => { section.hidden = section.dataset.cat !== activeCategory; });
+  }
+
+  async function renderSettings(activeCategory) {
     if (!await checkAuth()) return;
     setTitle(['Settings']);
     breadcrumbTrail = [{ label: 'Settings', path: '/settings' }];
@@ -2539,14 +2576,18 @@
       let bodyContent = `
         <div class="page-header"><h1>Settings</h1></div>
 
-        <div class="settings-section" id="libraries-section">
+        <div class="settings-layout">
+        <aside class="settings-nav" id="settings-nav"></aside>
+        <div class="settings-content">
+
+        <div class="settings-section" id="libraries-section" data-cat="library">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('library', 20)} Libraries</h3>
           <p class="description">Browse, add, scan, and manage your libraries. Pin a library to keep it in the sidebar for quick access.</p>
           <a href="#/libraries" class="btn btn-primary">${icon('library', 16)} Manage Libraries</a>
         </div>
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section" id="author-photos-section">
+        <div class="settings-section" id="author-photos-section" data-cat="general">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('users', 20)} Author Photos</h3>
           <p class="description">Download author portraits from Open Library and cache them on this server. Disabling stops all lookups and clears the cache.</p>
           <label style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer">
@@ -2557,7 +2598,7 @@
         ` : ''}
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section" id="server-update-section">
+        <div class="settings-section" id="server-update-section" data-cat="general">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Server Update</h3>
           <p class="description">Check for new Ironshelf server releases and apply updates directly from the UI.</p>
           <div class="update-card" id="update-card">
@@ -2569,7 +2610,7 @@
         ` : ''}
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section" id="remote-access-section">
+        <div class="settings-section" id="remote-access-section" data-cat="network">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Remote Access</h3>
           <p class="description">Make this server reachable from outside your local network. Choose a method below.</p>
           <div class="card remote-access-card" id="remote-access-card">
@@ -2581,7 +2622,7 @@
         ` : ''}
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section" id="cloud-settings-section">
+        <div class="settings-section" id="cloud-settings-section" data-cat="cloud">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Ironshelf Cloud</h3>
           <p class="description">Link this server to Ironshelf Cloud so users with cloud accounts can sign in.</p>
           <div class="cloud-claim-card" id="cloud-claim-card">
@@ -2592,7 +2633,7 @@
         </div>
         ` : ''}
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="devices">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('key', 20)} API Keys</h3>
           <p class="description">API keys authenticate the Flutter app or external tools. The key is shown once upon creation.</p>
 
@@ -2622,7 +2663,7 @@
           <button class="btn btn-primary mt-4" id="create-api-key-btn">${icon('plus', 16)} Create API Key</button>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="devices">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('link', 20)} Device Integration</h3>
           <p class="description">Connect e-readers and third-party apps to your Ironshelf server.</p>
 
@@ -2681,7 +2722,7 @@
           })()}
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="account">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('lock', 20)} Change Password</h3>
           <p class="description">Update your account password. You must provide your current password for verification.</p>
           <form id="change-password-form" class="card" style="max-width:400px;display:flex;flex-direction:column;gap:var(--space-4)" novalidate>
@@ -2704,7 +2745,7 @@
         </div>
 
         ${currentUser?.is_owner ? `
-        <div class="settings-section">
+        <div class="settings-section" data-cat="users">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('mail', 20)} Pending Invites</h3>
           <p class="description">Invite new users by creating invite codes. Share the code with someone to let them create an account.</p>
           <div class="list-group" id="invites-list">
@@ -2714,7 +2755,7 @@
         </div>
         ` : ''}
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="data">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Export / Import</h3>
           <p class="description">Export your reading progress, collections, and preferences as JSON. Import a previously exported file to restore data.</p>
           <div class="card" style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center">
@@ -2735,7 +2776,7 @@
           </div>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="notifications">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('bell', 20)} Notification Preferences</h3>
           <p class="description">Control which notification types appear in your notification panel. Preferences are stored locally in this browser.</p>
 
@@ -2768,7 +2809,7 @@
         ${renderReaderPreferencesSection()}
 
         ${hasPermission('manage_library') ? `
-          <div class="settings-section">
+          <div class="settings-section" data-cat="library">
             <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('globe', 20)} Integrations</h3>
             <p class="description">Manage webhooks, duplicate detection, and other advanced features.</p>
             <div style="display:flex;flex-wrap:wrap;gap:var(--space-3)">
@@ -2778,7 +2819,7 @@
           </div>
         ` : ''}
 
-        <div class="settings-section">
+        <div class="settings-section" data-cat="account">
           <h3>Account</h3>
           <div class="card">
             <dl class="book-detail-metadata" style="margin:0;padding:0;background:transparent;border:0">
@@ -2790,12 +2831,16 @@
           </div>
         </div>
 
+        </div><!-- settings-content -->
+        </div><!-- settings-layout -->
+
         <div class="settings-version-footer" id="settings-version-footer">
           <span class="settings-version-text">${cachedServerVersion ? `Ironshelf v${cachedServerVersion}` : 'Ironshelf'}</span>
         </div>
       `;
 
       renderShell(bodyContent, 'settings');
+      setupSettingsNav(activeCategory);
 
       // If version was not yet fetched, populate it now
       if (!cachedServerVersion) {
@@ -2890,7 +2935,7 @@
             const modal = document.querySelector('.modal-overlay:last-child');
             modal.querySelector('[data-action="done"]')?.addEventListener('click', () => {
               modal.remove();
-              renderSettings();
+              renderSettings(parseRoute(getHashPath()).params.id);
             });
             modal.querySelector('#copy-key-btn')?.addEventListener('click', () => {
               navigator.clipboard.writeText(result.key).then(() => {
@@ -2917,7 +2962,7 @@
               try {
                 await apiDelete(`/auth/api-keys/${keyId}`);
                 toast('API key deleted', 'success');
-                renderSettings();
+                renderSettings(parseRoute(getHashPath()).params.id);
               } catch (err) {
                 toast(err.message, 'error');
               }
@@ -2956,7 +3001,7 @@
           const importData = JSON.parse(text);
           const result = await apiPost('/import', importData);
           toast(result?.message || 'Data imported successfully', 'success');
-          renderSettings();
+          renderSettings(parseRoute(getHashPath()).params.id);
         } catch (err) {
           toast(err.message || 'Import failed — check file format', 'error');
         }
@@ -7151,7 +7196,7 @@
     const prefs = getReaderPreferences();
 
     return `
-      <div class="settings-section">
+      <div class="settings-section" data-cat="reader">
         <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('bookOpen', 20)} Reading Preferences</h3>
         <p class="description">Defaults applied when opening a reader. Stored locally in this browser.</p>
 
