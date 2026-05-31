@@ -1,10 +1,11 @@
 /**
  * Minimal SMTP client for Cloudflare Workers using raw TCP sockets
  * (`cloudflare:sockets`). Sends mail through an authenticated mailbox such as
- * Hostinger over implicit TLS (port 465).
+ * Hostinger. Tries implicit TLS (465) and STARTTLS (587) so it works whichever
+ * submission port the provider accepts from datacenter IPs.
  *
  * Configured via secrets: SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
- * SMTP_FROM. When any required field is missing, send() returns false.
+ * SMTP_FROM. When any required field is missing, sendMail() returns false.
  */
 
 import { connect } from 'cloudflare:sockets';
@@ -19,9 +20,7 @@ interface MailMessage {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/// Read SMTP replies until a final line (`NNN <text>`, space after the code)
-/// is seen, returning its numeric status code. Multiline replies (`NNN-...`)
-/// are consumed until the terminating line.
+/// Read SMTP replies until a final line (`NNN <text>`), returning its code.
 async function readReply(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: { buffer: string },
@@ -49,86 +48,114 @@ async function writeLine(
   await writer.write(encoder.encode(line + '\r\n'));
 }
 
-/// Send an email via SMTP. Returns true on success; never throws.
-export async function sendMail(env: Env, message: MailMessage): Promise<boolean> {
-  const host = env.SMTP_HOST;
-  const port = parseInt(env.SMTP_PORT || '465', 10);
-  const username = env.SMTP_USERNAME;
-  const password = env.SMTP_PASSWORD;
-  const from = env.SMTP_FROM || 'noreply@inknironapps.com';
+function buildMessage(from: string, message: MailMessage): string {
+  const headers = [
+    `From: Ironshelf <${from}>`,
+    `To: <${message.to}>`,
+    'Reply-To: support@inknironapps.com',
+    `Subject: ${message.subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+  ].join('\r\n');
+  // Dot-stuff lines beginning with '.' so they aren't read as end-of-data.
+  const body = message.html.replace(/\r?\n/g, '\r\n').replace(/\r\n\./g, '\r\n..');
+  return `${headers}\r\n\r\n${body}\r\n.\r\n`;
+}
 
-  if (!host || !username || !password) {
-    return false;
-  }
+interface SmtpCreds {
+  host: string;
+  username: string;
+  password: string;
+  from: string;
+}
 
-  let socket;
+/// Attempt a send over a single port/mode. Throws on any failure.
+async function attemptSend(
+  creds: SmtpCreds,
+  port: number,
+  mode: 'tls' | 'starttls',
+  message: MailMessage,
+): Promise<void> {
+  let socket = connect(
+    { hostname: creds.host, port },
+    { secureTransport: mode === 'tls' ? 'on' : 'starttls', allowHalfOpen: false },
+  );
+  await socket.opened;
+
+  let writer = socket.writable.getWriter();
+  let reader = socket.readable.getReader();
+  const state = { buffer: '' };
+  const expect = async (codes: number[], step: string) => {
+    const code = await readReply(reader, state);
+    if (!codes.includes(code)) throw new Error(`SMTP ${step} failed: ${code}`);
+  };
+
   try {
-    socket = connect(
-      { hostname: host, port },
-      { secureTransport: 'on', allowHalfOpen: false },
-    );
-    // Wait for the TCP+TLS connection to be established before reading/writing;
-    // otherwise the first read races the handshake ("Stream was cancelled").
-    await socket.opened;
-    const writer = socket.writable.getWriter();
-    const reader = socket.readable.getReader();
-    const state = { buffer: '' };
-
-    const expect = async (codes: number[], step: string) => {
-      const code = await readReply(reader, state);
-      if (!codes.includes(code)) {
-        throw new Error(`SMTP ${step} failed: ${code}`);
-      }
-    };
-
     await expect([220], 'greeting');
-
-    await writeLine(writer, `EHLO ${host}`);
+    await writeLine(writer, `EHLO ${creds.host}`);
     await expect([250], 'EHLO');
+
+    if (mode === 'starttls') {
+      await writeLine(writer, 'STARTTLS');
+      await expect([220], 'STARTTLS');
+      // Upgrade the connection to TLS, then re-handshake at the SMTP layer.
+      writer.releaseLock();
+      reader.releaseLock();
+      socket = socket.startTls();
+      writer = socket.writable.getWriter();
+      reader = socket.readable.getReader();
+      state.buffer = '';
+      await writeLine(writer, `EHLO ${creds.host}`);
+      await expect([250], 'EHLO (TLS)');
+    }
 
     await writeLine(writer, 'AUTH LOGIN');
     await expect([334], 'AUTH');
-    await writeLine(writer, btoa(username));
+    await writeLine(writer, btoa(creds.username));
     await expect([334], 'username');
-    await writeLine(writer, btoa(password));
+    await writeLine(writer, btoa(creds.password));
     await expect([235], 'password');
 
-    await writeLine(writer, `MAIL FROM:<${from}>`);
+    await writeLine(writer, `MAIL FROM:<${creds.from}>`);
     await expect([250], 'MAIL FROM');
     await writeLine(writer, `RCPT TO:<${message.to}>`);
     await expect([250, 251], 'RCPT TO');
-
     await writeLine(writer, 'DATA');
     await expect([354], 'DATA');
-
-    const headers = [
-      `From: Ironshelf <${from}>`,
-      `To: <${message.to}>`,
-      `Reply-To: support@inknironapps.com`,
-      `Subject: ${message.subject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=utf-8',
-    ].join('\r\n');
-
-    // Dot-stuff any line beginning with '.' so it isn't read as end-of-data.
-    const body = message.html.replace(/\r?\n/g, '\r\n').replace(/\r\n\./g, '\r\n..');
-    await writer.write(encoder.encode(`${headers}\r\n\r\n${body}\r\n.\r\n`));
+    await writer.write(encoder.encode(buildMessage(creds.from, message)));
     await expect([250], 'message body');
 
     await writeLine(writer, 'QUIT');
-    try {
-      await writer.close();
-    } catch {
-      // QUIT close races the server hangup — ignore.
-    }
-    return true;
-  } catch (error) {
-    console.error('SMTP send failed:', error);
-    try {
-      await socket?.close();
-    } catch {
-      // ignore
-    }
-    return false;
+  } finally {
+    try { await socket.close(); } catch { /* ignore */ }
   }
+}
+
+/// Send an email via SMTP. Tries the configured port first, then the other
+/// submission port/mode. Returns true on success; never throws.
+export async function sendMail(env: Env, message: MailMessage): Promise<boolean> {
+  const host = env.SMTP_HOST;
+  const username = env.SMTP_USERNAME;
+  const password = env.SMTP_PASSWORD;
+  const from = env.SMTP_FROM || 'noreply@inknironapps.com';
+  if (!host || !username || !password) return false;
+
+  const creds: SmtpCreds = { host, username, password, from };
+  const configuredPort = parseInt(env.SMTP_PORT || '465', 10);
+
+  // Order attempts so the configured port is tried first.
+  const attempts: Array<{ port: number; mode: 'tls' | 'starttls' }> =
+    configuredPort === 587
+      ? [{ port: 587, mode: 'starttls' }, { port: 465, mode: 'tls' }]
+      : [{ port: 465, mode: 'tls' }, { port: 587, mode: 'starttls' }];
+
+  for (const attempt of attempts) {
+    try {
+      await attemptSend(creds, attempt.port, attempt.mode, message);
+      return true;
+    } catch (error) {
+      console.error(`SMTP send failed on port ${attempt.port} (${attempt.mode}):`, String(error));
+    }
+  }
+  return false;
 }
