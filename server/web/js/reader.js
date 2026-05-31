@@ -407,7 +407,10 @@ const IronshelfReader = (() => {
         throw new Error(`Failed to download book (${bookResponse.status})`);
       }
       const bookData = await bookResponse.arrayBuffer();
-      currentBook = ePub(bookData);
+      // Force binary archive mode. Without openAs, epub.js's type detection can
+      // misfire on an ArrayBuffer, take the URL/directory path, fail, and (its
+      // open() swallows the error) leave `ready` unresolved — a silent hang.
+      currentBook = ePub(bookData, { openAs: 'binary' });
 
       // Wait for book to be ready
       await currentBook.ready;
