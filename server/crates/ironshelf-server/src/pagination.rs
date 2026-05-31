@@ -65,6 +65,8 @@ pub struct Paginated<T: Serialize> {
     pub total: i64,
     pub page: u32,
     pub per_page: u32,
+    /// Total number of pages (>= 1), so clients can render pagination.
+    pub total_pages: u32,
 }
 
 impl<T: Serialize> Paginated<T> {
@@ -82,11 +84,18 @@ impl<T: Serialize> Paginated<T> {
             items.drain(offset..end).collect()
         };
 
+        let total_pages = if per_page == 0 {
+            1
+        } else {
+            (((total as u64) + per_page as u64 - 1) / per_page as u64).max(1) as u32
+        };
+
         Self {
             items: page_items,
             total,
             page: pagination.page(),
             per_page,
+            total_pages,
         }
     }
 }

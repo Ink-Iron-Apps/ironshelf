@@ -281,7 +281,14 @@
     }
 
     if (response.status === 204) return null;
-    return response.json();
+    // Tolerate empty/non-JSON success bodies (e.g. 202 Accepted from scan).
+    const text = await response.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
   }
 
   function apiGet(path) { return api(path); }
