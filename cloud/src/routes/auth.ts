@@ -3,6 +3,7 @@
  */
 
 import type { Env, CloudUser } from '../types';
+import { sendMail } from '../email';
 import {
   hashPassword,
   verifyPassword,
@@ -283,10 +284,9 @@ export async function handleAdminResetPassword(request: Request, env: Env): Prom
 
 const RESET_TOKEN_TTL_SECONDS = 30 * 60; // 30 minutes
 
-/// Send a password-reset email via Resend. Returns true on success. Never
-/// throws — failures are logged and reported as false.
+/// Send a password-reset email via the configured SMTP mailbox. Returns true
+/// on success. Never throws — failures are logged and reported as false.
 async function sendResetEmail(env: Env, toEmail: string, resetLink: string): Promise<boolean> {
-  if (!env.RESEND_API_KEY) return false;
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;color:#0F1115">
       <h2 style="font-family:'EB Garamond',Georgia,serif">Reset your Ironshelf Cloud password</h2>
@@ -294,30 +294,11 @@ async function sendResetEmail(env: Env, toEmail: string, resetLink: string): Pro
       <p><a href="${resetLink}" style="display:inline-block;background:#095F73;color:#E8E4DA;padding:12px 20px;border-radius:8px;text-decoration:none">Reset password</a></p>
       <p style="color:#6b7280;font-size:13px">If you didn't request this, you can safely ignore this email. Or paste this link into your browser:<br>${resetLink}</p>
     </div>`;
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'Ironshelf <noreply@inknironapps.com>',
-        reply_to: 'support@inknironapps.com',
-        to: [toEmail],
-        subject: 'Reset your Ironshelf Cloud password',
-        html,
-      }),
-    });
-    if (!response.ok) {
-      console.error('Resend send failed:', response.status, await response.text().catch(() => ''));
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error('Resend send error:', error);
-    return false;
-  }
+  return sendMail(env, {
+    to: toEmail,
+    subject: 'Reset your Ironshelf Cloud password',
+    html,
+  });
 }
 
 interface ForgotPasswordBody {
