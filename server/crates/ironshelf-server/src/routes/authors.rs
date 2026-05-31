@@ -307,6 +307,90 @@ pub async fn get_author_photo(
     }
 }
 
+#[derive(Deserialize)]
+pub struct PrefetchPhotosParams {
+    /// When true, clear the cache first and re-fetch every author (recovers
+    /// from "not found" entries cached while the network was unavailable).
+    pub refresh: Option<bool>,
+}
+
+/// POST /api/v1/authors/photos/prefetch — fetch + cache portraits for every
+/// author in the background. Owner only. Returns immediately with the count.
+pub async fn prefetch_author_photos(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Query(params): Query<PrefetchPhotosParams>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if !auth_user.is_owner {
+        return Err(AppError::Forbidden(
+            "Only the server owner can do this".to_string(),
+        ));
+    }
+    if !author_images_enabled(&state).await {
+        return Err(AppError::BadRequest(
+            "Author photos are disabled — enable them first".to_string(),
+        ));
+    }
+
+    // Collect unique author names across all libraries.
+    let mut names: Vec<String> = Vec::new();
+    {
+        let libraries = state.libraries.read().await;
+        let mut seen = std::collections::HashSet::new();
+        for library in libraries.iter() {
+            if let Ok(authors) = library.source.authors().await {
+                for author in authors {
+                    let key = author.name.trim().to_lowercase();
+                    if !key.is_empty() && seen.insert(key) {
+                        names.push(author.name);
+                    }
+                }
+            }
+        }
+    }
+
+    let total = names.len();
+    let refresh = params.refresh.unwrap_or(false);
+    let task_state = state.clone();
+
+    // Run in the background — fetching hundreds of portraits would exceed
+    // request/proxy timeouts. Photos appear as they're cached.
+    tokio::spawn(async move {
+        if refresh {
+            let _ = task_state.ironshelf_db.clear_author_images().await;
+        }
+        let mut fetched = 0usize;
+        for name in names {
+            let key = name.trim().to_lowercase();
+            if !refresh {
+                if let Ok(Some(_)) = task_state.ironshelf_db.get_author_image(&key).await {
+                    continue; // already attempted
+                }
+            }
+            match fetch_author_photo(&task_state.http_client, &name).await {
+                Some((bytes, content_type)) => {
+                    let _ = task_state
+                        .ironshelf_db
+                        .set_author_image(&key, Some(bytes.as_slice()), &content_type, false)
+                        .await;
+                    fetched += 1;
+                }
+                None => {
+                    let _ = task_state
+                        .ironshelf_db
+                        .set_author_image(&key, None, "image/jpeg", true)
+                        .await;
+                }
+            }
+            // Be gentle with Open Library.
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        tracing::info!("author photo prefetch complete: {fetched} fetched of {total}");
+    });
+
+    Ok(Json(serde_json::json!({ "started": true, "total": total })))
+}
+
 #[derive(Serialize)]
 pub struct ServerSettings {
     pub author_images_enabled: bool,

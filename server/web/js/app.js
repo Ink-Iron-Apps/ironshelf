@@ -2691,6 +2691,11 @@
             <input type="checkbox" id="author-photos-toggle" ${serverSettings.author_images_enabled ? 'checked' : ''}>
             <span>Enable author photos</span>
           </label>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);margin-top:var(--space-4)">
+            <button class="btn btn-secondary" id="prefetch-author-photos-btn">${icon('download', 16)} Download all author photos</button>
+            <button class="btn btn-ghost" id="refetch-author-photos-btn">${icon('refresh', 16)} Re-fetch all (clear cache)</button>
+          </div>
+          <p class="form-hint" style="margin-top:var(--space-2)">Fetches a portrait for every author from Open Library in the background. "Re-fetch all" clears cached results first — use it if photos are missing after a network/tunnel issue.</p>
         </div>
         ` : ''}
 
@@ -2970,6 +2975,29 @@
         } finally {
           toggleEvent.target.disabled = false;
         }
+      });
+
+      // Bulk-download author photos
+      const prefetchPhotos = async (refresh) => {
+        const buttons = [document.getElementById('prefetch-author-photos-btn'), document.getElementById('refetch-author-photos-btn')];
+        buttons.forEach(b => { if (b) b.disabled = true; });
+        try {
+          const result = await apiPost(`/authors/photos/prefetch${refresh ? '?refresh=true' : ''}`, {});
+          toast(`Fetching photos for ${result.total} authors in the background — they'll appear as they download.`, 'success');
+        } catch (prefetchError) {
+          toast(prefetchError.message || 'Failed to start photo download', 'error');
+        } finally {
+          buttons.forEach(b => { if (b) b.disabled = false; });
+        }
+      };
+      document.getElementById('prefetch-author-photos-btn')?.addEventListener('click', () => prefetchPhotos(false));
+      document.getElementById('refetch-author-photos-btn')?.addEventListener('click', () => {
+        showConfirmModal({
+          title: 'Re-fetch all author photos',
+          message: 'This clears all cached author photos and re-fetches every author from Open Library. Useful if photos are missing. Continue?',
+          confirmText: 'Re-fetch all',
+          onConfirm: () => prefetchPhotos(true),
+        });
       });
 
       // Link Ironshelf Cloud account to this local user
