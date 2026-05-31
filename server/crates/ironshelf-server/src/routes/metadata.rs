@@ -1,6 +1,6 @@
 //! Metadata enrichment endpoints — search external providers, apply overrides.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,54 @@ pub struct MetadataSearchResponse {
     pub book_id: i64,
     pub matches: Vec<MetadataMatch>,
     pub composite: Option<BookMetadata>,
+}
+
+/// Optional refine terms for metadata search. When absent, the book's own
+/// title/author are used. An explicit empty `author` searches without an
+/// author filter.
+#[derive(Deserialize)]
+pub struct MetadataSearchQuery {
+    pub title: Option<String>,
+    pub author: Option<String>,
+}
+
+/// Normalize an author name from Calibre's "Last, First" sort form to the
+/// "First Last" form metadata providers expect.
+fn normalize_author(name: &str) -> String {
+    if let Some((last, first)) = name.split_once(',') {
+        let first = first.trim();
+        let last = last.trim();
+        if !first.is_empty() && !last.is_empty() {
+            return format!("{first} {last}");
+        }
+    }
+    name.trim().to_string()
+}
+
+/// Query both providers concurrently and collect their matches (errors logged).
+async fn run_provider_search(
+    state: &AppState,
+    title: &str,
+    author: Option<&str>,
+) -> Vec<MetadataMatch> {
+    let google_provider = GoogleBooksProvider::with_client(&state.http_client);
+    let open_library_provider = OpenLibraryProvider::with_client(&state.http_client);
+
+    let (google_result, open_library_result) = tokio::join!(
+        google_provider.search(title, author),
+        open_library_provider.search(title, author),
+    );
+
+    let mut matches: Vec<MetadataMatch> = Vec::new();
+    match google_result {
+        Ok(found) => matches.extend(found),
+        Err(error) => tracing::warn!("google books search failed: {error}"),
+    }
+    match open_library_result {
+        Ok(found) => matches.extend(found),
+        Err(error) => tracing::warn!("open library search failed: {error}"),
+    }
+    matches
 }
 
 #[derive(Deserialize)]
@@ -65,34 +113,33 @@ pub struct BulkScanBookError {
 pub async fn search_metadata(
     State(state): State<AppState>,
     Path(book_id): Path<i64>,
+    Query(query): Query<MetadataSearchQuery>,
     _auth_user: axum::Extension<AuthUser>,
 ) -> Result<Json<MetadataSearchResponse>, AppError> {
-    // Find the book across all libraries.
-    let (title, author) = find_book_title_author(&state, book_id).await?;
+    // Use the caller's refined terms when provided, else the book's own title
+    // and primary author.
+    let (book_title, book_author) = find_book_title_author(&state, book_id).await?;
+    let title = query
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or(book_title);
+    let author = match query.author.as_deref().map(str::trim) {
+        Some(value) if !value.is_empty() => Some(value.to_string()),
+        Some(_) => None, // explicit empty author = search without author filter
+        None => book_author,
+    };
+    // Calibre often stores authors "Last, First"; providers expect "First Last".
+    let normalized_author = author.as_deref().map(normalize_author);
 
-    let author_ref = author.as_deref();
-
-    // Query both providers concurrently using the shared HTTP client.
-    let google_provider = GoogleBooksProvider::with_client(&state.http_client);
-    let open_library_provider = OpenLibraryProvider::with_client(&state.http_client);
-
-    let (google_result, open_library_result) = tokio::join!(
-        google_provider.search(&title, author_ref),
-        open_library_provider.search(&title, author_ref),
-    );
-
-    let mut all_matches: Vec<MetadataMatch> = Vec::new();
-
-    match google_result {
-        Ok(matches) => all_matches.extend(matches),
-        Err(error) => tracing::warn!("google books search failed for book {}: {}", book_id, error),
-    }
-
-    match open_library_result {
-        Ok(matches) => all_matches.extend(matches),
-        Err(error) => {
-            tracing::warn!("open library search failed for book {}: {}", book_id, error)
-        }
+    // Primary search (title + author). If that yields nothing and an author was
+    // used, retry title-only — author-format mismatches are a common miss.
+    let mut all_matches =
+        run_provider_search(&state, &title, normalized_author.as_deref()).await;
+    if all_matches.is_empty() && normalized_author.is_some() {
+        all_matches = run_provider_search(&state, &title, None).await;
     }
 
     let ranked = rank_matches(all_matches);
