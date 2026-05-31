@@ -3474,7 +3474,13 @@
             description: 'Sign in with your Ironshelf Cloud account to claim this server.',
             content: `
               <form id="cloud-claim-form" novalidate>
-                <div class="form-group">
+                <div class="form-group hidden" id="claim-register-fields">
+                  <label class="form-label" for="claim-reg-email">Cloud Email</label>
+                  <input type="email" class="form-input" id="claim-reg-email" autocomplete="email">
+                  <label class="form-label" for="claim-reg-username" style="margin-top:var(--space-3)">Username</label>
+                  <input type="text" class="form-input" id="claim-reg-username" autocomplete="username" placeholder="2-32 chars, letters/numbers/underscore">
+                </div>
+                <div class="form-group" id="claim-login-identifier-group">
                   <label class="form-label" for="claim-cloud-email">Cloud Email or Username</label>
                   <input type="text" class="form-input" id="claim-cloud-email" required autocomplete="email" autofocus>
                 </div>
@@ -3492,6 +3498,10 @@
                   <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
                   <button type="submit" class="btn btn-primary" id="claim-submit-btn">${icon('globe', 16)} Claim Server</button>
                 </div>
+                <div class="login-footer" style="margin-top:var(--space-3);text-align:center">
+                  <span id="claim-mode-hint">No Ironshelf Cloud account?</span>
+                  <a href="#" id="claim-mode-toggle">Create one</a>
+                </div>
               </form>
             `,
           });
@@ -3499,69 +3509,108 @@
           const claimForm = document.getElementById('cloud-claim-form');
           claimForm.querySelector('[data-action="cancel"]').addEventListener('click', close);
 
+          // Toggle between sign-in and register modes.
+          let isRegisterMode = false;
+          const registerFields = document.getElementById('claim-register-fields');
+          const loginIdentifierGroup = document.getElementById('claim-login-identifier-group');
+          const claimSubmitBtnEl = document.getElementById('claim-submit-btn');
+          const modeHint = document.getElementById('claim-mode-hint');
+          const modeToggle = document.getElementById('claim-mode-toggle');
+          modeToggle.addEventListener('click', (toggleEvent) => {
+            toggleEvent.preventDefault();
+            isRegisterMode = !isRegisterMode;
+            registerFields.classList.toggle('hidden', !isRegisterMode);
+            loginIdentifierGroup.classList.toggle('hidden', isRegisterMode);
+            document.getElementById('claim-cloud-email').required = !isRegisterMode;
+            claimSubmitBtnEl.innerHTML = isRegisterMode
+              ? `${icon('globe', 16)} Create account &amp; claim`
+              : `${icon('globe', 16)} Claim Server`;
+            modeHint.textContent = isRegisterMode ? 'Already have a cloud account?' : 'No Ironshelf Cloud account?';
+            modeToggle.textContent = isRegisterMode ? 'Sign in' : 'Create one';
+          });
+
+          // Shared: take an authenticated cloud JWT, claim the server, persist locally.
+          async function completeCloudClaim(cloudJwt) {
+            const claimCloudResponse = await fetch(`${CLOUD_API}/servers/claim`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${cloudJwt}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                url: window.location.origin,
+                name: document.getElementById('claim-server-name').value || window.location.hostname,
+              }),
+            });
+            if (!claimCloudResponse.ok) {
+              const claimCloudError = await claimCloudResponse.json().catch(() => ({}));
+              throw new Error(claimCloudError.error || 'Failed to claim server on cloud');
+            }
+            const claimCloudData = await claimCloudResponse.json();
+            const claimToken = claimCloudData.data?.claim_token;
+            const serverId = claimCloudData.data?.server_id;
+            if (!claimToken) {
+              throw new Error('Cloud did not return a claim token');
+            }
+            await apiPost('/auth/claim', {
+              claim_token: claimToken,
+              cloud_service_url: CLOUD_API,
+              server_id: serverId,
+            });
+          }
+
           claimForm.addEventListener('submit', async (formEvent) => {
             formEvent.preventDefault();
             const claimError = document.getElementById('claim-error');
             const claimSubmitBtn = document.getElementById('claim-submit-btn');
             claimError.classList.add('hidden');
             claimSubmitBtn.disabled = true;
-            claimSubmitBtn.textContent = 'Claiming...';
+            claimSubmitBtn.textContent = isRegisterMode ? 'Creating account...' : 'Claiming...';
 
             try {
-              // 1. Authenticate with cloud
-              const cloudAuthResponse = await fetch(`${CLOUD_API}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  email_or_username: document.getElementById('claim-cloud-email').value,
-                  password: document.getElementById('claim-cloud-password').value,
-                }),
-              });
+              const password = document.getElementById('claim-cloud-password').value;
+              let cloudJwt;
 
-              if (!cloudAuthResponse.ok) {
-                const cloudAuthError = await cloudAuthResponse.json().catch(() => ({}));
-                throw new Error(cloudAuthError.error || 'Cloud authentication failed');
+              if (isRegisterMode) {
+                // Create a new Ironshelf Cloud account, which returns a token.
+                const registerResponse = await fetch(`${CLOUD_API}/auth/register`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email: document.getElementById('claim-reg-email').value,
+                    username: document.getElementById('claim-reg-username').value,
+                    password,
+                  }),
+                });
+                if (!registerResponse.ok) {
+                  const registerError = await registerResponse.json().catch(() => ({}));
+                  throw new Error(registerError.error || 'Failed to create cloud account');
+                }
+                const registerData = await registerResponse.json();
+                cloudJwt = registerData.data?.token;
+                if (!cloudJwt) throw new Error('Invalid response from cloud service');
+              } else {
+                // Authenticate with an existing cloud account.
+                const cloudAuthResponse = await fetch(`${CLOUD_API}/auth/login`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email_or_username: document.getElementById('claim-cloud-email').value,
+                    password,
+                  }),
+                });
+                if (!cloudAuthResponse.ok) {
+                  const cloudAuthError = await cloudAuthResponse.json().catch(() => ({}));
+                  throw new Error(cloudAuthError.error || 'Cloud authentication failed');
+                }
+                const cloudAuthData = await cloudAuthResponse.json();
+                cloudJwt = cloudAuthData.data?.token;
+                if (!cloudAuthData.ok || !cloudJwt) {
+                  throw new Error('Invalid response from cloud service');
+                }
               }
 
-              const cloudAuthData = await cloudAuthResponse.json();
-              if (!cloudAuthData.ok || !cloudAuthData.data?.token) {
-                throw new Error('Invalid response from cloud service');
-              }
-
-              const cloudJwt = cloudAuthData.data.token;
-
-              // 2. Claim server via cloud API
-              const claimCloudResponse = await fetch(`${CLOUD_API}/servers/claim`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${cloudJwt}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  url: window.location.origin,
-                  name: document.getElementById('claim-server-name').value || window.location.hostname,
-                }),
-              });
-
-              if (!claimCloudResponse.ok) {
-                const claimCloudError = await claimCloudResponse.json().catch(() => ({}));
-                throw new Error(claimCloudError.error || 'Failed to claim server on cloud');
-              }
-
-              const claimCloudData = await claimCloudResponse.json();
-              const claimToken = claimCloudData.data?.claim_token;
-              const serverId = claimCloudData.data?.server_id;
-
-              if (!claimToken) {
-                throw new Error('Cloud did not return a claim token');
-              }
-
-              // 3. Store claim on local server
-              await apiPost('/auth/claim', {
-                claim_token: claimToken,
-                cloud_service_url: CLOUD_API,
-                server_id: serverId,
-              });
+              await completeCloudClaim(cloudJwt);
 
               close();
               toast('Server claimed successfully! Cloud login is now enabled.', 'success');
@@ -3570,7 +3619,9 @@
               claimError.textContent = claimAttemptError.message;
               claimError.classList.remove('hidden');
               claimSubmitBtn.disabled = false;
-              claimSubmitBtn.textContent = 'Claim Server';
+              claimSubmitBtn.innerHTML = isRegisterMode
+                ? `${icon('globe', 16)} Create account &amp; claim`
+                : `${icon('globe', 16)} Claim Server`;
             }
           });
         });
