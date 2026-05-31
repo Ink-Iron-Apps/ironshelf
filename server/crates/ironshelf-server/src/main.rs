@@ -268,6 +268,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/authors/{id}", get(routes::authors::get_author))
         .route("/api/v1/authors/{id}/series", get(routes::authors::author_series))
         .route("/api/v1/authors/{id}/standalone", get(routes::authors::author_standalone))
+        .route("/api/v1/authors/{id}/photo", get(routes::authors::get_author_photo))
+        .route(
+            "/api/v1/server/settings",
+            get(routes::authors::get_server_settings)
+                .put(routes::authors::update_server_settings),
+        )
         .route("/api/v1/series/{id}", get(routes::series::get_series))
         .route("/api/v1/search", get(routes::search::global_search))
         .route("/api/v1/search/rebuild", axum::routing::post(routes::search::rebuild_search_index))

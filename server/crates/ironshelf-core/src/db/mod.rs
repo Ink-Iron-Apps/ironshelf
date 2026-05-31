@@ -94,6 +94,16 @@ pub struct StoredWebdavFile {
     pub modified_at: String,
 }
 
+/// A cached author portrait image.
+#[derive(Debug, Clone)]
+pub struct CachedAuthorImage {
+    /// Image bytes, or None when the lookup found nothing (see `not_found`).
+    pub image: Option<Vec<u8>>,
+    pub content_type: String,
+    /// True when a prior lookup found no portrait — avoids re-querying upstream.
+    pub not_found: bool,
+}
+
 /// A book override as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredBookOverride {
@@ -439,6 +449,9 @@ impl IronshelfDb {
         let migration_017 = include_str!("migrations/017_cloud_config.sql");
         sqlx::raw_sql(migration_017).execute(&self.pool).await?;
 
+        let migration_018 = include_str!("migrations/018_author_images.sql");
+        sqlx::raw_sql(migration_018).execute(&self.pool).await?;
+
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
         // "duplicate column" errors to make migrate() safe to call on every startup.
@@ -541,6 +554,61 @@ impl IronshelfDb {
             .iter()
             .map(|r| (r.get::<String, _>("key"), r.get::<String, _>("value")))
             .collect())
+    }
+
+    // --- Author images (cached portraits) ---
+
+    /// Look up a cached author image by normalized author key.
+    pub async fn get_author_image(
+        &self,
+        author_key: &str,
+    ) -> Result<Option<CachedAuthorImage>, DbError> {
+        let row = sqlx::query(
+            "SELECT image, content_type, not_found FROM author_images WHERE author_key = ?",
+        )
+        .bind(author_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| CachedAuthorImage {
+            image: r.get::<Option<Vec<u8>>, _>("image"),
+            content_type: r.get::<String, _>("content_type"),
+            not_found: r.get::<i64, _>("not_found") != 0,
+        }))
+    }
+
+    /// Upsert a cached author image. Pass `image = None` with `not_found = true`
+    /// to record that no portrait was found (avoids repeated upstream lookups).
+    pub async fn set_author_image(
+        &self,
+        author_key: &str,
+        image: Option<&[u8]>,
+        content_type: &str,
+        not_found: bool,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO author_images (author_key, image, content_type, not_found, fetched_at) \
+             VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) \
+             ON CONFLICT(author_key) DO UPDATE SET \
+                image = excluded.image, \
+                content_type = excluded.content_type, \
+                not_found = excluded.not_found, \
+                fetched_at = excluded.fetched_at",
+        )
+        .bind(author_key)
+        .bind(image)
+        .bind(content_type)
+        .bind(if not_found { 1_i64 } else { 0_i64 })
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Clear all cached author images (e.g. when disabling the feature).
+    pub async fn clear_author_images(&self) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM author_images")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     // --- Library CRUD (managed via API/GUI, not config file) ---
