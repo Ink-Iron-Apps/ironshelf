@@ -205,7 +205,12 @@
       }
     }
 
-    cleanNode(doc.body);
+    // Clean the body's children, not the body node itself: cleanNode replaces
+    // any element whose tag is not allowed, and 'body' is not in allowedTags,
+    // so cleaning the body would delete it and null out doc.body.
+    for (const child of [...doc.body.childNodes]) {
+      cleanNode(child);
+    }
     return doc.body.innerHTML;
   }
 
