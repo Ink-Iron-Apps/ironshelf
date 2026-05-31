@@ -8,6 +8,7 @@ mod pagination;
 mod routes;
 mod scheduler;
 mod state;
+mod tasks;
 pub mod thumbnail;
 pub mod tunnel;
 pub mod upnp;
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
         update_status,
         upnp_manager: Arc::new(RwLock::new(upnp_manager)),
         tunnel_manager: Arc::new(RwLock::new(tunnel_manager)),
+        tasks: Arc::new(tasks::TaskRegistry::new()),
     };
 
     // Determine which remote access method to use, in priority order:
@@ -313,6 +315,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/server/settings",
             get(routes::authors::get_server_settings)
                 .put(routes::authors::update_server_settings),
+        )
+        .route(
+            "/api/v1/server/tasks",
+            get(routes::authors::list_background_tasks),
         )
         .route("/api/v1/series/{id}", get(routes::series::get_series))
         .route("/api/v1/search", get(routes::search::global_search))

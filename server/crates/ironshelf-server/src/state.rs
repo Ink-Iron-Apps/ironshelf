@@ -198,4 +198,6 @@ pub struct AppState {
     pub upnp_manager: Arc<RwLock<UpnpManager>>,
     /// Cloudflare Quick Tunnel manager for zero-config remote access.
     pub tunnel_manager: Arc<RwLock<TunnelManager>>,
+    /// In-memory registry of background tasks for UI progress monitoring.
+    pub tasks: Arc<crate::tasks::TaskRegistry>,
 }
