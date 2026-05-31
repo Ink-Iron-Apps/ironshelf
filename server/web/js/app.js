@@ -292,19 +292,47 @@
 
   // --- Server Version ---
 
+  // Health endpoint lives on the server (cross-origin in hosted mode).
+  const HEALTH_URL = (HOSTED && SERVER_URL) ? `${SERVER_URL}/health` : '/health';
+
+  // Version the UI booted with; if the server later reports a different one,
+  // the binary was updated and the cached UI is stale → reload.
+  let bootServerVersion = null;
+  let reloadingForUpdate = false;
+
   async function fetchServerVersion(forceRefresh = false) {
     if (cachedServerVersion && !forceRefresh) return cachedServerVersion;
     try {
-      const healthResponse = await fetch('/health');
+      const healthResponse = await fetch(HEALTH_URL);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
         cachedServerVersion = healthData.version || null;
+        if (bootServerVersion === null) bootServerVersion = cachedServerVersion;
         updateSidebarVersion();
       }
     } catch {
       // Silently ignore — version display is non-critical.
     }
     return cachedServerVersion;
+  }
+
+  // Detect a server update and reload so the new embedded UI is loaded.
+  async function checkForServerUpdate() {
+    if (reloadingForUpdate || !bootServerVersion) return;
+    try {
+      const healthResponse = await fetch(HEALTH_URL, { cache: 'no-store' });
+      if (!healthResponse.ok) return;
+      const healthData = await healthResponse.json();
+      const liveVersion = healthData.version || null;
+      if (liveVersion && liveVersion !== bootServerVersion) {
+        reloadingForUpdate = true;
+        cachedServerVersion = liveVersion;
+        try { toast(`Server updated to v${liveVersion} — refreshing…`, 'success'); } catch {}
+        setTimeout(() => window.location.reload(), 1200);
+      }
+    } catch {
+      // Ignore — server may be briefly restarting during an update.
+    }
   }
 
   function updateSidebarVersion() {
@@ -400,7 +428,10 @@
   function startNotificationPolling() {
     stopNotificationPolling();
     fetchNotificationCount();
-    notificationPollTimer = setInterval(fetchNotificationCount, 30000);
+    notificationPollTimer = setInterval(() => {
+      fetchNotificationCount();
+      checkForServerUpdate();
+    }, 30000);
   }
 
   function stopNotificationPolling() {
@@ -4175,7 +4206,7 @@
           }
 
           try {
-            const healthResponse = await fetch('/health');
+            const healthResponse = await fetch(HEALTH_URL, { cache: 'no-store' });
             if (healthResponse.ok) {
               const healthData = await healthResponse.json();
               clearInterval(updatePollTimer);
