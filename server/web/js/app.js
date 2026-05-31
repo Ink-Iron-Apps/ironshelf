@@ -2204,7 +2204,7 @@
         <div class="author-avatar" id="author-avatar">
           <span class="author-avatar-initial">${escapeHtml(authorInitial)}</span>
           ${serverSettings.author_images_enabled
-            ? `<img class="author-avatar-img" id="author-avatar-img" alt="" src="${API}/authors/${authorId}/photo">`
+            ? `<img class="author-avatar-img" id="author-avatar-img" alt="" src="${API}/authors/${authorId}/photo${mediaToken()}">`
             : ''}
         </div>
       `;
@@ -3207,7 +3207,11 @@
       // Export data
       document.getElementById('export-data-btn')?.addEventListener('click', async () => {
         try {
-          const response = await fetch(`${API}/export/all`, { credentials: 'same-origin' });
+          const exportToken = HOSTED ? localStorage.getItem('ironshelf_server_token') : null;
+          const response = await fetch(`${API}/export/all`, {
+            credentials: 'same-origin',
+            headers: exportToken ? { 'Authorization': `Bearer ${exportToken}` } : {},
+          });
           if (!response.ok) throw new Error(`Export failed (${response.status})`);
           const blob = await response.blob();
           const url = URL.createObjectURL(blob);
