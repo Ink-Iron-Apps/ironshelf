@@ -110,6 +110,7 @@ jobs:
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
       bumped: ${{ steps.bump.outputs.bumped }}
+      changes: ${{ steps.bump.outputs.changes }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -170,6 +171,16 @@ jobs:
           echo "bumped=true" >> "$GITHUB_OUTPUT"
           echo "Bumping: ${CURRENT_VERSION} → ${NEW_VERSION} (${BUMP})"
 
+          # Export the commit subjects for this release so the release job can
+          # build changelog notes without re-deriving them from git (the second
+          # checkout's tag/history state is fragile). This range is computed here
+          # with full history and excludes the not-yet-created bump commit.
+          {
+            echo "changes<<__CHANGES_EOF__"
+            echo "$COMMITS"
+            echo "__CHANGES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Update version in Cargo.toml
         if: steps.bump.outputs.bumped == 'true'
         run: |
@@ -227,25 +238,13 @@ jobs:
 
       - name: Generate release notes from commits
         id: notes
+        env:
+          # Commit subjects for this release, computed by the version-bump job.
+          # Passed via env (not inline) to avoid shell injection from messages.
+          CHANGES: ${{ needs.version-bump.outputs.changes }}
         run: |
           VERSION="v${{ needs.version-bump.outputs.new_version }}"
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-          if [ -z "$LAST_TAG" ]; then
-            COMMITS=$(git log --no-merges --oneline --format="%s")
-          else
-            COMMITS=$(git log --no-merges "${LAST_TAG}..HEAD" --oneline --format="%s")
-          fi
-
-          # If --no-merges produced nothing (e.g. squash-merge workflow),
-          # fall back to parsing PR titles from merge commits.
-          if [ -z "$COMMITS" ]; then
-            if [ -z "$LAST_TAG" ]; then
-              COMMITS=$(git log --oneline --format="%s" | sed -n 's/^Merge pull request.*from [^/]*\///p; s/^.*(\(#[0-9]*\))$/\1/; t')
-            else
-              COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="%b%s" | grep -iE "^(feat|fix|refactor|perf|docs)" || true)
-            fi
-          fi
+          COMMITS="$CHANGES"
 
           # Build release notes from conventional commits
           FEATURES=""
