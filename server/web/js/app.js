@@ -9212,6 +9212,9 @@
               <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm);color:var(--color-muted)">
                 Access your servers from anywhere · <a href="#" id="cloud-register-link">Create account</a>
               </p>
+              <p style="text-align:center;margin-top:var(--space-2);font-size:var(--text-xs);color:var(--color-muted)">
+                Your server must be reachable over HTTPS (e.g. its Cloudflare Tunnel URL). Connecting to a plain http:// address from this HTTPS dashboard is blocked by the browser.
+              </p>
             </div>
 
             <!-- Cloud Login Form (hidden initially) -->
@@ -9302,10 +9305,10 @@
             <div class="form-group">
               <label for="server-url">Server URL</label>
               <input type="url" class="form-input" id="server-url" name="server_url"
-                     placeholder="https://books.example.com or http://192.168.1.50:10810"
+                     placeholder="https://books.example.com"
                      value="${escapeHtml(savedUrl)}">
               <p class="form-hint" style="margin-top:var(--space-1);font-size:var(--text-sm);color:var(--color-muted)">
-                Enter your server's URL to connect directly
+                Must be an <strong>HTTPS</strong> URL — this dashboard is served over HTTPS and browsers block insecure (http://) connections. Use your Cloudflare Tunnel URL or any HTTPS reverse-proxy address. Plain <code>http://</code> LAN addresses won't work here; open the server's own UI directly for local-only access.
               </p>
             </div>
             <div id="connect-status" style="margin-bottom:var(--space-4)"></div>
