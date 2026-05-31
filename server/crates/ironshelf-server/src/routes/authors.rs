@@ -218,29 +218,49 @@ async fn fetch_author_photo(
         return None;
     }
     let search_json: serde_json::Value = search.json().await.ok()?;
-    let olid = match search_json
-        .get("docs")
-        .and_then(|docs| docs.as_array())
-        .and_then(|docs| docs.iter().find_map(|doc| doc.get("key").and_then(|key| key.as_str())))
-    {
-        Some(key) => key.to_string(),
-        None => {
+    let docs = match search_json.get("docs").and_then(|docs| docs.as_array()) {
+        Some(docs) if !docs.is_empty() => docs,
+        _ => {
             tracing::debug!("author photo: no Open Library match for '{name}'");
             return None;
         }
     };
 
-    // 2. Fetch the large portrait. `default=false` makes the CDN 404 instead of
-    //    returning a blank placeholder when no image exists.
-    let photo_url = format!(
-        "https://covers.openlibrary.org/a/olid/{}-L.jpg?default=false",
-        olid
-    );
-    let photo = client.get(&photo_url).send().await.ok()?;
-    if !photo.status().is_success() {
+    // 2. Try the top few matches. A name often returns several author records;
+    //    the first may be a photoless duplicate while another has a portrait.
+    //    Prefer an explicit `photos` id (by-id cover), then fall back to the
+    //    by-OLID cover. Return the first real image found.
+    for doc in docs.iter().take(5) {
+        if let Some(photo_id) = doc
+            .get("photos")
+            .and_then(|photos| photos.as_array())
+            .and_then(|photos| photos.iter().find_map(|id| id.as_i64()))
+            .filter(|id| *id > 0)
+        {
+            let url = format!("https://covers.openlibrary.org/a/id/{photo_id}-L.jpg?default=false");
+            if let Some(image) = try_fetch_cover(client, &url).await {
+                return Some(image);
+            }
+        }
+        if let Some(olid) = doc.get("key").and_then(|key| key.as_str()) {
+            let url = format!("https://covers.openlibrary.org/a/olid/{olid}-L.jpg?default=false");
+            if let Some(image) = try_fetch_cover(client, &url).await {
+                return Some(image);
+            }
+        }
+    }
+
+    tracing::debug!("author photo: matched but no portrait for '{name}'");
+    None
+}
+
+/// Fetch a cover URL, returning (bytes, content_type) only for a real image.
+async fn try_fetch_cover(client: &reqwest::Client, url: &str) -> Option<(Vec<u8>, String)> {
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
         return None;
     }
-    let content_type = photo
+    let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -249,7 +269,7 @@ async fn fetch_author_photo(
     if !content_type.starts_with("image/") {
         return None;
     }
-    let bytes = photo.bytes().await.ok()?;
+    let bytes = response.bytes().await.ok()?;
     if bytes.is_empty() {
         return None;
     }
