@@ -180,6 +180,8 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: main
+          # Full history + tags needed to diff commits since the last release.
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v5
