@@ -306,6 +306,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/authors/{id}/standalone", get(routes::authors::author_standalone))
         .route("/api/v1/authors/{id}/photo", get(routes::authors::get_author_photo))
         .route(
+            "/api/v1/authors/photos/prefetch",
+            axum::routing::post(routes::authors::prefetch_author_photos),
+        )
+        .route(
             "/api/v1/server/settings",
             get(routes::authors::get_server_settings)
                 .put(routes::authors::update_server_settings),
