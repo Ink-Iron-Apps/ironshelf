@@ -8,6 +8,14 @@ on:
 permissions:
   contents: write
 
+# Serialize releases. Concurrent runs would each compute the same version bump
+# from the same last tag, then race on tag/force-push/release-create. Never
+# cancel a run mid-publish — queue instead. A queued run re-checks out the
+# now-bumped main, finds no new bumping commits, and skips cleanly.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   build:
     needs: version-bump
