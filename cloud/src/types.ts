@@ -3,6 +3,10 @@ export interface Env {
   DB: D1Database;
   JWT_SECRET: string;
   CORS_ORIGIN: string;
+  /// Optional admin token for out-of-band password resets. Set via
+  /// `wrangler secret put ADMIN_TOKEN`. When unset, the reset endpoint is
+  /// disabled (returns 404).
+  ADMIN_TOKEN?: string;
 }
 
 /// Central user account.

@@ -124,11 +124,20 @@ impl TunnelManager {
 
         let mut reader = BufReader::new(stderr).lines();
 
+        // Scan stderr for the tunnel URL, accumulating recent log lines so that,
+        // if cloudflared exits without producing a URL, we can surface its actual
+        // output (the real reason) instead of an opaque message.
         let parsed_url = tokio::time::timeout(
             std::time::Duration::from_secs(TUNNEL_STARTUP_TIMEOUT_SECONDS),
             async {
+                let mut recent_output: Vec<String> = Vec::new();
                 while let Ok(Some(line)) = reader.next_line().await {
                     tracing::debug!("cloudflared: {line}");
+
+                    if recent_output.len() >= 15 {
+                        recent_output.remove(0);
+                    }
+                    recent_output.push(line.clone());
 
                     // Look for a trycloudflare.com URL in the log line.
                     if let Some(url_start) = line.find("https://") {
@@ -140,17 +149,17 @@ impl TunnelManager {
                         let extracted_url = &url_candidate[..url_end];
 
                         if extracted_url.contains(".trycloudflare.com") {
-                            return Some(extracted_url.to_string());
+                            return (Some(extracted_url.to_string()), recent_output);
                         }
                     }
                 }
-                None
+                (None, recent_output)
             },
         )
         .await;
 
         match parsed_url {
-            Ok(Some(tunnel_url)) => {
+            Ok((Some(tunnel_url), _)) => {
                 self.child_process = Some(child);
                 self.public_url = Some(tunnel_url.clone());
                 self.is_active = true;
@@ -163,11 +172,25 @@ impl TunnelManager {
 
                 Ok(tunnel_url)
             }
-            Ok(None) => {
+            Ok((None, recent_output)) => {
                 // stderr closed without producing a URL — process likely exited.
+                let exit_note = match child.wait().await {
+                    Ok(status) => format!(" (exit status: {status})"),
+                    Err(_) => String::new(),
+                };
                 let _ = child.kill().await;
-                let message =
-                    "cloudflared exited before producing a tunnel URL".to_string();
+
+                let detail = recent_output
+                    .iter()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| "no output captured".to_string());
+
+                let message = format!(
+                    "cloudflared exited before producing a tunnel URL{exit_note}. Last output: {detail}"
+                );
+                tracing::warn!("cloudflared startup failed; recent output: {recent_output:?}");
                 self.last_error = Some(message.clone());
                 self.is_active = false;
                 Err(message)

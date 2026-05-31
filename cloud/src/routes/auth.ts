@@ -215,3 +215,63 @@ export async function handleChangePassword(request: Request, env: Env): Promise<
 
   return jsonResponse({ ok: true });
 }
+
+// ---------------------------------------------------------------------------
+// POST /auth/admin/reset-password
+// ---------------------------------------------------------------------------
+
+interface AdminResetBody {
+  email_or_username: string;
+  new_password: string;
+}
+
+/// Out-of-band password reset for a forgotten cloud password. Gated by the
+/// ADMIN_TOKEN secret (Authorization: Bearer <ADMIN_TOKEN>). Disabled (404)
+/// when ADMIN_TOKEN is not configured.
+export async function handleAdminResetPassword(request: Request, env: Env): Promise<Response> {
+  if (!env.ADMIN_TOKEN) {
+    return jsonResponse({ error: 'Not found' }, 404);
+  }
+
+  const authorization = request.headers.get('Authorization') || '';
+  const provided = authorization.startsWith('Bearer ')
+    ? authorization.slice('Bearer '.length)
+    : '';
+  // Constant-ish comparison: reject unless it matches the configured token.
+  if (!provided || provided !== env.ADMIN_TOKEN) {
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
+
+  let body: AdminResetBody;
+  try {
+    body = await request.json() as AdminResetBody;
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { email_or_username, new_password } = body;
+  if (!email_or_username || !new_password) {
+    return jsonResponse({ error: 'email_or_username and new_password are required' }, 400);
+  }
+  if (new_password.length < 8 || new_password.length > 1024) {
+    return jsonResponse({ error: 'New password must be 8-1024 characters' }, 400);
+  }
+
+  const identifier = email_or_username.toLowerCase();
+  const user = await env.DB.prepare(
+    'SELECT id FROM users WHERE email = ? OR username = ?',
+  )
+    .bind(identifier, identifier)
+    .first<{ id: string }>();
+
+  if (!user) {
+    return jsonResponse({ error: 'No account found for that email or username' }, 404);
+  }
+
+  const newHash = await hashPassword(new_password);
+  await env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+    .bind(newHash, user.id)
+    .run();
+
+  return jsonResponse({ ok: true, data: { user_id: user.id } });
+}

@@ -3598,8 +3598,8 @@
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                url: window.location.origin,
-                name: document.getElementById('claim-server-name').value || window.location.hostname,
+                server_url: window.location.origin,
+                server_name: document.getElementById('claim-server-name').value || window.location.hostname,
               }),
             });
             if (!claimCloudResponse.ok) {
