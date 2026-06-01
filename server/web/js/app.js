@@ -22,6 +22,26 @@
     return token ? `${separator}access_token=${encodeURIComponent(token)}` : '';
   }
 
+  // Reusable author avatar: a circular initial with the portrait layered on top
+  // (revealed once it loads; removed on error so the initial shows). `enabled`
+  // gates the network request when author photos are turned off.
+  function authorAvatarHtml(authorId, name, enabled, extraClass = 'author-avatar-sm') {
+    const initial = ((name || '?').trim().charAt(0) || '?').toUpperCase();
+    const img = enabled
+      ? `<img class="author-avatar-img" loading="lazy" alt="" src="${API}/authors/${authorId}/photo${mediaToken()}">`
+      : '';
+    return `<span class="author-avatar ${extraClass}"><span class="author-avatar-initial">${escapeHtml(initial)}</span>${img}</span>`;
+  }
+
+  // Reveal portraits on load, drop them on error (CSP blocks inline handlers).
+  function bindAuthorAvatars(root) {
+    (root || document).querySelectorAll('.author-avatar-img:not([data-bound])').forEach((img) => {
+      img.dataset.bound = '1';
+      img.addEventListener('load', () => img.classList.add('loaded'));
+      img.addEventListener('error', () => img.remove());
+    });
+  }
+
   let currentUser = null;
   let sidebarOpen = false;
 
@@ -2048,6 +2068,7 @@
 
       const authors = Array.isArray(authorsResponse) ? authorsResponse : (authorsResponse?.items || authorsResponse?.data || []);
       const totalPages = authorsResponse?.total_pages || 1;
+      const photosEnabled = (await getServerSettings()).author_images_enabled !== false;
 
       // Build alpha jump
       const letters = [...new Set(authors.map(a => (a.name || '')[0]?.toUpperCase()).filter(Boolean))].sort();
@@ -2126,7 +2147,7 @@
             html += `
               <div class="list-item" data-author-id="${author.id}" role="link" tabindex="0" aria-label="${escapeHtml(author.name)}">
                 <div class="list-item-content">
-                  <div class="list-item-icon">${Icons.author}</div>
+                  <div class="list-item-icon">${authorAvatarHtml(author.id, author.name, photosEnabled)}</div>
                   <div class="list-item-text">
                     <div class="list-item-name">${escapeHtml(author.name)}</div>
                     <div class="list-item-subtitle">${author.book_count || 0} book${(author.book_count || 0) !== 1 ? 's' : ''}${author.series_count ? ` · ${author.series_count} series` : ''}</div>
@@ -2138,6 +2159,7 @@
               </div>`;
           }
           listEl.insertAdjacentHTML('beforeend', html);
+          bindAuthorAvatars(listEl);
           listEl.querySelectorAll('[data-author-id]:not([data-bound])').forEach((item) => {
             item.dataset.bound = '1';
             const handler = () => navigateTo(`/author/${item.dataset.authorId}`);
@@ -7002,10 +7024,11 @@
         `;
         return;
       }
+      const genrePhotosEnabled = (await getServerSettings()).author_images_enabled !== false;
       container.innerHTML = `<div class="list-group">${authors.map(authorItem => `
         <div class="list-item" data-author-id="${authorItem.id}" role="link" tabindex="0" aria-label="${escapeHtml(authorItem.name)}">
           <div class="list-item-content">
-            <div class="list-item-icon">${Icons.author}</div>
+            <div class="list-item-icon">${authorAvatarHtml(authorItem.id, authorItem.name, genrePhotosEnabled)}</div>
             <div class="list-item-text">
               <div class="list-item-name">${escapeHtml(authorItem.name)}</div>
               <div class="list-item-subtitle">${authorItem.book_count || 0} book${(authorItem.book_count || 0) !== 1 ? 's' : ''}</div>
@@ -7016,6 +7039,7 @@
           </div>
         </div>
       `).join('')}</div>`;
+      bindAuthorAvatars(container);
 
       container.querySelectorAll('[data-author-id]').forEach(item => {
         const handler = () => navigateTo(`/author/${item.dataset.authorId}`);
