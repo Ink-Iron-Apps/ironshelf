@@ -87,7 +87,7 @@ impl<T: Serialize> Paginated<T> {
         let total_pages = if per_page == 0 {
             1
         } else {
-            (((total as u64) + per_page as u64 - 1) / per_page as u64).max(1) as u32
+            (total.max(0) as u64).div_ceil(per_page as u64).max(1) as u32
         };
 
         Self {
