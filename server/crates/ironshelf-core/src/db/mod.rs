@@ -647,6 +647,14 @@ impl IronshelfDb {
         }))
     }
 
+    /// Clear all cached author info (bios/metadata).
+    pub async fn clear_author_info(&self) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM author_info")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Upsert cached author info.
     pub async fn set_author_info(
         &self,
