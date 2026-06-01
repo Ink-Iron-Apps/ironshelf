@@ -104,6 +104,17 @@ pub struct CachedAuthorImage {
     pub not_found: bool,
 }
 
+/// Cached author biography / metadata.
+#[derive(Debug, Clone, Default)]
+pub struct CachedAuthorInfo {
+    pub bio: Option<String>,
+    pub birth_date: Option<String>,
+    pub death_date: Option<String>,
+    pub openlibrary_url: Option<String>,
+    pub wikipedia_url: Option<String>,
+    pub not_found: bool,
+}
+
 /// A book override as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredBookOverride {
@@ -452,6 +463,9 @@ impl IronshelfDb {
         let migration_018 = include_str!("migrations/018_author_images.sql");
         sqlx::raw_sql(migration_018).execute(&self.pool).await?;
 
+        let migration_019 = include_str!("migrations/019_author_info.sql");
+        sqlx::raw_sql(migration_019).execute(&self.pool).await?;
+
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
         // "duplicate column" errors to make migrate() safe to call on every startup.
@@ -608,6 +622,56 @@ impl IronshelfDb {
         sqlx::query("DELETE FROM author_images")
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Look up cached author info (bio/metadata) by normalized author key.
+    pub async fn get_author_info(
+        &self,
+        author_key: &str,
+    ) -> Result<Option<CachedAuthorInfo>, DbError> {
+        let row = sqlx::query(
+            "SELECT bio, birth_date, death_date, openlibrary_url, wikipedia_url, not_found \
+             FROM author_info WHERE author_key = ?",
+        )
+        .bind(author_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| CachedAuthorInfo {
+            bio: r.get("bio"),
+            birth_date: r.get("birth_date"),
+            death_date: r.get("death_date"),
+            openlibrary_url: r.get("openlibrary_url"),
+            wikipedia_url: r.get("wikipedia_url"),
+            not_found: r.get::<i64, _>("not_found") != 0,
+        }))
+    }
+
+    /// Upsert cached author info.
+    pub async fn set_author_info(
+        &self,
+        author_key: &str,
+        info: &CachedAuthorInfo,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO author_info \
+                (author_key, bio, birth_date, death_date, openlibrary_url, wikipedia_url, not_found, fetched_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) \
+             ON CONFLICT(author_key) DO UPDATE SET \
+                bio = excluded.bio, birth_date = excluded.birth_date, \
+                death_date = excluded.death_date, openlibrary_url = excluded.openlibrary_url, \
+                wikipedia_url = excluded.wikipedia_url, not_found = excluded.not_found, \
+                fetched_at = excluded.fetched_at",
+        )
+        .bind(author_key)
+        .bind(&info.bio)
+        .bind(&info.birth_date)
+        .bind(&info.death_date)
+        .bind(&info.openlibrary_url)
+        .bind(&info.wikipedia_url)
+        .bind(if info.not_found { 1_i64 } else { 0_i64 })
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

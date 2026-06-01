@@ -2263,8 +2263,10 @@
 
       const serverSettings = await getServerSettings();
       const authorInitial = (author.name || '?').trim().charAt(0).toUpperCase() || '?';
-      const authorAvatarHtml = `
-        <div class="author-avatar" id="author-avatar">
+      const seriesCountVal = author.series_count || (Array.isArray(seriesList) ? seriesList.length : 0);
+      const bookCountVal = author.book_count || 0;
+      const heroAvatar = `
+        <div class="author-avatar author-avatar-lg" id="author-avatar">
           <span class="author-avatar-initial">${escapeHtml(authorInitial)}</span>
           ${serverSettings.author_images_enabled
             ? `<img class="author-avatar-img" id="author-avatar-img" alt="" src="${API}/authors/${authorId}/photo${mediaToken()}">`
@@ -2274,9 +2276,16 @@
 
       let bodyContent = `
         <div class="page-header author-page-header">
-          ${authorAvatarHtml}
-          <h1>${escapeHtml(author.name)}</h1>
+          ${heroAvatar}
+          <div class="author-hero-text">
+            <h1>${escapeHtml(author.name)}</h1>
+            <div class="author-hero-stats text-caption">
+              ${bookCountVal} book${bookCountVal !== 1 ? 's' : ''}${seriesCountVal ? ` · ${seriesCountVal} series` : ''}<span id="author-hero-dates"></span>
+            </div>
+            <div id="author-hero-links" class="author-hero-links"></div>
+          </div>
         </div>
+        <div id="author-bio" class="author-bio"></div>
       `;
 
       const series = Array.isArray(seriesList) ? seriesList : (seriesList?.items || []);
@@ -2338,6 +2347,35 @@
         authorAvatarImg.addEventListener('load', () => authorAvatarImg.classList.add('loaded'));
         authorAvatarImg.addEventListener('error', () => authorAvatarImg.remove());
       }
+
+      // Lazy-load author bio + metadata (Open Library / Wikipedia).
+      apiGet(`/authors/${authorId}/info`).then((info) => {
+        if (!info) return;
+        const datesEl = document.getElementById('author-hero-dates');
+        if (datesEl && (info.birth_date || info.death_date)) {
+          const born = info.birth_date ? `b. ${escapeHtml(info.birth_date)}` : '';
+          const died = info.death_date ? `d. ${escapeHtml(info.death_date)}` : '';
+          datesEl.textContent = ` · ${[born, died].filter(Boolean).join(' – ')}`;
+        }
+        const bioEl = document.getElementById('author-bio');
+        if (bioEl && info.bio) {
+          const full = String(info.bio);
+          const isLong = full.length > 600;
+          const shown = isLong ? `${full.slice(0, 600)}…` : full;
+          bioEl.innerHTML = `<p class="author-bio-text">${escapeHtml(shown)}</p>${isLong ? `<button class="btn btn-ghost btn-sm" id="author-bio-more">Read more</button>` : ''}`;
+          document.getElementById('author-bio-more')?.addEventListener('click', () => {
+            bioEl.querySelector('.author-bio-text').textContent = full;
+            document.getElementById('author-bio-more').remove();
+          });
+        }
+        const linksEl = document.getElementById('author-hero-links');
+        if (linksEl) {
+          const links = [];
+          if (info.wikipedia_url) links.push(`<a class="btn btn-ghost btn-sm" href="${escapeHtml(info.wikipedia_url)}" target="_blank" rel="noopener">${icon('globe', 14)} Wikipedia</a>`);
+          if (info.openlibrary_url) links.push(`<a class="btn btn-ghost btn-sm" href="${escapeHtml(info.openlibrary_url)}" target="_blank" rel="noopener">${icon('book', 14)} Open Library</a>`);
+          linksEl.innerHTML = links.join('');
+        }
+      }).catch(() => {});
 
       // Bind
       document.querySelectorAll('[data-series-id]').forEach(item => {
