@@ -101,9 +101,10 @@ impl RateLimiter {
         self
     }
 
-    /// API-tier limiter: 100 requests/minute (~1.67/s).
+    /// API-tier limiter: 300 burst, ~5/s sustained. Generous because a single
+    /// page view fans out into many small API calls (lists, counts, ratings).
     pub fn api_tier() -> Self {
-        Self::new(100, 100.0 / 60.0)
+        Self::new(300, 300.0 / 60.0)
     }
 
     /// Auth-tier limiter: 10 requests/minute (~0.167/s).
@@ -215,6 +216,16 @@ pub async fn rate_limit_api(
     request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
+    // Cheap cached image reads (covers, author portraits) load in bursts of many
+    // per page (galleries, author lists). Exempt them so a normal page view
+    // doesn't blow the request budget and 429 the rest of the page.
+    if request.method() == axum::http::Method::GET {
+        let path = request.uri().path();
+        if path.ends_with("/cover") || path.ends_with("/photo") {
+            return next.run(request).await;
+        }
+    }
+
     let client_address = extract_client_address(&request, limiter.trust_proxy_headers);
 
     match limiter.check(client_address).await {
