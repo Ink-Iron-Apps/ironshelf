@@ -470,28 +470,34 @@ pub async fn prefetch_author_photos(
     let task_state = state.clone();
     let task_id = state
         .tasks
-        .start("author_photos", "Downloading author photos", total as u64);
+        .start("author_metadata", "Downloading author metadata", total as u64);
 
-    // Run in the background — fetching hundreds of portraits would exceed
-    // request/proxy timeouts. Photos appear as they're cached.
+    // Run in the background — fetching hundreds of portraits + bios would exceed
+    // request/proxy timeouts. Results appear as they're cached.
     tokio::spawn(async move {
         if refresh {
             let _ = task_state.ironshelf_db.clear_author_images().await;
+            let _ = task_state.ironshelf_db.clear_author_info().await;
         }
-        let mut fetched = 0usize;
+        let mut photos_fetched = 0usize;
+        let mut bios_fetched = 0usize;
         let mut processed = 0u64;
         for name in names {
             let key = name.trim().to_lowercase();
-            let already = !refresh
+            let mut hit_network = false;
+
+            // Portrait.
+            let photo_cached = !refresh
                 && matches!(task_state.ironshelf_db.get_author_image(&key).await, Ok(Some(_)));
-            if !already {
+            if !photo_cached {
+                hit_network = true;
                 match fetch_author_photo(&task_state.http_client, &name).await {
                     Some((bytes, content_type)) => {
                         let _ = task_state
                             .ironshelf_db
                             .set_author_image(&key, Some(bytes.as_slice()), &content_type, false)
                             .await;
-                        fetched += 1;
+                        photos_fetched += 1;
                     }
                     None => {
                         let _ = task_state
@@ -500,7 +506,30 @@ pub async fn prefetch_author_photos(
                             .await;
                     }
                 }
-                // Be gentle with Open Library.
+            }
+
+            // Bio / metadata.
+            let info_cached = !refresh
+                && matches!(task_state.ironshelf_db.get_author_info(&key).await, Ok(Some(_)));
+            if !info_cached {
+                hit_network = true;
+                let info = match fetch_author_info(&task_state.http_client, &name).await {
+                    Some(info) => {
+                        if info.bio.is_some() {
+                            bios_fetched += 1;
+                        }
+                        info
+                    }
+                    None => ironshelf_core::db::CachedAuthorInfo {
+                        not_found: true,
+                        ..Default::default()
+                    },
+                };
+                let _ = task_state.ironshelf_db.set_author_info(&key, &info).await;
+            }
+
+            if hit_network {
+                // Be gentle with the upstream APIs.
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             }
             processed += 1;
@@ -509,9 +538,13 @@ pub async fn prefetch_author_photos(
         task_state.tasks.finish(
             &task_id,
             "completed",
-            Some(format!("{fetched} portraits fetched of {total} authors")),
+            Some(format!(
+                "{photos_fetched} portraits, {bios_fetched} bios of {total} authors"
+            )),
         );
-        tracing::info!("author photo prefetch complete: {fetched} fetched of {total}");
+        tracing::info!(
+            "author metadata prefetch complete: {photos_fetched} photos, {bios_fetched} bios of {total}"
+        );
     });
 
     Ok(Json(serde_json::json!({ "started": true, "total": total })))

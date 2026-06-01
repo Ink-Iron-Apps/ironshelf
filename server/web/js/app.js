@@ -2828,10 +2828,10 @@
             <span>Enable author photos</span>
           </label>
           <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);margin-top:var(--space-4)">
-            <button class="btn btn-secondary" id="prefetch-author-photos-btn">${icon('download', 16)} Download all author photos</button>
+            <button class="btn btn-secondary" id="prefetch-author-photos-btn">${icon('download', 16)} Download all author metadata</button>
             <button class="btn btn-ghost" id="refetch-author-photos-btn">${icon('refresh', 16)} Re-fetch all (clear cache)</button>
           </div>
-          <p class="form-hint" style="margin-top:var(--space-2)">Fetches a portrait for every author from Open Library in the background. "Re-fetch all" clears cached results first — use it if photos are missing after a network/tunnel issue.</p>
+          <p class="form-hint" style="margin-top:var(--space-2)">Fetches a portrait <em>and</em> bio for every author (Open Library + Wikipedia) in the background. "Re-fetch all" clears cached results first — use it if data is missing after a network/tunnel issue.</p>
         </div>
         ` : ''}
 
@@ -3127,7 +3127,7 @@
         buttons.forEach(b => { if (b) b.disabled = true; });
         try {
           const result = await apiPost(`/authors/photos/prefetch${refresh ? '?refresh=true' : ''}`, {});
-          toast(`Fetching photos for ${result.total} authors in the background — they'll appear as they download.`, 'success');
+          toast(`Fetching metadata for ${result.total} authors in the background — it'll appear as it downloads.`, 'success');
         } catch (prefetchError) {
           toast(prefetchError.message || 'Failed to start photo download', 'error');
         } finally {
