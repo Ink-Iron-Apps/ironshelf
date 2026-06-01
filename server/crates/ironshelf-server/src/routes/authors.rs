@@ -517,6 +517,158 @@ pub async fn prefetch_author_photos(
     Ok(Json(serde_json::json!({ "started": true, "total": total })))
 }
 
+// --- Author info (bio / metadata) ---
+
+fn extract_ol_text(value: Option<&serde_json::Value>) -> Option<String> {
+    match value {
+        Some(serde_json::Value::String(text)) if !text.is_empty() => Some(text.clone()),
+        Some(serde_json::Value::Object(object)) => object
+            .get("value")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        _ => None,
+    }
+}
+
+async fn ol_author_olid(client: &reqwest::Client, name: &str) -> Option<String> {
+    let response = client
+        .get("https://openlibrary.org/search/authors.json")
+        .query(&[("q", name)])
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = response.json().await.ok()?;
+    json.get("docs")?
+        .as_array()?
+        .iter()
+        .find_map(|doc| doc.get("key").and_then(|key| key.as_str()))
+        .map(String::from)
+}
+
+/// Wikipedia REST summary → (extract, page url), only for author-like pages.
+async fn wikipedia_summary(client: &reqwest::Client, name: &str) -> Option<(String, String)> {
+    let title = name.replace(' ', "_");
+    let url = format!(
+        "https://en.wikipedia.org/api/rest_v1/page/summary/{}",
+        urlencoding::encode(&title)
+    );
+    let response = client.get(&url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = response.json().await.ok()?;
+    if json.get("type").and_then(|t| t.as_str()) == Some("disambiguation") {
+        return None;
+    }
+    // Guard against wrong-page matches: require a writer-ish description.
+    let description = json.get("description").and_then(|d| d.as_str()).unwrap_or("").to_lowercase();
+    let writerish = ["author", "writer", "novelist", "poet", "playwright", "essayist", "journalist"]
+        .iter()
+        .any(|word| description.contains(word));
+    if !writerish {
+        return None;
+    }
+    let extract = json
+        .get("extract")
+        .and_then(|e| e.as_str())
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let page = json
+        .get("content_urls")
+        .and_then(|c| c.get("desktop"))
+        .and_then(|d| d.get("page"))
+        .and_then(|p| p.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| format!("https://en.wikipedia.org/wiki/{title}"));
+    Some((extract, page))
+}
+
+async fn fetch_author_info(
+    client: &reqwest::Client,
+    name: &str,
+) -> Option<ironshelf_core::db::CachedAuthorInfo> {
+    let query_name = normalize_author_name(name);
+    let mut info = ironshelf_core::db::CachedAuthorInfo::default();
+
+    if let Some(olid) = ol_author_olid(client, &query_name).await {
+        info.openlibrary_url = Some(format!("https://openlibrary.org/authors/{olid}"));
+        if let Ok(response) = client
+            .get(format!("https://openlibrary.org/authors/{olid}.json"))
+            .send()
+            .await
+        {
+            if let Ok(json) = response.json::<serde_json::Value>().await {
+                info.bio = extract_ol_text(json.get("bio"));
+                info.birth_date = json.get("birth_date").and_then(|v| v.as_str()).map(String::from);
+                info.death_date = json.get("death_date").and_then(|v| v.as_str()).map(String::from);
+            }
+        }
+    }
+
+    if let Some((extract, wiki_url)) = wikipedia_summary(client, &query_name).await {
+        if info.bio.is_none() {
+            info.bio = Some(extract);
+        }
+        info.wikipedia_url = Some(wiki_url);
+    }
+
+    if info.bio.is_none()
+        && info.birth_date.is_none()
+        && info.death_date.is_none()
+        && info.openlibrary_url.is_none()
+        && info.wikipedia_url.is_none()
+    {
+        return None;
+    }
+    Some(info)
+}
+
+fn author_info_json(name: &str, info: &ironshelf_core::db::CachedAuthorInfo) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "bio": info.bio,
+        "birth_date": info.birth_date,
+        "death_date": info.death_date,
+        "openlibrary_url": info.openlibrary_url,
+        "wikipedia_url": info.wikipedia_url,
+    })
+}
+
+/// GET /api/v1/authors/:id/info — author bio + metadata (cached; fetched from
+/// Open Library + Wikipedia on first request).
+pub async fn get_author_info(
+    State(state): State<AppState>,
+    Path(author_id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let name = author_name_by_id(&state, author_id)
+        .await
+        .ok_or(AppError::not_found("author"))?;
+    let author_key = name.trim().to_lowercase();
+
+    if let Some(cached) = state
+        .ironshelf_db
+        .get_author_info(&author_key)
+        .await
+        .map_err(AppError::internal)?
+    {
+        return Ok(Json(author_info_json(&name, &cached)));
+    }
+
+    let info = match fetch_author_info(&state.http_client, &name).await {
+        Some(info) => info,
+        None => ironshelf_core::db::CachedAuthorInfo {
+            not_found: true,
+            ..Default::default()
+        },
+    };
+    let _ = state.ironshelf_db.set_author_info(&author_key, &info).await;
+    Ok(Json(author_info_json(&name, &info)))
+}
+
 /// GET /api/v1/server/tasks — list running + recent background tasks.
 pub async fn list_background_tasks(
     State(state): State<AppState>,

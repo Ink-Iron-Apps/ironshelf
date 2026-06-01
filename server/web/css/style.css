@@ -6018,3 +6018,30 @@ tbody td {
   height: 28px;
   font-size: 0.85rem;
 }
+
+/* Author detail hero */
+.author-avatar.author-avatar-lg {
+  width: 120px;
+  height: 120px;
+  font-size: 3rem;
+}
+.author-page-header {
+  align-items: center;
+}
+.author-hero-text { min-width: 0; }
+.author-hero-stats { margin-top: var(--space-1); }
+.author-hero-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.author-bio {
+  max-width: 70ch;
+  margin: var(--space-4) 0 var(--space-6);
+}
+.author-bio-text {
+  color: var(--color-text-dim, var(--color-muted));
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
