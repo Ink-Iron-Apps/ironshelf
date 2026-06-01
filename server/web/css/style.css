@@ -6006,3 +6006,15 @@ tbody td {
     position: static;
   }
 }
+
+/* Small author avatar (lists, inline) */
+.author-avatar.author-avatar-sm {
+  width: 40px;
+  height: 40px;
+  font-size: 1.1rem;
+}
+.author-avatar.author-avatar-xs {
+  width: 28px;
+  height: 28px;
+  font-size: 0.85rem;
+}
