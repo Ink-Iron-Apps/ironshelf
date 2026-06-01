@@ -2011,6 +2011,7 @@
   let librarySortField = 'name';
   let librarySortDirection = 'asc';
   let libraryPage = 1;
+  let libraryScrollObserver = null;
 
   async function renderLibrary(libraryId) {
     if (!await checkAuth()) return;
@@ -2093,53 +2094,91 @@
           </div>
         `;
       } else {
-        bodyContent += `<div style="display:flex;gap:var(--space-4);align-items:flex-start">`;
-
-        // Alpha jump sidebar (desktop only)
-        if (letters.length > 5) {
-          bodyContent += `<div class="alpha-jump" aria-label="Jump to letter">`;
-          for (const letter of letters) {
-            bodyContent += `<a href="#letter-${letter}" aria-label="Jump to ${letter}">${letter}</a>`;
-          }
-          bodyContent += `</div>`;
-        }
-
-        bodyContent += `<div class="list-group" style="flex:1">`;
-        let currentLetter = '';
-        for (const author of authors) {
-          const firstLetter = (author.name || '')[0]?.toUpperCase() || '';
-          if (firstLetter !== currentLetter && letters.length > 5) {
-            currentLetter = firstLetter;
-            bodyContent += `<div id="letter-${firstLetter}" style="padding:var(--space-2) var(--space-5);background:var(--color-bg-elevated);font-size:var(--text-xs);font-weight:600;color:var(--color-teal-bright);letter-spacing:0.05em;text-transform:uppercase">${firstLetter}</div>`;
-          }
-
-          bodyContent += `
-            <div class="list-item" data-author-id="${author.id}" role="link" tabindex="0" aria-label="${escapeHtml(author.name)}">
-              <div class="list-item-content">
-                <div class="list-item-icon">${Icons.author}</div>
-                <div class="list-item-text">
-                  <div class="list-item-name">${escapeHtml(author.name)}</div>
-                  <div class="list-item-subtitle">${author.book_count || 0} book${(author.book_count || 0) !== 1 ? 's' : ''}${author.series_count ? ` · ${author.series_count} series` : ''}</div>
-                </div>
-              </div>
-              <div class="list-item-meta">
-                <span class="nav-icon" style="width:16px;height:16px;color:var(--color-muted)">${Icons.chevronRight}</span>
-              </div>
-            </div>
-          `;
-        }
-        bodyContent += `</div></div>`;
-        bodyContent += renderPagination(libraryPage, totalPages);
+        // Infinite scroll: authors load into this list as you scroll.
+        bodyContent += `
+          <div class="list-group" id="library-author-list"></div>
+          <div id="library-scroll-loader" class="hidden" style="text-align:center;padding:var(--space-4);color:var(--color-muted)">Loading more…</div>
+          <div id="library-scroll-sentinel" style="height:1px"></div>
+        `;
       }
 
       renderShell(bodyContent, 'settings');
 
-      // Bind
-      document.querySelectorAll('[data-author-id]').forEach(item => {
-        const handler = () => navigateTo(`/author/${item.dataset.authorId}`);
-        item.addEventListener('click', handler);
-        item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
-      });
+      // Infinite scroll: render page 1, then fetch more as the sentinel nears.
+      if (authors.length > 0) {
+        const listEl = document.getElementById('library-author-list');
+        const loaderEl = document.getElementById('library-scroll-loader');
+        const sentinelEl = document.getElementById('library-scroll-sentinel');
+        const sortingByName = !librarySortField || librarySortField === 'name';
+        let lastLetter = '';
+        let nextPage = 2;
+        let scrollTotalPages = totalPages;
+        let loading = false;
+
+        const appendAuthors = (batch) => {
+          let html = '';
+          for (const author of batch) {
+            const firstLetter = (author.name || '')[0]?.toUpperCase() || '';
+            if (sortingByName && firstLetter && firstLetter !== lastLetter) {
+              lastLetter = firstLetter;
+              html += `<div style="padding:var(--space-2) var(--space-5);background:var(--color-bg-elevated);font-size:var(--text-xs);font-weight:600;color:var(--color-teal-bright);letter-spacing:0.05em;text-transform:uppercase">${escapeHtml(firstLetter)}</div>`;
+            }
+            html += `
+              <div class="list-item" data-author-id="${author.id}" role="link" tabindex="0" aria-label="${escapeHtml(author.name)}">
+                <div class="list-item-content">
+                  <div class="list-item-icon">${Icons.author}</div>
+                  <div class="list-item-text">
+                    <div class="list-item-name">${escapeHtml(author.name)}</div>
+                    <div class="list-item-subtitle">${author.book_count || 0} book${(author.book_count || 0) !== 1 ? 's' : ''}${author.series_count ? ` · ${author.series_count} series` : ''}</div>
+                  </div>
+                </div>
+                <div class="list-item-meta">
+                  <span class="nav-icon" style="width:16px;height:16px;color:var(--color-muted)">${Icons.chevronRight}</span>
+                </div>
+              </div>`;
+          }
+          listEl.insertAdjacentHTML('beforeend', html);
+          listEl.querySelectorAll('[data-author-id]:not([data-bound])').forEach((item) => {
+            item.dataset.bound = '1';
+            const handler = () => navigateTo(`/author/${item.dataset.authorId}`);
+            item.addEventListener('click', handler);
+            item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+          });
+        };
+
+        appendAuthors(authors);
+
+        if (libraryScrollObserver) { libraryScrollObserver.disconnect(); libraryScrollObserver = null; }
+        if (sentinelEl && scrollTotalPages > 1) {
+          const loadMore = async () => {
+            if (loading || nextPage > scrollTotalPages) return;
+            loading = true;
+            if (loaderEl) loaderEl.classList.remove('hidden');
+            try {
+              const moreParams = new URLSearchParams({ page: nextPage, per_page: 50, sort: librarySortField, dir: librarySortDirection });
+              if (librarySearchQuery) moreParams.set('search', librarySearchQuery);
+              const moreResp = await apiGet(`/libraries/${libraryId}/authors?${moreParams}`);
+              const moreAuthors = Array.isArray(moreResp) ? moreResp : (moreResp?.items || []);
+              appendAuthors(moreAuthors);
+              scrollTotalPages = moreResp?.total_pages || scrollTotalPages;
+              nextPage += 1;
+            } catch {
+              // ignore — will retry on next intersection
+            } finally {
+              loading = false;
+              if (loaderEl) loaderEl.classList.add('hidden');
+              if (nextPage > scrollTotalPages && libraryScrollObserver) {
+                libraryScrollObserver.disconnect();
+                libraryScrollObserver = null;
+              }
+            }
+          };
+          libraryScrollObserver = new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) loadMore();
+          }, { rootMargin: '400px' });
+          libraryScrollObserver.observe(sentinelEl);
+        }
+      }
 
       bindToolbar(document.querySelector('.main-body'), {
         currentDirection: librarySortDirection,
@@ -2154,11 +2193,6 @@
           libraryPage = 1;
           renderLibrary(libraryId);
         },
-      });
-
-      bindPagination(document.querySelector('.main-body'), (page) => {
-        libraryPage = page;
-        renderLibrary(libraryId);
       });
 
       document.getElementById('edit-library-btn')?.addEventListener('click', () => {
