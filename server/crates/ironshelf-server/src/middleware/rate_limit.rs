@@ -219,7 +219,7 @@ pub async fn rate_limit_api(
     // Cheap cached image reads (covers, author portraits) load in bursts of many
     // per page (galleries, author lists). Exempt them so a normal page view
     // doesn't blow the request budget and 429 the rest of the page.
-    if request.method() == axum::http::Method::GET {
+    if request.method().as_str() == "GET" {
         let path = request.uri().path();
         if path.ends_with("/cover") || path.ends_with("/photo") {
             return next.run(request).await;
