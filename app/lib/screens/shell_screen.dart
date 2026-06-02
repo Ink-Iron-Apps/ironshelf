@@ -1,14 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../services/whats_new_service.dart';
+
 /// Shell with bottom navigation bar.
-class ShellScreen extends StatelessWidget {
+class ShellScreen extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
 
   const ShellScreen({super.key, required this.navigationShell});
 
   @override
+  State<ShellScreen> createState() => _ShellScreenState();
+}
+
+class _ShellScreenState extends State<ShellScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // After the first frame, show the What's New dialog if the app just updated.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) WhatsNewService.maybeShow(context);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final navigationShell = widget.navigationShell;
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
