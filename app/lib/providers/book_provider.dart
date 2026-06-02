@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
-import '../services/api_service.dart';
 import 'server_provider.dart';
 
 /// Single book detail by ID.
