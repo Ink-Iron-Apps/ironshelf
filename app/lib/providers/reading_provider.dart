@@ -31,6 +31,14 @@ final bookProgressProvider = FutureProvider.family
   return apiService.getProgress(bookId);
 });
 
+/// The user's reading-state snapshot (in-progress percents + finished IDs).
+/// Cached until invalidated (after a mark read/unread or returning from the
+/// reader). Cards read this to overlay progress bars and finished badges.
+final readingStatesProvider = FutureProvider<ReadingStates>((ref) {
+  final apiService = ref.read(apiServiceProvider);
+  return apiService.getReadingStates();
+});
+
 /// Bookmarks for a specific book.
 final bookBookmarksProvider = FutureProvider.family
     .autoDispose<List<BookmarkEntry>, String>((ref, bookId) {
