@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
+import '../providers/reading_provider.dart';
 import 'book_cover.dart';
 import 'progress_bar.dart';
 
 /// Book card for grid layout.
-class BookCard extends StatelessWidget {
+class BookCard extends ConsumerWidget {
   final Book book;
   final String? authorName;
   final double? progressPercent;
@@ -19,8 +21,14 @@ class BookCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final states = ref.watch(readingStatesProvider).valueOrNull;
+    final status = states?.statusFor(book.id.toString());
+    // Use an explicitly-passed percent (e.g. continue-reading), else the
+    // cached reading-state percent.
+    final overlayPercent = progressPercent ??
+        states?.inProgress[book.id.toString()];
 
     return GestureDetector(
       onTap: onTap,
@@ -60,14 +68,31 @@ class BookCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                // Progress overlay
-                if (progressPercent != null && progressPercent! > 0)
+                // Finished badge (top-left so it doesn't clash with series badge)
+                if (status == 'finished')
+                  Positioned(
+                    top: 6,
+                    left: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.check,
+                          size: 13, color: theme.colorScheme.onPrimary),
+                    ),
+                  ),
+                // Progress overlay (in-progress books)
+                if (status != 'finished' &&
+                    overlayPercent != null &&
+                    overlayPercent > 0)
                   Positioned(
                     bottom: 0,
                     left: 0,
                     right: 0,
                     child: ReadingProgressBar(
-                      percent: progressPercent!,
+                      percent: overlayPercent,
                       height: 3,
                       borderRadius: const BorderRadius.only(
                         bottomLeft: Radius.circular(8),
@@ -110,7 +135,7 @@ class BookCard extends StatelessWidget {
 }
 
 /// Book list tile for list layout.
-class BookListTile extends StatelessWidget {
+class BookListTile extends ConsumerWidget {
   final Book book;
   final String? authorName;
   final double? progressPercent;
@@ -127,8 +152,12 @@ class BookListTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final states = ref.watch(readingStatesProvider).valueOrNull;
+    final status = states?.statusFor(book.id.toString());
+    final overlayPercent =
+        progressPercent ?? states?.inProgress[book.id.toString()];
 
     return InkWell(
       onTap: onTap,
@@ -179,10 +208,23 @@ class BookListTile extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (progressPercent != null && progressPercent! > 0) ...[
+                  if (status == 'finished') ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.check_circle,
+                            size: 13, color: theme.colorScheme.primary),
+                        const SizedBox(width: 4),
+                        Text('Read',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            )),
+                      ],
+                    ),
+                  ] else if (overlayPercent != null && overlayPercent > 0) ...[
                     const SizedBox(height: 4),
                     ReadingProgressBar(
-                      percent: progressPercent!,
+                      percent: overlayPercent,
                       height: 3,
                       showLabel: true,
                     ),

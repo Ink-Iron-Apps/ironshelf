@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../models/book.dart';
 import '../providers/book_provider.dart';
+import '../providers/reading_provider.dart';
+import '../providers/server_provider.dart';
 import '../theme.dart';
 import '../widgets/book_cover.dart';
 import '../widgets/error_state.dart';
@@ -136,6 +138,8 @@ class _BookDetailContent extends ConsumerWidget {
                         icon: const Icon(Icons.menu_book_rounded, size: 18),
                         label: const Text('Read'),
                       ),
+                    const SizedBox(width: 8),
+                    _MarkReadButton(bookId: book.id),
                     const SizedBox(width: 8),
                     OutlinedButton.icon(
                       onPressed: () => _showAddToCollectionSheet(context),
@@ -427,6 +431,65 @@ class _DetailRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Mark read / mark unread toggle. Reads the cached reading-state snapshot for
+/// the current status; marking unread also clears progress (server-side), so it
+/// reopens from the start.
+class _MarkReadButton extends ConsumerWidget {
+  final int bookId;
+
+  const _MarkReadButton({required this.bookId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final states = ref.watch(readingStatesProvider).valueOrNull;
+    final isFinished = states?.statusFor(bookId.toString()) == 'finished';
+
+    Future<void> toggle() async {
+      final api = ref.read(apiServiceProvider);
+      try {
+        if (isFinished) {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Mark as unread?'),
+              content: const Text(
+                  'This clears your saved position so the book reopens from the '
+                  'beginning.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Mark Unread'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed != true) return;
+          await api.markBookUnread(bookId.toString());
+        } else {
+          await api.markBookRead(bookId.toString());
+        }
+        ref.invalidate(readingStatesProvider);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed: $e')),
+          );
+        }
+      }
+    }
+
+    return OutlinedButton.icon(
+      onPressed: toggle,
+      icon: Icon(isFinished ? Icons.undo : Icons.check, size: 18),
+      label: Text(isFinished ? 'Mark unread' : 'Mark read'),
     );
   }
 }
