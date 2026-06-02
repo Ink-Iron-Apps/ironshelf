@@ -185,7 +185,15 @@ const IronshelfCbzReader = (() => {
 
   // --- Image Extraction ---
   async function extractImages(arrayBuffer) {
-    const zip = await JSZip.loadAsync(arrayBuffer);
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(arrayBuffer);
+    } catch (err) {
+      // CBR archives are RAR, not ZIP. JSZip can only read ZIP-based comics
+      // (CBZ, and CBR files that are secretly ZIP). True RAR can't be unpacked
+      // in-browser — surface a clear message instead of a generic zip error.
+      throw new Error('This comic is a RAR archive (CBR), which cannot be opened in the browser. Convert it to CBZ to read it here.');
+    }
     const imageFiles = [];
 
     zip.forEach((relativePath, zipEntry) => {
@@ -647,8 +655,9 @@ const IronshelfCbzReader = (() => {
   }
 
   // --- Core: Open ---
-  async function open(bookId) {
+  async function open(bookId, format) {
     currentBookId = bookId;
+    const fileFormat = (format || 'cbz').toUpperCase();
     currentPage = 1;
     totalPages = 0;
     imageUrls = [];
@@ -672,7 +681,7 @@ const IronshelfCbzReader = (() => {
       await loadJsZip();
 
       const savedProgress = await fetchProgress(bookId);
-      const fileUrl = withToken(`${API}/books/${bookId}/file?format=CBZ`);
+      const fileUrl = withToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
 
       // Download the CBZ file
       const response = await fetch(fileUrl, { credentials: 'same-origin' });
