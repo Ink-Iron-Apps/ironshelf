@@ -45,6 +45,81 @@
   let currentUser = null;
   let sidebarOpen = false;
 
+  // --- Reading state (in-progress percents + finished set), fetched per session ---
+  // inProgress: Map<bookId(string), percent(0..1)>; completed: Set<bookId(string)>.
+  let readingStateInProgress = new Map();
+  let readingStateCompleted = new Set();
+  let readingStateLoaded = false;
+  // Set when the reader is opened or a mark action runs, so the next navigation
+  // re-fetches the snapshot instead of using the stale cache.
+  let readingStateDirty = false;
+
+  // Fetch the user's reading-state snapshot once and cache it. Safe to call
+  // repeatedly; pass forceRefresh after progress/mark changes.
+  async function loadReadingStates(forceRefresh = false) {
+    if (readingStateLoaded && !forceRefresh) return;
+    try {
+      const states = await apiGet('/me/reading-states');
+      readingStateInProgress = new Map(
+        (states.in_progress || []).map(entry => [String(entry.book_id), entry.percent])
+      );
+      readingStateCompleted = new Set((states.completed || []).map(id => String(id)));
+      readingStateLoaded = true;
+    } catch (err) {
+      // Non-fatal — cards just render without status overlays.
+      readingStateLoaded = true;
+    }
+  }
+
+  // Classify a book for the current user. Completed wins over in-progress.
+  function bookReadingStatus(bookId) {
+    const key = String(bookId);
+    if (readingStateCompleted.has(key)) return 'finished';
+    if (readingStateInProgress.has(key)) return 'reading';
+    return 'unread';
+  }
+
+  // Furthest-read percent (0..100 integer) for an in-progress book, else 0.
+  function bookProgressPercent(bookId) {
+    const fraction = readingStateInProgress.get(String(bookId));
+    return fraction ? Math.round(Math.max(0, Math.min(1, fraction)) * 100) : 0;
+  }
+
+  // Build the status overlay (progress bar + finished badge) for a book cover.
+  function readingStatusOverlay(bookId) {
+    const status = bookReadingStatus(bookId);
+    if (status === 'finished') {
+      return `<span class="read-badge" title="Read" aria-label="Read">${Icons.check || '✓'}</span>`;
+    }
+    if (status === 'reading') {
+      const percent = bookProgressPercent(bookId);
+      return `<div class="card-progress" title="${percent}% read" aria-label="${percent}% read">
+        <div class="card-progress-fill" style="width:${percent}%"></div>
+      </div>`;
+    }
+    return '';
+  }
+
+  // Mark read / mark unread toggle for the book detail page.
+  function renderMarkReadButton(bookId) {
+    const isFinished = bookReadingStatus(bookId) === 'finished';
+    return `<button class="btn btn-secondary" id="toggle-read-btn" data-finished="${isFinished}">
+      ${isFinished ? `${icon('refresh', 16)} Mark as Unread` : `${icon('check', 16)} Mark as Read`}
+    </button>`;
+  }
+
+  // One-line status pill for the detail page header (Reading 42% / Read / Unread).
+  function renderDetailStatusPill(bookId) {
+    const status = bookReadingStatus(bookId);
+    if (status === 'finished') {
+      return `<span class="status-pill status-pill-finished">${icon('check', 14)} Read</span>`;
+    }
+    if (status === 'reading') {
+      return `<span class="status-pill status-pill-reading">${bookProgressPercent(bookId)}% read</span>`;
+    }
+    return `<span class="status-pill status-pill-unread">Unread</span>`;
+  }
+
   // --- Notification State ---
   let notificationUnreadCount = 0;
   let notificationPollTimer = null;
@@ -873,6 +948,14 @@
     closeSidebar();
     closeNotificationPanel();
 
+    // Refresh reading-state overlays when returning from the reader (progress
+    // may have advanced) or after a mark read/unread action; otherwise use the
+    // cached snapshot. Logged-in routes only.
+    if (currentUser) {
+      await loadReadingStates(readingStateDirty);
+      readingStateDirty = false;
+    }
+
     // Clear any active conversion poll from previous page
     if (conversionPollTimer) {
       clearInterval(conversionPollTimer);
@@ -896,6 +979,7 @@
       series: () => renderSeries(parsed.params.id),
       book: () => renderBook(parsed.params.id),
       read: () => openReader(parsed.params.id, detectReaderFormat(parsed.params.sub) || 'epub', parsed.params.sub),
+      mybooks: renderMyBooks,
       collections: renderCollections,
       collection: () => renderCollectionDetail(parsed.params.id),
       settings: () => renderSettings(parsed.params.id),
@@ -967,6 +1051,7 @@
       await loadReaderScript(readerFormat);
       const reader = window[entry.global];
       if (reader) {
+        readingStateDirty = true; // progress will change while reading
         reader.open(bookId, actualFormat || readerFormat);
       } else {
         toast('Reader module failed to initialize', 'error');
@@ -1122,6 +1207,7 @@
 
     const mainNavItems = [
       { id: 'home', label: 'Home', icon: 'home', path: '/' },
+      { id: 'mybooks', label: 'My Books', icon: 'bookOpen', path: '/mybooks' },
       { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
@@ -2032,6 +2118,28 @@
   let librarySortDirection = 'asc';
   let libraryPage = 1;
   let libraryScrollObserver = null;
+  // Reading-status filter for the library view: all | reading | finished | unread.
+  // "all" shows the Author hierarchy; any other value shows a flat book grid
+  // filtered to that status.
+  let libraryStatusFilter = 'all';
+
+  const READING_STATUS_TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'reading', label: 'Reading' },
+    { value: 'finished', label: 'Finished' },
+    { value: 'unread', label: 'Unread' },
+  ];
+
+  // Render a status tab bar. `active` = current value; `idPrefix` namespaces the
+  // data attribute so callers can bind their own click handler.
+  function renderReadingStatusTabs(active, idPrefix = 'lib-status') {
+    return `<div class="status-tabs" role="tablist" data-status-group="${idPrefix}">
+      ${READING_STATUS_TABS.map(tab => `
+        <button class="status-tab ${tab.value === active ? 'is-active' : ''}" role="tab"
+          aria-selected="${tab.value === active}" data-status-value="${tab.value}">${tab.label}</button>
+      `).join('')}
+    </div>`;
+  }
 
   async function renderLibrary(libraryId) {
     if (!await checkAuth()) return;
@@ -2048,34 +2156,15 @@
     `, 'libraries');
 
     try {
-      const params = new URLSearchParams({
-        page: libraryPage,
-        per_page: 50,
-        sort: librarySortField,
-        dir: librarySortDirection,
-      });
-      if (librarySearchQuery) params.set('search', librarySearchQuery);
-
-      const [library, authorsResponse] = await Promise.all([
-        apiGet(`/libraries/${libraryId}`),
-        apiGet(`/libraries/${libraryId}/authors?${params}`),
-      ]);
-
+      const library = await apiGet(`/libraries/${libraryId}`);
       if (isStaleNavigation(thisGeneration)) return;
 
       setTitle([library.name]);
       breadcrumbTrail[1].label = library.name;
 
-      const authors = Array.isArray(authorsResponse) ? authorsResponse : (authorsResponse?.items || authorsResponse?.data || []);
-      const totalPages = authorsResponse?.total_pages || 1;
-      const photosEnabled = (await getServerSettings()).author_images_enabled !== false;
-
-      // Build alpha jump
-      const letters = [...new Set(authors.map(a => (a.name || '')[0]?.toUpperCase()).filter(Boolean))].sort();
-
       const isScanningThisLibrary = activeScanLibraryId === libraryId;
 
-      let bodyContent = `
+      const headerHtml = `
         <div class="page-header">
           <h1>${escapeHtml(library.name)}</h1>
           <div class="actions">
@@ -2095,6 +2184,111 @@
             </div>
           ` : ''}
         </div>
+        ${renderReadingStatusTabs(libraryStatusFilter)}
+      `;
+
+      // Shared header bindings (status tabs, edit, scan) used by both paths.
+      const bindLibraryHeader = () => {
+        document.querySelectorAll('.status-tabs[data-status-group="lib-status"] .status-tab').forEach((tabButton) => {
+          tabButton.addEventListener('click', () => {
+            const nextStatus = tabButton.dataset.statusValue;
+            if (nextStatus === libraryStatusFilter) return;
+            libraryStatusFilter = nextStatus;
+            libraryPage = 1;
+            renderLibrary(libraryId);
+          });
+        });
+        document.getElementById('edit-library-btn')?.addEventListener('click', () => showAddLibraryModal(library));
+        document.getElementById('scan-library-btn')?.addEventListener('click', () => startLibraryScan(libraryId));
+      };
+
+      // --- Flat filtered book grid (status = reading | finished | unread) ---
+      if (libraryStatusFilter !== 'all') {
+        await loadReadingStates();
+        const buildBooksParams = (pageNumber) => new URLSearchParams({
+          page: pageNumber, per_page: 50, status: libraryStatusFilter, sort: 'sort_title', dir: 'asc',
+        });
+        const booksResponse = await apiGet(`/libraries/${libraryId}/books?${buildBooksParams(1)}`);
+        if (isStaleNavigation(thisGeneration)) return;
+        const books = Array.isArray(booksResponse) ? booksResponse : (booksResponse?.items || []);
+        let booksTotalPages = booksResponse?.total_pages || 1;
+
+        let gridBody = headerHtml;
+        if (books.length === 0) {
+          const emptyLabel = { reading: 'No books in progress', finished: 'No finished books', unread: 'No unread books' }[libraryStatusFilter] || 'No books';
+          gridBody += `<div class="empty-state"><div class="empty-state-icon">${Icons.book || Icons.bookOpen || ''}</div><h3>${emptyLabel}</h3><p>Switch tabs to see more of your library.</p></div>`;
+          renderShell(gridBody, 'settings');
+          bindLibraryHeader();
+          return;
+        }
+        gridBody += `
+          <div class="grid grid-books" id="library-book-grid"></div>
+          <div id="library-scroll-loader" class="hidden" style="text-align:center;padding:var(--space-4);color:var(--color-muted)">Loading more…</div>
+          <div id="library-scroll-sentinel" style="height:1px"></div>
+        `;
+        renderShell(gridBody, 'settings');
+        bindLibraryHeader();
+
+        const gridEl = document.getElementById('library-book-grid');
+        const loaderEl = document.getElementById('library-scroll-loader');
+        const sentinelEl = document.getElementById('library-scroll-sentinel');
+        let nextPage = 2;
+        let loading = false;
+
+        const appendBooks = (batch) => {
+          gridEl.insertAdjacentHTML('beforeend', batch.map(bookItem => renderBookCard(bookItem)).join(''));
+          gridEl.querySelectorAll('.book-card:not([data-bound])').forEach((card) => {
+            card.dataset.bound = '1';
+            const openBook = () => navigateTo(`/book/${card.dataset.bookId}`);
+            card.addEventListener('click', openBook);
+            card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBook(); } });
+          });
+        };
+        appendBooks(books);
+
+        if (libraryScrollObserver) { libraryScrollObserver.disconnect(); libraryScrollObserver = null; }
+        if (sentinelEl && booksTotalPages > 1) {
+          const loadMore = async () => {
+            if (loading || nextPage > booksTotalPages) return;
+            loading = true;
+            if (loaderEl) loaderEl.classList.remove('hidden');
+            try {
+              const moreResp = await apiGet(`/libraries/${libraryId}/books?${buildBooksParams(nextPage)}`);
+              const moreBooks = Array.isArray(moreResp) ? moreResp : (moreResp?.items || []);
+              appendBooks(moreBooks);
+              booksTotalPages = moreResp?.total_pages || booksTotalPages;
+              nextPage += 1;
+            } catch {
+              // ignore — retry on next intersection
+            } finally {
+              loading = false;
+              if (loaderEl) loaderEl.classList.add('hidden');
+              if (nextPage > booksTotalPages && libraryScrollObserver) { libraryScrollObserver.disconnect(); libraryScrollObserver = null; }
+            }
+          };
+          libraryScrollObserver = new IntersectionObserver((entries) => { if (entries.some(entry => entry.isIntersecting)) loadMore(); }, { rootMargin: '400px' });
+          libraryScrollObserver.observe(sentinelEl);
+        }
+        return;
+      }
+
+      // --- Author hierarchy (status = all) ---
+      const params = new URLSearchParams({
+        page: libraryPage,
+        per_page: 50,
+        sort: librarySortField,
+        dir: librarySortDirection,
+      });
+      if (librarySearchQuery) params.set('search', librarySearchQuery);
+
+      const authorsResponse = await apiGet(`/libraries/${libraryId}/authors?${params}`);
+      if (isStaleNavigation(thisGeneration)) return;
+
+      const authors = Array.isArray(authorsResponse) ? authorsResponse : (authorsResponse?.items || authorsResponse?.data || []);
+      const totalPages = authorsResponse?.total_pages || 1;
+      const photosEnabled = (await getServerSettings()).author_images_enabled !== false;
+
+      let bodyContent = headerHtml + `
         ${renderToolbar({
           searchPlaceholder: 'Search authors...',
           sortOptions: [
@@ -2217,13 +2411,7 @@
         },
       });
 
-      document.getElementById('edit-library-btn')?.addEventListener('click', () => {
-        showAddLibraryModal(library);
-      });
-
-      document.getElementById('scan-library-btn')?.addEventListener('click', () => {
-        startLibraryScan(libraryId);
-      });
+      bindLibraryHeader();
     } catch (err) {
       renderShell(renderError('Failed to load library', err.message, () => renderLibrary(libraryId)), 'libraries');
     }
@@ -2530,7 +2718,7 @@
             }
           </div>
           <div class="book-detail-info">
-            <h1>${escapeHtml(book.title)}</h1>
+            <h1>${escapeHtml(book.title)} ${renderDetailStatusPill(bookId)}</h1>
             ${(book.author_names && book.author_names.length > 0) ? `<a class="author-link" href="#/author/${(book.author_ids && book.author_ids[0]) || ''}">${escapeHtml(book.author_names.join(', '))}</a>` : ''}
             ${book.series_name ? `<p class="text-caption" style="margin-top:var(--space-2)">Book ${book.series_index || '?'} of <a href="#/series/${book.series_id || ''}">${escapeHtml(book.series_name)}</a></p>` : ''}
             ${genreChipsHtml}
@@ -2566,6 +2754,7 @@
                 `).join('')}
                 ${renderAddToCollectionButton(bookId)}
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
+                ${renderMarkReadButton(bookId)}
                 <div id="convert-btn-container"></div>
                 ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
                 ${hasPermission('manage_library') && book.author_names && book.author_names.length > 0 ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
@@ -2574,6 +2763,7 @@
               <div class="book-detail-formats">
                 ${renderAddToCollectionButton(bookId)}
                 <button class="btn btn-secondary" id="add-to-queue-btn">${icon('clock', 16)} Add to Queue</button>
+                ${renderMarkReadButton(bookId)}
                 <div id="convert-btn-container"></div>
                 ${(!book.description || hasPermission('manage_library')) ? `<button class="btn btn-secondary" id="enrich-metadata-btn">${icon('zap', 16)} Enrich Metadata</button>` : ''}
                 ${hasPermission('manage_library') && book.author_names && book.author_names.length > 0 ? `<button class="btn btn-secondary" id="find-more-author-btn">${icon('search', 16)} Find More by Author</button>` : ''}
@@ -2641,6 +2831,48 @@
           } catch (queueError) {
             toast(queueError.message, 'error');
             if (queueBtn) queueBtn.disabled = false;
+          }
+        });
+
+        // Bind mark read / unread toggle
+        document.getElementById('toggle-read-btn')?.addEventListener('click', () => {
+          const toggleBtn = document.getElementById('toggle-read-btn');
+          const isFinished = toggleBtn?.dataset.finished === 'true';
+
+          const markUnread = async () => {
+            try {
+              await apiDelete(`/books/${bookId}/complete`);
+              toast('Marked as unread', 'success');
+              await loadReadingStates(true);
+              renderBook(bookId);
+            } catch (toggleError) {
+              toast(toggleError.message, 'error');
+            }
+          };
+
+          const markRead = async () => {
+            if (toggleBtn) toggleBtn.disabled = true;
+            try {
+              await apiPost(`/books/${bookId}/complete`, {});
+              toast('Marked as read', 'success');
+              await loadReadingStates(true);
+              renderBook(bookId);
+            } catch (toggleError) {
+              toast(toggleError.message, 'error');
+              if (toggleBtn) toggleBtn.disabled = false;
+            }
+          };
+
+          if (isFinished) {
+            showConfirmModal({
+              title: 'Mark as unread?',
+              message: 'This clears your saved position so the book reopens from the beginning.',
+              confirmText: 'Mark Unread',
+              confirmClass: 'btn-primary',
+              onConfirm: markUnread,
+            });
+          } else {
+            markRead();
           }
         });
 
@@ -5787,12 +6019,13 @@
 
   function renderBookCard(book, showSeriesIndex = false) {
     const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
+    const statusOverlay = readingStatusOverlay(book.id);
     return `
       <div class="book-card" data-book-id="${book.id}" role="link" tabindex="0" aria-label="${escapeHtml(book.title)}">
         ${showSeriesIndex && book.series_index ? `<span class="series-badge">#${book.series_index}</span>` : ''}
         ${coverUrl
-          ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy"></div>`
-          : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>`
+          ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy">${statusOverlay}</div>`
+          : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>${statusOverlay}</div>`
         }
         <div class="book-title" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</div>
         <div class="book-meta">${(book.author_names && book.author_names.length > 0) ? escapeHtml(book.author_names.join(', ')) : ''}</div>
@@ -6129,6 +6362,135 @@
         submitBtn.disabled = false;
       }
     });
+  }
+
+  // ============================================================
+  // My Books — reading-status shelves across all libraries
+  // ============================================================
+
+  let myBooksStatus = 'reading';
+  let myBooksLibraryId = 'all';
+
+  async function renderMyBooks() {
+    if (!await checkAuth()) return;
+    const thisGeneration = navigationGeneration;
+    setTitle(['My Books']);
+    breadcrumbTrail = [{ label: 'My Books', path: '/mybooks' }];
+
+    renderShell(`
+      <div class="page-header"><h1>My Books</h1></div>
+      ${skeletonCards(8)}
+    `, 'mybooks');
+
+    try {
+      await loadReadingStates();
+      const librariesResponse = await apiGet('/libraries');
+      if (isStaleNavigation(thisGeneration)) return;
+      const libraries = Array.isArray(librariesResponse) ? librariesResponse : (librariesResponse?.items || []);
+
+      // Validate sticky library scope still exists.
+      if (myBooksLibraryId !== 'all' && !libraries.some(lib => String(lib.id) === String(myBooksLibraryId))) {
+        myBooksLibraryId = 'all';
+      }
+
+      // Fetch the chosen status across the chosen scope. Pull a generous page so
+      // most personal libraries render fully; note if more remains.
+      const targetLibraries = myBooksLibraryId === 'all'
+        ? libraries
+        : libraries.filter(lib => String(lib.id) === String(myBooksLibraryId));
+
+      let books = [];
+      let truncated = false;
+      for (const lib of targetLibraries) {
+        const params = new URLSearchParams({ page: 1, per_page: 200, status: myBooksStatus, sort: 'sort_title', dir: 'asc' });
+        try {
+          const response = await apiGet(`/libraries/${lib.id}/books?${params}`);
+          if (isStaleNavigation(thisGeneration)) return;
+          const libBooks = Array.isArray(response) ? response : (response?.items || []);
+          books = books.concat(libBooks);
+          if ((response?.total_pages || 1) > 1) truncated = true;
+        } catch {
+          // skip a library that fails; others still render
+        }
+      }
+
+      // Reading shelf: order by furthest-read recency feel — keep title sort for
+      // the others, but reading is more useful most-progressed first.
+      if (myBooksStatus === 'reading') {
+        books.sort((a, b) => bookProgressPercent(b.id) - bookProgressPercent(a.id));
+      }
+
+      const libraryOptions = [`<option value="all" ${myBooksLibraryId === 'all' ? 'selected' : ''}>All libraries</option>`]
+        .concat(libraries.map(lib => `<option value="${lib.id}" ${String(lib.id) === String(myBooksLibraryId) ? 'selected' : ''}>${escapeHtml(lib.name)}</option>`))
+        .join('');
+
+      let body = `
+        <div class="page-header">
+          <h1>My Books</h1>
+          <div class="actions">
+            <select id="mybooks-library-scope" class="form-input" aria-label="Library scope" style="min-width:180px">
+              ${libraryOptions}
+            </select>
+          </div>
+        </div>
+        ${renderReadingStatusTabsMyBooks(myBooksStatus)}
+      `;
+
+      if (books.length === 0) {
+        const emptyLabel = { reading: "You're not reading anything yet", finished: 'No finished books yet', unread: 'No unread books' }[myBooksStatus] || 'No books';
+        const emptyHint = myBooksStatus === 'reading'
+          ? 'Open a book to start tracking your progress here.'
+          : (myBooksStatus === 'finished' ? 'Books you finish (or mark as read) show up here.' : 'Everything you have not started appears here.');
+        body += `<div class="empty-state"><div class="empty-state-icon">${Icons.bookOpen || ''}</div><h3>${emptyLabel}</h3><p>${emptyHint}</p></div>`;
+      } else {
+        body += `<div class="grid grid-books" id="mybooks-grid">${books.map(bookItem => renderBookCard(bookItem)).join('')}</div>`;
+        if (truncated) {
+          body += `<p class="text-caption" style="text-align:center;color:var(--color-muted);margin-top:var(--space-4)">Showing the first ${books.length}. Open a specific library to browse the rest.</p>`;
+        }
+      }
+
+      renderShell(body, 'mybooks');
+
+      // Bind status tabs
+      document.querySelectorAll('.status-tabs[data-status-group="mybooks"] .status-tab').forEach((tabButton) => {
+        tabButton.addEventListener('click', () => {
+          const nextStatus = tabButton.dataset.statusValue;
+          if (nextStatus === myBooksStatus) return;
+          myBooksStatus = nextStatus;
+          renderMyBooks();
+        });
+      });
+
+      // Bind library scope
+      document.getElementById('mybooks-library-scope')?.addEventListener('change', (e) => {
+        myBooksLibraryId = e.target.value;
+        renderMyBooks();
+      });
+
+      // Bind cards
+      document.querySelectorAll('#mybooks-grid .book-card').forEach((card) => {
+        const openBook = () => navigateTo(`/book/${card.dataset.bookId}`);
+        card.addEventListener('click', openBook);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBook(); } });
+      });
+    } catch (err) {
+      renderShell(renderError('Failed to load your books', err.message, renderMyBooks), 'mybooks');
+    }
+  }
+
+  // My Books uses Reading | Finished | Unread (no "All" — that's the library view).
+  function renderReadingStatusTabsMyBooks(active) {
+    const tabs = [
+      { value: 'reading', label: 'Reading' },
+      { value: 'finished', label: 'Finished' },
+      { value: 'unread', label: 'Unread' },
+    ];
+    return `<div class="status-tabs" role="tablist" data-status-group="mybooks">
+      ${tabs.map(tab => `
+        <button class="status-tab ${tab.value === active ? 'is-active' : ''}" role="tab"
+          aria-selected="${tab.value === active}" data-status-value="${tab.value}">${tab.label}</button>
+      `).join('')}
+    </div>`;
   }
 
   // ============================================================

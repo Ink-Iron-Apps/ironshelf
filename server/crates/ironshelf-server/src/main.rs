@@ -383,6 +383,15 @@ async fn main() -> anyhow::Result<()> {
             get(routes::progress::list_all_bookmarks),
         )
         .route(
+            "/api/v1/me/reading-states",
+            get(routes::reading_status::get_reading_states),
+        )
+        .route(
+            "/api/v1/books/{id}/complete",
+            axum::routing::post(routes::reading_status::mark_read)
+                .delete(routes::reading_status::mark_unread),
+        )
+        .route(
             "/api/v1/me/highlights",
             get(routes::highlights::list_all_highlights),
         )

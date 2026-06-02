@@ -2,6 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::pagination::{Paginated, PaginationParams, SortDirection, SortParams};
 use crate::state::AppState;
@@ -19,6 +20,8 @@ pub struct ListBooksQuery {
     pub tag: Option<String>,
     /// Filter by language code (exact, case-insensitive).
     pub language: Option<String>,
+    /// Filter by the user's reading status: reading | finished | unread | all.
+    pub status: Option<String>,
 }
 
 /// GET /api/v1/books/:id
@@ -46,6 +49,7 @@ pub async fn get_book(
 /// - Filters: ?tag= (exact tag match), ?language= (exact language match)
 pub async fn list_books(
     State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
     Path(library_id): Path<String>,
     Query(query): Query<ListBooksQuery>,
 ) -> Result<Json<Paginated<ironshelf_core::model::Book>>, AppError> {
@@ -81,6 +85,40 @@ pub async fn list_books(
                 .iter()
                 .any(|language| language.to_lowercase() == language_lower)
         });
+    }
+
+    // Filter: by the user's reading status (reading | finished | unread).
+    if let Some(ref status_filter) = query.status {
+        let status = status_filter.to_lowercase();
+        if status != "all" && !status.is_empty() {
+            let completed: std::collections::HashSet<String> = state
+                .ironshelf_db
+                .get_completed_book_ids(&user.user_id)
+                .await
+                .map_err(AppError::internal)?
+                .into_iter()
+                .collect();
+            let in_progress: std::collections::HashSet<String> = state
+                .ironshelf_db
+                .get_in_progress_states(&user.user_id)
+                .await
+                .map_err(AppError::internal)?
+                .into_iter()
+                .map(|(book_id, _percent)| book_id)
+                .collect();
+
+            books.retain(|book| {
+                let book_id = book.id.to_string();
+                match status.as_str() {
+                    "finished" => completed.contains(&book_id),
+                    "reading" => in_progress.contains(&book_id) && !completed.contains(&book_id),
+                    "unread" => {
+                        !completed.contains(&book_id) && !in_progress.contains(&book_id)
+                    }
+                    _ => true,
+                }
+            });
+        }
     }
 
     // Sort
