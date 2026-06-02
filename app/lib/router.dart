@@ -1,75 +1,61 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
+import 'providers/cloud_provider.dart';
 import 'providers/server_provider.dart';
 import 'screens/author_detail_screen.dart';
 import 'screens/authors_screen.dart';
 import 'screens/book_detail_screen.dart';
+import 'screens/cloud_login_screen.dart';
+import 'screens/cloud_servers_screen.dart';
 import 'screens/collection_detail_screen.dart';
 import 'screens/collections_screen.dart';
 import 'screens/genre_detail_screen.dart';
 import 'screens/genres_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
-import 'screens/login_screen.dart';
 import 'screens/reader/reader_screen.dart';
 import 'screens/reading_queue_screen.dart';
-import 'screens/register_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/series_detail_screen.dart';
-import 'screens/server_connect_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shell_screen.dart';
 import 'screens/stats_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final isServerConfigured = ref.watch(isServerConfiguredProvider);
-  final isAuthenticated = ref.watch(isAuthenticatedProvider);
+  final hasCloud = ref.watch(cloudConfiguredProvider);
+  final hasServer = ref.watch(isServerConfiguredProvider) &&
+      ref.watch(isAuthenticatedProvider);
 
   return GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
-      final currentPath = state.matchedLocation;
+      final path = state.matchedLocation;
+      const loginPath = '/cloud-login';
+      const pickerPath = '/cloud-servers';
 
-      // Public routes that don't require auth
-      const publicPaths = [
-        '/server-connect',
-        '/login',
-        '/register',
-      ];
-
-      // Not configured → server connect
-      if (!isServerConfigured && !publicPaths.contains(currentPath)) {
-        return '/server-connect';
+      // The app is cloud-only: sign in to the cloud first.
+      if (!hasCloud) {
+        return path == loginPath ? null : loginPath;
       }
-
-      // Configured but not authenticated → login
-      if (isServerConfigured &&
-          !isAuthenticated &&
-          !publicPaths.contains(currentPath)) {
-        return '/login';
+      // Signed in to the cloud but no server connected → pick one.
+      if (!hasServer) {
+        return path == pickerPath ? null : pickerPath;
       }
-
-      // Authenticated but on auth pages → home
-      if (isAuthenticated && publicPaths.contains(currentPath)) {
-        return '/';
-      }
-
+      // Fully connected. Keep users off the login page; the picker stays
+      // reachable so they can switch servers.
+      if (path == loginPath) return '/';
       return null;
     },
     routes: [
-      // Auth routes (no shell)
+      // Cloud onboarding (no shell)
       GoRoute(
-        path: '/server-connect',
-        builder: (context, state) => const ServerConnectScreen(),
+        path: '/cloud-login',
+        builder: (context, state) => const CloudLoginScreen(),
       ),
       GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
-      ),
-      GoRoute(
-        path: '/register',
-        builder: (context, state) => const RegisterScreen(),
+        path: '/cloud-servers',
+        builder: (context, state) => const CloudServersScreen(),
       ),
 
       // Main app with bottom navigation shell

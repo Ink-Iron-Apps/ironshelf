@@ -614,12 +614,13 @@ class ApiService {
     // Auth interceptor
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) {
-        // Add Bearer token or session cookie
-        if (config.apiKey != null) {
-          options.headers['Authorization'] = 'Bearer ${config.apiKey}';
-        } else if (config.sessionId != null) {
-          options.headers['Cookie'] =
-              'ironshelf_session=${config.sessionId}';
+        // The app always talks to the server cross-origin (over its cloud
+        // tunnel URL), where cookies don't apply — so send the session id as a
+        // Bearer token too. The server accepts any non-`irs_` Bearer as a
+        // session id (and `irs_` Bearers as API keys).
+        final bearer = config.apiKey ?? config.sessionId;
+        if (bearer != null) {
+          options.headers['Authorization'] = 'Bearer $bearer';
         }
 
         // Add custom headers (CF-Access tokens, etc.)
@@ -869,15 +870,38 @@ class ApiService {
   /// Auth headers for CachedNetworkImage.
   Map<String, String> get authHeaders {
     final headers = <String, String>{};
-    if (_serverConfig?.apiKey != null) {
-      headers['Authorization'] = 'Bearer ${_serverConfig!.apiKey}';
-    } else if (_serverConfig?.sessionId != null) {
-      headers['Cookie'] = 'ironshelf_session=${_serverConfig!.sessionId}';
+    final bearer = _serverConfig?.apiKey ?? _serverConfig?.sessionId;
+    if (bearer != null) {
+      headers['Authorization'] = 'Bearer $bearer';
     }
     _serverConfig?.customHeaders.forEach((key, value) {
       headers[key] = value;
     });
     return headers;
+  }
+
+  /// Exchange a cloud-issued server access token for a local server session.
+  /// POST {serverUrl}/api/v1/auth/cloud-login -> { session_id, ... }.
+  /// Returns the session id the app then uses as its Bearer token.
+  Future<String> cloudLoginToServer(
+    String serverUrl,
+    String serverAccessToken,
+  ) async {
+    final dio = Dio(BaseOptions(
+      baseUrl: '$serverUrl/api/v1',
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 20),
+    ));
+    final response = await dio.post(
+      '/auth/cloud-login',
+      data: {'cloud_token': serverAccessToken},
+    );
+    final data = response.data as Map<String, dynamic>;
+    final sessionId = data['session_id'] as String?;
+    if (sessionId == null || sessionId.isEmpty) {
+      throw const ApiException('Server did not return a session');
+    }
+    return sessionId;
   }
 
   // ---------------------------------------------------------------------------
