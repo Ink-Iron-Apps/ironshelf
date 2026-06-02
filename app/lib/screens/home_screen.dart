@@ -127,8 +127,8 @@ class _ContinueReadingSection extends ConsumerWidget {
                       child: SizedBox(
                         width: 120,
                         child: GestureDetector(
-                          onTap: () =>
-                              context.go('/book/${entry.book.id}'),
+                          onTap: () => context.push(
+                              '/read/${entry.book.id}/${entry.progress.format.toLowerCase()}'),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [

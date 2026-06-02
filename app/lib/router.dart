@@ -13,6 +13,7 @@ import 'screens/genres_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/reader/reader_screen.dart';
 import 'screens/reading_queue_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/search_screen.dart';
@@ -169,6 +170,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           final bookId =
               int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
           return BookDetailScreen(bookId: bookId);
+        },
+      ),
+      GoRoute(
+        path: '/read/:id/:format',
+        builder: (context, state) {
+          final bookId =
+              int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
+          final format = state.pathParameters['format'] ?? 'epub';
+          return ReaderScreen(bookId: bookId, format: format);
         },
       ),
       GoRoute(
