@@ -16,6 +16,7 @@ dependencies:
   cached_network_image: ^3.4.0
   package_info_plus: ^8.0.0
   in_app_review: ^2.0.9
+  open_filex: ^4.5.0
   google_fonts: ^6.2.0
   shimmer: ^3.0.0
   url_launcher: ^6.3.0
