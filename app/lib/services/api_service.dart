@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/author.dart';
 import '../models/book.dart';
 import '../models/library.dart';
@@ -365,6 +368,36 @@ class ReadingProgress {
       percent: (json['percent'] as num?)?.toDouble() ?? 0.0,
       updatedAt: json['updated_at'] as String? ?? '',
     );
+  }
+}
+
+/// The user's reading-state snapshot from GET /me/reading-states.
+/// [inProgress] maps book id -> furthest-read fraction (0..1); [completed] is
+/// the set of finished book ids.
+class ReadingStates {
+  final Map<String, double> inProgress;
+  final Set<String> completed;
+
+  const ReadingStates({required this.inProgress, required this.completed});
+
+  factory ReadingStates.fromJson(Map<String, dynamic> json) {
+    final progressList = (json['in_progress'] as List?) ?? const [];
+    final completedList = (json['completed'] as List?) ?? const [];
+    return ReadingStates(
+      inProgress: {
+        for (final entry in progressList)
+          (entry as Map<String, dynamic>)['book_id'].toString():
+              (entry['percent'] as num?)?.toDouble() ?? 0.0,
+      },
+      completed: {for (final id in completedList) id.toString()},
+    );
+  }
+
+  /// reading | finished | unread for a book id.
+  String statusFor(String bookId) {
+    if (completed.contains(bookId)) return 'finished';
+    if (inProgress.containsKey(bookId)) return 'reading';
+    return 'unread';
   }
 }
 
@@ -845,6 +878,59 @@ class ApiService {
       headers[key] = value;
     });
     return headers;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Book file download (for the readers)
+  // ---------------------------------------------------------------------------
+
+  /// Download a book's file for a given format to a local cache file and return
+  /// it. Auth + CF-Access headers are applied by the dio interceptor. If a
+  /// non-empty cached copy already exists it is reused (offline-friendly).
+  ///
+  /// [onProgress] receives (received, total) byte counts; total is -1 until the
+  /// server sends Content-Length.
+  Future<File> downloadBookFile(
+    int bookId,
+    String format, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final cacheDir = await getTemporaryDirectory();
+    final safeFormat = format.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final file = File('${cacheDir.path}/book_${bookId}_$safeFormat.$safeFormat');
+
+    if (await file.exists() && await file.length() > 0) {
+      onProgress?.call(await file.length(), await file.length());
+      return file;
+    }
+
+    await _dio.download(
+      '/books/$bookId/file',
+      file.path,
+      queryParameters: {'format': format},
+      onReceiveProgress: onProgress,
+    );
+    return file;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reading status (read / unread)
+  // ---------------------------------------------------------------------------
+
+  /// Mark a book as read for the current user.
+  Future<void> markBookRead(String bookId) async {
+    await _request(() => _dio.post('/books/$bookId/complete'));
+  }
+
+  /// Mark a book unread — also clears saved progress so it reopens from start.
+  Future<void> markBookUnread(String bookId) async {
+    await _request(() => _dio.delete('/books/$bookId/complete'));
+  }
+
+  /// The user's reading-state snapshot: in-progress percents + finished IDs.
+  Future<ReadingStates> getReadingStates() async {
+    final response = await _request(() => _dio.get('/me/reading-states'));
+    return ReadingStates.fromJson(response as Map<String, dynamic>);
   }
 
   // ---------------------------------------------------------------------------

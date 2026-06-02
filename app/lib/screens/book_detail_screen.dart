@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../models/book.dart';
 import '../providers/book_provider.dart';
 import '../theme.dart';
@@ -130,12 +131,9 @@ class _BookDetailContent extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (book.formats.isNotEmpty)
+                    if (_readableFormats(book).isNotEmpty)
                       ElevatedButton.icon(
-                        onPressed: () {
-                          // Open reader or download
-                          _showFormatPicker(context, ref, book);
-                        },
+                        onPressed: () => _startReading(context, book),
                         icon: const Icon(Icons.menu_book_rounded, size: 18),
                         label: const Text('Read'),
                       ),
@@ -204,6 +202,7 @@ class _BookDetailContent extends ConsumerWidget {
                 Text('Formats', style: theme.textTheme.titleSmall),
                 const SizedBox(height: 8),
                 ...book.formats.map((format) {
+                  final readable = _isReadable(format.kind);
                   return ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
@@ -216,12 +215,12 @@ class _BookDetailContent extends ConsumerWidget {
                     subtitle: format.size != null
                         ? Text(_formatFileSize(format.size!))
                         : null,
-                    trailing: IconButton(
-                      icon: const Icon(Icons.download_rounded, size: 20),
-                      onPressed: () {
-                        // Download via browser
-                      },
-                    ),
+                    trailing: readable
+                        ? const Icon(Icons.menu_book_rounded, size: 20)
+                        : null,
+                    onTap: readable
+                        ? () => _openReader(context, book.id, format.kind)
+                        : null,
                   );
                 }),
               ],
@@ -285,16 +284,48 @@ class _BookDetailContent extends ConsumerWidget {
     );
   }
 
-  void _showFormatPicker(BuildContext context, WidgetRef ref, Book book) {
-    if (book.formats.length == 1) {
-      // Single format — open directly
+  // Formats the in-app readers can open.
+  static const _readableKinds = {'epub', 'pdf', 'cbz', 'cbr', 'cb7'};
+
+  // Preference order when picking a default to read.
+  static const _formatPreference = ['epub', 'pdf', 'cbz', 'cbr', 'cb7'];
+
+  bool _isReadable(String kind) => _readableKinds.contains(kind.toLowerCase());
+
+  List<BookFormat> _readableFormats(Book book) =>
+      book.formats.where((f) => _isReadable(f.kind)).toList();
+
+  void _openReader(BuildContext context, int bookId, String format) {
+    context.push('/read/$bookId/${format.toLowerCase()}');
+  }
+
+  /// Open the best readable format directly; if several, let the user choose.
+  void _startReading(BuildContext context, Book book) {
+    final readable = _readableFormats(book);
+    if (readable.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No readable format for this book')),
+      );
+      return;
+    }
+    if (readable.length == 1) {
+      _openReader(context, book.id, readable.first.kind);
       return;
     }
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
-      builder: (context) {
-        final theme = Theme.of(context);
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        // Best format first.
+        readable.sort((a, b) {
+          int rank(String k) {
+            final i = _formatPreference.indexOf(k.toLowerCase());
+            return i < 0 ? 999 : i;
+          }
+
+          return rank(a.kind).compareTo(rank(b.kind));
+        });
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -305,7 +336,7 @@ class _BookDetailContent extends ConsumerWidget {
                 child: Text('Choose format',
                     style: theme.textTheme.titleSmall),
               ),
-              ...book.formats.map((format) {
+              ...readable.map((format) {
                 return ListTile(
                   leading: Icon(_formatIcon(format.kind)),
                   title: Text(format.kind.toUpperCase()),
@@ -313,8 +344,8 @@ class _BookDetailContent extends ConsumerWidget {
                       ? Text(_formatFileSize(format.size!))
                       : null,
                   onTap: () {
-                    Navigator.pop(context);
-                    // Open reader for this format
+                    Navigator.pop(sheetContext);
+                    _openReader(context, book.id, format.kind);
                   },
                 );
               }),
