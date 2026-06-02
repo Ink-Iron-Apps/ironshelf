@@ -49,14 +49,21 @@ jobs:
       - name: Create platform directories
         working-directory: app
         run: flutter create --org com.inknironapps --project-name ironshelf .
+      - name: Enable in-app install (REQUEST_INSTALL_PACKAGES)
+        working-directory: app
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
+            sed -i 's#\(<manifest[^>]*>\)#\1\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>#' "$MANIFEST"
+          fi
       - name: Get dependencies
         working-directory: app
         run: flutter pub get
       - name: Build APK
         working-directory: app
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --debug --no-tree-shake-icons
       - name: Upload APK
         uses: actions/upload-artifact@v5
         with:
           name: ironshelf-android
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/app/outputs/flutter-apk/app-debug.apk

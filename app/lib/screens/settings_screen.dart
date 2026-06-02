@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../providers/server_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/update_service.dart';
 import '../theme.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -24,6 +25,9 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          // Surfaces a sideload update when one is published (Android only).
+          const _UpdateCard(),
+
           // Account section
           _SectionHeader(title: 'Account'),
           if (authState.user != null)
@@ -375,6 +379,109 @@ class _VersionFooter extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Update card (Android sideload). Checks GitHub Releases on mount; shows a
+/// prominent card only when a newer app version is available, with in-app
+/// download + install. Hidden entirely when up to date or on other platforms.
+class _UpdateCard extends StatefulWidget {
+  const _UpdateCard();
+
+  @override
+  State<_UpdateCard> createState() => _UpdateCardState();
+}
+
+class _UpdateCardState extends State<_UpdateCard> {
+  AppUpdateInfo? _update;
+  bool _downloading = false;
+  double _progress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    try {
+      final update = await UpdateService.checkForUpdate();
+      if (mounted) setState(() => _update = update);
+    } catch (_) {
+      // Offline / rate-limited — just don't show the card.
+    }
+  }
+
+  Future<void> _install() async {
+    final update = _update;
+    if (update == null) return;
+    setState(() => _downloading = true);
+    try {
+      await UpdateService.downloadAndInstall(
+        update,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final update = _update;
+    if (update == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      color: theme.colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.system_update, color: theme.colorScheme.onPrimaryContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Update available',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w600,
+                      )),
+                  Text('Version ${update.version}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                      )),
+                  if (_downloading) ...[
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(value: _progress),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (!_downloading)
+              FilledButton(
+                onPressed: _install,
+                child: const Text('Update'),
+              )
+            else
+              Text('${(_progress * 100).round()}%',
+                  style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
+          ],
+        ),
+      ),
     );
   }
 }
