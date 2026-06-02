@@ -5,7 +5,6 @@ import '../providers/server_provider.dart';
 import '../services/api_service.dart';
 import '../widgets/error_state.dart';
 import '../widgets/genre_chip.dart';
-import '../widgets/loading_skeleton.dart';
 
 /// Provider for all genres.
 final allGenresProvider =

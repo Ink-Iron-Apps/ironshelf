@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../providers/browse_provider.dart';
 import '../widgets/book_card.dart';
 import '../widgets/error_state.dart';
-import '../widgets/loading_skeleton.dart';
 
 class SeriesDetailScreen extends ConsumerWidget {
   final int seriesId;

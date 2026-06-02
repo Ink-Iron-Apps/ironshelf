@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/library.dart';
-import '../services/api_service.dart';
 import 'server_provider.dart';
 
 /// Async provider for the libraries list.

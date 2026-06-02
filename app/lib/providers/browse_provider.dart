@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/author.dart';
 import '../models/book.dart';
-import '../models/series.dart';
 import '../services/api_service.dart';
 import 'server_provider.dart';
 

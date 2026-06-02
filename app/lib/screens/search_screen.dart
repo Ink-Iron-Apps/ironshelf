@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/search_provider.dart';
-import '../services/api_service.dart';
 import '../widgets/book_cover.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/error_state.dart';
