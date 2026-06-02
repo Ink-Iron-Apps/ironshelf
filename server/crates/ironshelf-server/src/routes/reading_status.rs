@@ -1,8 +1,10 @@
 //! Reading-status endpoints: per-user read / in-progress state and mark read/unread.
 //!
 //! Reading state is derived from two tables:
+//!
 //! - `reading_progress` (0 < percent < 1) => "in progress"
-//! - `completed_books`                      => "read / finished"
+//! - `completed_books` => "read / finished"
+//!
 //! A book in neither is "unread". The UI fetches a single snapshot and overlays
 //! it onto book cards, so this avoids per-card round trips.
 
