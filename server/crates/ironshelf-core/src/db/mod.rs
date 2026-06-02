@@ -2193,6 +2193,62 @@ impl IronshelfDb {
         Ok(())
     }
 
+    /// Clear all reading progress for a book (every format) for a user.
+    /// Used when marking a finished book unread so it reopens from the start.
+    pub async fn clear_reading_progress(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM reading_progress WHERE user_id = ? AND book_id = ?")
+            .bind(user_id)
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get all in-progress books for a user as (book_id, percent) pairs.
+    /// In progress = some format has 0 < percent < 1. The highest percent across
+    /// formats is reported. Ordered by most recently updated first.
+    pub async fn get_in_progress_states(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<(String, f64)>, DbError> {
+        let rows = sqlx::query(
+            "SELECT book_id, MAX(percent) AS percent, MAX(updated_at) AS updated_at \
+             FROM reading_progress \
+             WHERE user_id = ? AND percent > 0.0 AND percent < 1.0 \
+             GROUP BY book_id \
+             ORDER BY updated_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let book_id: String = row.get("book_id");
+                let percent: f64 = row.get("percent");
+                (book_id, percent)
+            })
+            .collect())
+    }
+
+    /// Get the IDs of every book a user has marked completed (all time).
+    pub async fn get_completed_book_ids(&self, user_id: &str) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query(
+            "SELECT book_id FROM completed_books WHERE user_id = ? ORDER BY completed_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(|row| row.get("book_id")).collect())
+    }
+
     /// Get completed books for a user in a given year (by completed_at timestamp).
     pub async fn get_completed_books(
         &self,

@@ -29,6 +29,7 @@ pub mod progress;
 pub mod ratings_reviews;
 pub mod reading_goals;
 pub mod reading_queue;
+pub mod reading_status;
 pub mod remote_access;
 pub mod search;
 pub mod series;
