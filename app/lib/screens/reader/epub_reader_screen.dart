@@ -144,6 +144,28 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     }
   }
 
+  Future<void> _addBookmark() async {
+    final cfi = _savedCfi;
+    if (cfi == null || cfi.isEmpty) return;
+    try {
+      await ref.read(apiServiceProvider).createBookmark(
+            widget.bookId.toString(),
+            locator: cfi,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bookmarked')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save bookmark')),
+        );
+      }
+    }
+  }
+
   Future<void> _persistPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_prefsFontKey, _fontSize);
@@ -308,6 +330,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               icon: const Icon(Icons.brightness_6),
               tooltip: 'Theme',
               onPressed: _cycleTheme,
+            ),
+            IconButton(
+              icon: const Icon(Icons.bookmark_add_outlined),
+              tooltip: 'Bookmark this spot',
+              onPressed: _addBookmark,
             ),
             IconButton(
               icon: const Icon(Icons.list),

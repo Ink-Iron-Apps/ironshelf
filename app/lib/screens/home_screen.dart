@@ -52,6 +52,7 @@ class HomeScreen extends ConsumerWidget {
                 ],
               ),
               actions: [
+                _NotificationBell(),
                 IconButton(
                   icon: const Icon(Icons.search),
                   onPressed: () => context.go('/search'),
@@ -473,6 +474,41 @@ class _OnboardingView extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// App-bar bell with an unread-count badge.
+class _NotificationBell extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.notifications_none_rounded),
+          onPressed: () => context.push('/notifications'),
+        ),
+        if (unread > 0)
+          Positioned(
+            top: 10,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+              child: Text(
+                unread > 99 ? '99+' : '$unread',
+                style: const TextStyle(color: Colors.white, fontSize: 9),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

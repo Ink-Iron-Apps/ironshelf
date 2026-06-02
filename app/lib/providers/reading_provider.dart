@@ -39,6 +39,66 @@ final readingStatesProvider = FutureProvider<ReadingStates>((ref) {
   return apiService.getReadingStates();
 });
 
+/// Ratings summary + the user's rating for a book.
+final bookRatingsProvider =
+    FutureProvider.family.autoDispose<BookRatings, String>((ref, bookId) {
+  return ref.read(apiServiceProvider).getBookRatings(bookId);
+});
+
+/// Reviews for a book.
+final bookReviewsProvider =
+    FutureProvider.family.autoDispose<List<Review>, String>((ref, bookId) {
+  return ref.read(apiServiceProvider).getBookReviews(bookId);
+});
+
+/// Author bio / dates / links.
+final authorInfoProvider =
+    FutureProvider.family.autoDispose<AuthorInfo, int>((ref, authorId) {
+  return ref.read(apiServiceProvider).getAuthorInfo(authorId);
+});
+
+/// The user's reading queue.
+final queueProvider =
+    FutureProvider.autoDispose<List<QueueItem>>((ref) {
+  return ref.read(apiServiceProvider).getQueue();
+});
+
+/// Yearly reading goal (nullable when unset).
+final readingGoalProvider =
+    FutureProvider.autoDispose<ReadingGoal?>((ref) {
+  return ref.read(apiServiceProvider).getReadingGoal();
+});
+
+/// Personal reading stats (/me/stats).
+final personalStatsProvider =
+    FutureProvider.autoDispose<Map<String, dynamic>>((ref) {
+  return ref.read(apiServiceProvider).getPersonalStats();
+});
+
+/// All notifications.
+final notificationsProvider =
+    FutureProvider.autoDispose<List<AppNotification>>((ref) {
+  return ref.read(apiServiceProvider).getNotifications();
+});
+
+/// Unread notification count (for the bell badge).
+final unreadNotificationCountProvider =
+    FutureProvider.autoDispose<int>((ref) {
+  return ref.read(apiServiceProvider).getUnreadNotificationCount();
+});
+
+/// All of the user's highlights across books.
+final allHighlightsProvider =
+    FutureProvider.autoDispose<List<HighlightEntry>>((ref) {
+  return ref.read(apiServiceProvider).getAllHighlights();
+});
+
+/// All of the user's bookmarks across books.
+final allBookmarksProvider =
+    FutureProvider.autoDispose<List<BookmarkEntry>>((ref) {
+  return ref.read(apiServiceProvider).getAllBookmarks();
+});
+
 /// Bookmarks for a specific book.
 final bookBookmarksProvider = FutureProvider.family
     .autoDispose<List<BookmarkEntry>, String>((ref, bookId) {

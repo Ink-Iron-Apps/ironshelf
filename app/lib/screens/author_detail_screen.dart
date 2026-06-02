@@ -1,7 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/browse_provider.dart';
+import '../providers/reading_provider.dart';
+import '../providers/server_provider.dart';
 import '../widgets/book_card.dart';
 import '../widgets/error_state.dart';
 import '../widgets/loading_skeleton.dart';
@@ -45,21 +49,9 @@ class AuthorDetailScreen extends ConsumerWidget {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Row(
                     children: [
-                      Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(32),
-                        ),
-                        child: Center(
-                          child: Text(
-                            _initials(authorDetail.author.name),
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              color: theme.colorScheme.onPrimaryContainer,
-                            ),
-                          ),
-                        ),
+                      _AuthorAvatar(
+                        authorId: authorId,
+                        initials: _initials(authorDetail.author.name),
                       ),
                       const SizedBox(width: 16),
                       Column(
@@ -82,6 +74,11 @@ class AuthorDetailScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+              ),
+
+              // Bio / dates / external links (lazy-loaded)
+              SliverToBoxAdapter(
+                child: _AuthorInfoSection(authorId: authorId),
               ),
 
               // Series section
@@ -172,5 +169,109 @@ class AuthorDetailScreen extends ConsumerWidget {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
     return trimmed[0].toUpperCase();
+  }
+}
+
+/// Circular author avatar — server-cached portrait over an initials fallback.
+class _AuthorAvatar extends ConsumerWidget {
+  final int authorId;
+  final String initials;
+  const _AuthorAvatar({required this.authorId, required this.initials});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final api = ref.read(apiServiceProvider);
+    return ClipOval(
+      child: Container(
+        width: 64,
+        height: 64,
+        color: theme.colorScheme.primaryContainer,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: Text(initials,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                  )),
+            ),
+            CachedNetworkImage(
+              imageUrl: api.authorPhotoUrl(authorId),
+              httpHeaders: api.authHeaders,
+              fit: BoxFit.cover,
+              fadeInDuration: const Duration(milliseconds: 200),
+              errorWidget: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Author biography, life dates, and external links — shown only when present.
+class _AuthorInfoSection extends ConsumerWidget {
+  final int authorId;
+  const _AuthorInfoSection({required this.authorId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final infoAsync = ref.watch(authorInfoProvider(authorId));
+
+    return infoAsync.maybeWhen(
+      orElse: () => const SizedBox.shrink(),
+      data: (info) {
+        if (!info.hasContent) return const SizedBox.shrink();
+        final dates = [info.birthDate, info.deathDate]
+            .where((d) => d != null && d.isNotEmpty)
+            .join(' – ');
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (dates.isNotEmpty)
+                Text(dates,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    )),
+              if (info.bio != null && info.bio!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(info.bio!,
+                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.5)),
+              ],
+              if (info.openlibraryUrl != null || info.wikipediaUrl != null) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    if (info.wikipediaUrl != null)
+                      OutlinedButton.icon(
+                        onPressed: () => launchUrl(
+                          Uri.parse(info.wikipediaUrl!),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        icon: const Icon(Icons.public, size: 16),
+                        label: const Text('Wikipedia'),
+                      ),
+                    if (info.openlibraryUrl != null)
+                      OutlinedButton.icon(
+                        onPressed: () => launchUrl(
+                          Uri.parse(info.openlibraryUrl!),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        icon: const Icon(Icons.menu_book_outlined, size: 16),
+                        label: const Text('Open Library'),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
   }
 }

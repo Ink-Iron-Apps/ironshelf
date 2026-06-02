@@ -958,6 +958,163 @@ class ApiService {
   }
 
   // ---------------------------------------------------------------------------
+  // Ratings & reviews
+  // ---------------------------------------------------------------------------
+
+  Future<BookRatings> getBookRatings(String bookId) async {
+    final response = await _request(() => _dio.get('/books/$bookId/ratings'));
+    return BookRatings.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<void> setBookRating(String bookId, int rating) async {
+    await _request(
+      () => _dio.post('/books/$bookId/ratings', data: {'rating': rating}),
+    );
+  }
+
+  Future<List<Review>> getBookReviews(String bookId) async {
+    final response = await _request(() => _dio.get('/books/$bookId/reviews'));
+    return (response as List)
+        .map((json) => Review.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Review> createReview(
+    String bookId, {
+    required String title,
+    required String body,
+    bool containsSpoilers = false,
+  }) async {
+    final response = await _request(
+      () => _dio.post('/books/$bookId/reviews', data: {
+        'title': title,
+        'body': body,
+        'contains_spoilers': containsSpoilers,
+      }),
+    );
+    return Review.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<void> updateReview(
+    String reviewId, {
+    required String title,
+    required String body,
+    bool containsSpoilers = false,
+  }) async {
+    await _request(
+      () => _dio.patch('/reviews/$reviewId', data: {
+        'title': title,
+        'body': body,
+        'contains_spoilers': containsSpoilers,
+      }),
+    );
+  }
+
+  Future<void> deleteReview(String reviewId) async {
+    await _request(() => _dio.delete('/reviews/$reviewId'));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reading queue
+  // ---------------------------------------------------------------------------
+
+  Future<List<QueueItem>> getQueue() async {
+    final response = await _request(() => _dio.get('/me/queue'));
+    return (response as List)
+        .map((json) => QueueItem.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> addToQueue(String bookId) async {
+    await _request(() => _dio.post('/me/queue', data: {'book_id': bookId}));
+  }
+
+  Future<void> removeFromQueue(String bookId) async {
+    await _request(() => _dio.delete('/me/queue/$bookId'));
+  }
+
+  Future<void> moveQueueItem(String bookId, String direction) async {
+    await _request(
+      () => _dio.patch('/me/queue/$bookId/move', data: {'direction': direction}),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Author info (bio / dates / links)
+  // ---------------------------------------------------------------------------
+
+  Future<AuthorInfo> getAuthorInfo(int authorId) async {
+    final response = await _request(() => _dio.get('/authors/$authorId/info'));
+    return AuthorInfo.fromJson(response as Map<String, dynamic>);
+  }
+
+  /// Author portrait URL (server-cached). Use with [authHeaders].
+  String authorPhotoUrl(int authorId) {
+    return '${_serverConfig?.serverUrl ?? ""}/api/v1/authors/$authorId/photo';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reading goal & personal stats
+  // ---------------------------------------------------------------------------
+
+  Future<ReadingGoal?> getReadingGoal({int? year}) async {
+    final response = await _request(
+      () => _dio.get('/me/reading-goal',
+          queryParameters: year != null ? {'year': year} : null),
+    );
+    if (response is Map<String, dynamic>) return ReadingGoal.fromJson(response);
+    return null;
+  }
+
+  Future<void> setReadingGoal(int year, int target) async {
+    await _request(
+      () => _dio.post('/me/reading-goal',
+          data: {'year': year, 'target': target}),
+    );
+  }
+
+  Future<Map<String, dynamic>> getPersonalStats() async {
+    final response = await _request(() => _dio.get('/me/stats'));
+    return response as Map<String, dynamic>;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notifications
+  // ---------------------------------------------------------------------------
+
+  Future<List<AppNotification>> getNotifications({
+    bool unreadOnly = false,
+    int limit = 50,
+  }) async {
+    final response = await _request(
+      () => _dio.get('/notifications', queryParameters: {
+        if (unreadOnly) 'unread': 'true',
+        'limit': limit,
+      }),
+    );
+    return (response as List)
+        .map((json) => AppNotification.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<int> getUnreadNotificationCount() async {
+    final response = await _request(() => _dio.get('/notifications/count'));
+    return ((response as Map<String, dynamic>)['unread'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    await _request(() => _dio.patch('/notifications/$notificationId/read'));
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    await _request(() => _dio.post('/notifications/read-all'));
+  }
+
+  Future<void> deleteNotification(String notificationId) async {
+    await _request(() => _dio.delete('/notifications/$notificationId'));
+  }
+
+  // ---------------------------------------------------------------------------
   // Continue reading
   // ---------------------------------------------------------------------------
 
@@ -1029,6 +1186,13 @@ class ApiService {
         () => _dio.delete('/books/$bookId/bookmarks/$bookmarkId'));
   }
 
+  Future<List<BookmarkEntry>> getAllBookmarks() async {
+    final response = await _request(() => _dio.get('/me/bookmarks'));
+    return (response as List)
+        .map((json) => BookmarkEntry.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
   // ---------------------------------------------------------------------------
   // Highlights
   // ---------------------------------------------------------------------------
@@ -1064,6 +1228,19 @@ class ApiService {
 
   Future<void> deleteHighlight(String highlightId) async {
     await _request(() => _dio.delete('/highlights/$highlightId'));
+  }
+
+  Future<void> updateHighlight(
+    String highlightId, {
+    String? color,
+    String? note,
+  }) async {
+    await _request(
+      () => _dio.patch('/highlights/$highlightId', data: {
+        if (color != null) 'color': color,
+        if (note != null) 'note': note,
+      }),
+    );
   }
 
   Future<List<HighlightEntry>> getAllHighlights({
@@ -1273,5 +1450,189 @@ class ApiService {
         errorCode: errorCode,
       );
     }
+  }
+}
+
+/// Aggregate + personal rating for a book.
+class BookRatings {
+  final double? average;
+  final int count;
+  final int? userRating;
+
+  const BookRatings({this.average, required this.count, this.userRating});
+
+  factory BookRatings.fromJson(Map<String, dynamic> json) {
+    return BookRatings(
+      average: (json['average'] as num?)?.toDouble(),
+      count: (json['count'] as num?)?.toInt() ?? 0,
+      userRating: (json['user_rating'] as num?)?.toInt(),
+    );
+  }
+}
+
+/// A user review on a book.
+class Review {
+  final String id;
+  final String userId;
+  final String username;
+  final String bookId;
+  final String title;
+  final String body;
+  final bool containsSpoilers;
+  final String createdAt;
+  final String updatedAt;
+
+  const Review({
+    required this.id,
+    required this.userId,
+    required this.username,
+    required this.bookId,
+    required this.title,
+    required this.body,
+    required this.containsSpoilers,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory Review.fromJson(Map<String, dynamic> json) {
+    return Review(
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString() ?? '',
+      username: json['username'] as String? ?? '',
+      bookId: json['book_id']?.toString() ?? '',
+      title: json['title'] as String? ?? '',
+      body: json['body'] as String? ?? '',
+      containsSpoilers: json['contains_spoilers'] == true,
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
+    );
+  }
+}
+
+/// One entry in the reading queue.
+class QueueItem {
+  final String id;
+  final String bookId;
+  final int position;
+  final String title;
+  final List<String> authors;
+  final bool hasCover;
+  final String? addedAt;
+
+  const QueueItem({
+    required this.id,
+    required this.bookId,
+    required this.position,
+    required this.title,
+    required this.authors,
+    required this.hasCover,
+    this.addedAt,
+  });
+
+  factory QueueItem.fromJson(Map<String, dynamic> json) {
+    return QueueItem(
+      id: json['id']?.toString() ?? json['book_id']?.toString() ?? '',
+      bookId: json['book_id']?.toString() ?? '',
+      position: (json['position'] as num?)?.toInt() ?? 0,
+      title: json['title'] as String? ?? 'Untitled',
+      authors: (json['authors'] as List?)?.map((a) => a.toString()).toList() ??
+          const [],
+      hasCover: json['has_cover'] == true,
+      addedAt: json['added_at'] as String?,
+    );
+  }
+}
+
+/// Author biography + external links (server-cached).
+class AuthorInfo {
+  final String? name;
+  final String? bio;
+  final String? birthDate;
+  final String? deathDate;
+  final String? openlibraryUrl;
+  final String? wikipediaUrl;
+
+  const AuthorInfo({
+    this.name,
+    this.bio,
+    this.birthDate,
+    this.deathDate,
+    this.openlibraryUrl,
+    this.wikipediaUrl,
+  });
+
+  bool get hasContent =>
+      (bio != null && bio!.isNotEmpty) ||
+      birthDate != null ||
+      deathDate != null ||
+      openlibraryUrl != null ||
+      wikipediaUrl != null;
+
+  factory AuthorInfo.fromJson(Map<String, dynamic> json) {
+    return AuthorInfo(
+      name: json['name'] as String?,
+      bio: json['bio'] as String?,
+      birthDate: json['birth_date'] as String?,
+      deathDate: json['death_date'] as String?,
+      openlibraryUrl: json['openlibrary_url'] as String?,
+      wikipediaUrl: json['wikipedia_url'] as String?,
+    );
+  }
+}
+
+/// Yearly reading goal + progress.
+class ReadingGoal {
+  final int year;
+  final int target;
+  final int completed;
+  final double percent;
+
+  const ReadingGoal({
+    required this.year,
+    required this.target,
+    required this.completed,
+    required this.percent,
+  });
+
+  factory ReadingGoal.fromJson(Map<String, dynamic> json) {
+    return ReadingGoal(
+      year: (json['year'] as num?)?.toInt() ?? 0,
+      target: (json['target'] as num?)?.toInt() ?? 0,
+      completed: (json['completed'] as num?)?.toInt() ?? 0,
+      percent: (json['percent'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+/// A user notification.
+class AppNotification {
+  final String id;
+  final String title;
+  final String message;
+  final String type;
+  final bool isRead;
+  final String? link;
+  final String createdAt;
+
+  const AppNotification({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.isRead,
+    this.link,
+    required this.createdAt,
+  });
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) {
+    return AppNotification(
+      id: json['id']?.toString() ?? '',
+      title: json['title'] as String? ?? '',
+      message: json['message'] as String? ?? '',
+      type: json['notification_type'] as String? ?? 'info',
+      isRead: json['is_read'] == true,
+      link: json['link'] as String?,
+      createdAt: json['created_at'] as String? ?? '',
+    );
   }
 }
