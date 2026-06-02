@@ -7,7 +7,9 @@ import '../providers/reading_provider.dart';
 import '../providers/server_provider.dart';
 import '../services/review_service.dart';
 import '../theme.dart';
+import '../providers/collection_provider.dart';
 import '../widgets/book_cover.dart';
+import '../widgets/book_social.dart';
 import '../widgets/error_state.dart';
 import '../widgets/rating_stars.dart';
 
@@ -127,11 +129,15 @@ class _BookDetailContent extends ConsumerWidget {
                   ),
                 const SizedBox(height: 8),
                 RatingStars(rating: book.rating, starSize: 20),
+                const SizedBox(height: 8),
+                BookRatingsBar(bookId: book.id.toString()),
                 const SizedBox(height: 16),
 
                 // Action buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
                   children: [
                     if (_readableFormats(book).isNotEmpty)
                       ElevatedButton.icon(
@@ -139,13 +145,18 @@ class _BookDetailContent extends ConsumerWidget {
                         icon: const Icon(Icons.menu_book_rounded, size: 18),
                         label: const Text('Read'),
                       ),
-                    const SizedBox(width: 8),
                     _MarkReadButton(bookId: book.id),
-                    const SizedBox(width: 8),
+                    Consumer(
+                      builder: (context, ref, _) => OutlinedButton.icon(
+                        onPressed: () => _addToQueue(context, ref, book.id),
+                        icon: const Icon(Icons.playlist_play, size: 18),
+                        label: const Text('Queue'),
+                      ),
+                    ),
                     OutlinedButton.icon(
                       onPressed: () => _showAddToCollectionSheet(context),
                       icon: const Icon(Icons.playlist_add, size: 18),
-                      label: const Text('Add to collection'),
+                      label: const Text('Collection'),
                     ),
                   ],
                 ),
@@ -283,6 +294,14 @@ class _BookDetailContent extends ConsumerWidget {
             ),
           ),
 
+        // Reviews
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+            child: BookReviewsSection(bookId: book.id.toString()),
+          ),
+        ),
+
         const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
       ],
     );
@@ -361,9 +380,29 @@ class _BookDetailContent extends ConsumerWidget {
     );
   }
 
+  Future<void> _addToQueue(BuildContext context, WidgetRef ref, int bookId) async {
+    try {
+      await ref.read(apiServiceProvider).addToQueue(bookId.toString());
+      ref.invalidate(queueProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to your reading queue')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not add to queue: $e')));
+      }
+    }
+  }
+
   void _showAddToCollectionSheet(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Collection feature coming soon')),
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) =>
+          _CollectionPickerSheet(bookId: book.id.toString()),
     );
   }
 
@@ -493,6 +532,104 @@ class _MarkReadButton extends ConsumerWidget {
       onPressed: toggle,
       icon: Icon(isFinished ? Icons.undo : Icons.check, size: 18),
       label: Text(isFinished ? 'Mark unread' : 'Mark read'),
+    );
+  }
+}
+
+/// Bottom sheet to add a book to one of the user's collections (or create one).
+class _CollectionPickerSheet extends ConsumerWidget {
+  final String bookId;
+  const _CollectionPickerSheet({required this.bookId});
+
+  Future<void> _add(
+    BuildContext context,
+    WidgetRef ref,
+    String collectionId,
+    String name,
+  ) async {
+    try {
+      await ref.read(apiServiceProvider).addBookToCollection(collectionId, bookId);
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Added to "$name"')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not add: $e')));
+      }
+    }
+  }
+
+  Future<void> _createAndAdd(BuildContext context, WidgetRef ref) async {
+    final nameController = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New collection'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, nameController.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await ref
+        .read(collectionsProvider.notifier)
+        .createCollection(name: name);
+    // Find the new collection and add the book to it.
+    final collections = ref.read(collectionsProvider).valueOrNull ?? [];
+    final created = collections.where((c) => c.name == name);
+    if (created.isNotEmpty && context.mounted) {
+      await _add(context, ref, created.first.id, name);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final collectionsAsync = ref.watch(collectionsProvider);
+    return SafeArea(
+      child: collectionsAsync.when(
+        loading: () => const Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('Could not load collections: $e'),
+        ),
+        data: (collections) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: const Text('New collection'),
+              onTap: () => _createAndAdd(context, ref),
+            ),
+            const Divider(height: 1),
+            ...collections.map((collection) => ListTile(
+                  leading: const Icon(Icons.collections_bookmark_outlined),
+                  title: Text(collection.name),
+                  onTap: () =>
+                      _add(context, ref, collection.id, collection.name),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -52,13 +52,16 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ListTile(
-            leading: const Icon(Icons.vpn_key_outlined),
-            title: const Text('API Keys'),
-            subtitle: const Text('Manage API keys for third-party apps'),
+            leading: const Icon(Icons.format_quote_rounded),
+            title: const Text('Highlights & Bookmarks'),
             trailing: const Icon(Icons.chevron_right, size: 20),
-            onTap: () {
-              // Navigate to API keys management
-            },
+            onTap: () => context.go('/annotations'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications_none_rounded),
+            title: const Text('Notifications'),
+            trailing: const Icon(Icons.chevron_right, size: 20),
+            onTap: () => context.go('/notifications'),
           ),
 
           const Divider(),

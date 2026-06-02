@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cloud_provider.dart';
 import 'providers/server_provider.dart';
+import 'screens/annotations_screen.dart';
 import 'screens/author_detail_screen.dart';
 import 'screens/authors_screen.dart';
 import 'screens/book_detail_screen.dart';
@@ -14,6 +15,7 @@ import 'screens/genre_detail_screen.dart';
 import 'screens/genres_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
+import 'screens/notifications_screen.dart';
 import 'screens/reader/reader_screen.dart';
 import 'screens/reading_queue_screen.dart';
 import 'screens/search_screen.dart';
@@ -187,6 +189,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/stats',
         builder: (context, state) => const StatsScreen(),
+      ),
+      GoRoute(
+        path: '/annotations',
+        builder: (context, state) => const AnnotationsScreen(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsScreen(),
       ),
     ],
   );
