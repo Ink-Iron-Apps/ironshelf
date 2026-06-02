@@ -7,7 +7,7 @@ const IronshelfCbzReader = (() => {
 
   const HOSTED = !!window.IRONSHELF_HOSTED;
   const SERVER_URL = HOSTED ? (localStorage.getItem('ironshelf_server_url') || '') : '';
-  const API = (HOSTED && SERVER_URL) ? `/api/v1` : '/api/v1';
+  const API = (HOSTED && SERVER_URL) ? `${SERVER_URL}/api/v1` : '/api/v1';
 
   function withToken(url) {
     const token = localStorage.getItem("ironshelf_server_token");
