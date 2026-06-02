@@ -384,8 +384,9 @@ const IronshelfReader = (() => {
   }
 
   // --- Core: Open ---
-  async function open(bookId) {
+  async function open(bookId, format) {
     currentBookId = bookId;
+    const fileFormat = (format || 'epub').toUpperCase();
 
     // Create container
     containerElement = document.createElement('div');
@@ -412,7 +413,7 @@ const IronshelfReader = (() => {
       // the URL directly makes epub.js treat it as an unpacked directory (it
       // fetches META-INF/container.xml relative to the path) and hang; an
       // ArrayBuffer forces archive mode and carries the session cookie.
-      const bookUrl = withToken(`${API}/books/${bookId}/file?format=EPUB`);
+      const bookUrl = withToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
       const bookResponse = await fetch(bookUrl, { credentials: 'same-origin' });
       if (!bookResponse.ok) {
         throw new Error(`Failed to download book (${bookResponse.status})`);

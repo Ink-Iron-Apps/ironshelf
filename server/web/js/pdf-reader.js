@@ -691,8 +691,9 @@ const IronshelfPdfReader = (() => {
   }
 
   // --- Core: Open ---
-  async function open(bookId) {
+  async function open(bookId, format) {
     currentBookId = bookId;
+    const fileFormat = (format || 'pdf').toUpperCase();
     currentPage = 1;
     totalPages = 0;
     renderedPages.clear();
@@ -714,7 +715,7 @@ const IronshelfPdfReader = (() => {
       await loadPdfJs();
 
       const savedProgress = await fetchProgress(bookId);
-      const fileUrl = withToken(`${API}/books/${bookId}/file?format=PDF`);
+      const fileUrl = withToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
 
       const loadingTask = pdfjsLib.getDocument(fileUrl);
       currentDocument = await loadingTask.promise;

@@ -895,7 +895,7 @@
       author: () => renderAuthor(parsed.params.id),
       series: () => renderSeries(parsed.params.id),
       book: () => renderBook(parsed.params.id),
-      read: () => openReader(parsed.params.id, detectReaderFormat(parsed.params.sub) || 'epub'),
+      read: () => openReader(parsed.params.id, detectReaderFormat(parsed.params.sub) || 'epub', parsed.params.sub),
       collections: renderCollections,
       collection: () => renderCollectionDetail(parsed.params.id),
       settings: () => renderSettings(parsed.params.id),
@@ -954,7 +954,7 @@
     return null;
   }
 
-  async function openReader(bookId, format) {
+  async function openReader(bookId, format, actualFormat) {
     const readerFormat = format || 'epub';
     const entry = readerScripts[readerFormat];
     if (!entry) {
@@ -967,7 +967,7 @@
       await loadReaderScript(readerFormat);
       const reader = window[entry.global];
       if (reader) {
-        reader.open(bookId);
+        reader.open(bookId, actualFormat || readerFormat);
       } else {
         toast('Reader module failed to initialize', 'error');
         navigateTo(`/book/${bookId}`);
