@@ -228,6 +228,13 @@ pub async fn rate_limit_api(
 
     let client_address = extract_client_address(&request, limiter.trust_proxy_headers);
 
+    // Loopback = local access or the co-located Cloudflare tunnel (which makes
+    // every request appear to come from 127.0.0.1). Don't throttle those — it
+    // would collapse all tunneled users into one shared bucket.
+    if client_address.is_loopback() {
+        return next.run(request).await;
+    }
+
     match limiter.check(client_address).await {
         Ok(()) => next.run(request).await,
         Err(retry_after_seconds) => {
