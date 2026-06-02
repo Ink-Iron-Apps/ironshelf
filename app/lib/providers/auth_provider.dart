@@ -53,6 +53,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   ApiService get _api => _ref.read(apiServiceProvider);
 
+  /// Re-evaluate auth from the currently stored server credentials. Call after
+  /// connecting to a server via the cloud.
+  Future<void> reload() => _checkAuth();
+
   Future<void> _checkAuth() async {
     final serverConfig = _ref.read(serverConfigProvider);
     if (serverConfig == null ||
