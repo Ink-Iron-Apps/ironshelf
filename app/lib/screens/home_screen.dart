@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/collection_provider.dart';
 import '../providers/library_provider.dart';
 import '../providers/reading_provider.dart';
+import '../providers/server_provider.dart';
 import '../theme.dart';
 import '../widgets/book_cover.dart';
 import '../widgets/empty_state.dart';
@@ -17,6 +19,15 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+
+    // First-run onboarding: when the server has no libraries yet, guide the
+    // user to set one up rather than showing a blank home.
+    final librariesAsync = ref.watch(librariesProvider);
+    final hasNoLibraries =
+        librariesAsync.maybeWhen(data: (list) => list.isEmpty, orElse: () => false);
+    if (hasNoLibraries) {
+      return const _OnboardingView();
+    }
 
     return Scaffold(
       body: RefreshIndicator(
@@ -369,5 +380,99 @@ class _LibrariesSection extends ConsumerWidget {
       default:
         return Icons.menu_book_rounded;
     }
+  }
+}
+
+/// First-launch experience shown on Home when the connected server has no
+/// libraries yet. Guides the user to set one up (done in the web dashboard,
+/// since the app is a reader client) and to pull-to-refresh once they have.
+class _OnboardingView extends ConsumerWidget {
+  const _OnboardingView();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final serverConfig = ref.watch(serverConfigProvider);
+
+    Future<void> openDashboard() async {
+      final url = serverConfig?.serverUrl;
+      if (url == null) return;
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Icon(Icons.shelves, color: IronshelfColors.tealBright, size: 24),
+            const SizedBox(width: 10),
+            Text('Ironshelf',
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(color: IronshelfColors.paper)),
+          ],
+        ),
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async => ref.invalidate(librariesProvider),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Icon(Icons.auto_stories_rounded,
+                            size: 48,
+                            color: theme.colorScheme.onPrimaryContainer),
+                      ),
+                      const SizedBox(height: 24),
+                      Text('Welcome to Ironshelf',
+                          style: theme.textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Your books live on your server. Add a Calibre library '
+                        'or a folder in the Ironshelf web dashboard, then pull '
+                        'down to refresh — your library appears here.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 28),
+                      if (serverConfig != null)
+                        FilledButton.icon(
+                          onPressed: openDashboard,
+                          icon: const Icon(Icons.open_in_new, size: 18),
+                          label: const Text('Open Web Dashboard'),
+                        ),
+                      const SizedBox(height: 12),
+                      TextButton.icon(
+                        onPressed: () => ref.invalidate(librariesProvider),
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('Refresh'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
