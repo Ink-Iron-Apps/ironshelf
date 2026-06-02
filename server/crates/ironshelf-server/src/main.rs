@@ -1,5 +1,6 @@
 //! ironshelf-server — Axum HTTP server for the Ironshelf ebook platform.
 
+mod access;
 mod auth;
 mod config;
 mod error;

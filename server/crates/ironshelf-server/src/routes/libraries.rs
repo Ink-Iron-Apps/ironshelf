@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::Json;
+use axum::{Extension, Json};
 use ironshelf_core::calibre::CalibreSource;
 use ironshelf_core::model::{LibraryType, SourceKind};
 use ironshelf_core::scan::FolderSource;
@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::access::{accessible_library_ids, library_allowed};
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::{AppState, LibrarySource, LoadedLibrary};
 
@@ -55,10 +57,15 @@ pub struct CreateLibraryResponse {
 }
 
 /// GET /api/v1/libraries
-pub async fn list_libraries(State(state): State<AppState>) -> Json<Vec<LibrarySummary>> {
+pub async fn list_libraries(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Json<Vec<LibrarySummary>> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let summaries = libraries
         .iter()
+        .filter(|library| library_allowed(&allowed, &library.id))
         .map(|library| LibrarySummary {
             id: library.id.clone(),
             name: library.name.clone(),
@@ -72,8 +79,13 @@ pub async fn list_libraries(State(state): State<AppState>) -> Json<Vec<LibrarySu
 /// GET /api/v1/libraries/:id
 pub async fn get_library(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(library_id): Path<String>,
 ) -> Result<Json<LibraryDetail>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
+    if !library_allowed(&allowed, &library_id) {
+        return Err(AppError::not_found("library"));
+    }
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
