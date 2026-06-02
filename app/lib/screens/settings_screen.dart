@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -101,6 +103,11 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.bug_report_outlined),
             title: const Text('Report a Bug'),
             onTap: () => _reportBug(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.security_outlined),
+            title: const Text('Report Security Issue'),
+            onTap: () => _reportSecurity(context),
           ),
 
           const Divider(),
@@ -248,23 +255,47 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  /// App version + OS line appended to support emails so we don't have to ask.
+  Future<String> _diagnosticFooter() async {
+    final info = await PackageInfo.fromPlatform();
+    final os = '${Platform.operatingSystem} ${Platform.operatingSystemVersion}';
+    return '\n\n---\nIronshelf v${info.version} (${info.buildNumber})\n$os';
+  }
+
   Future<void> _sendFeedback(BuildContext context) async {
+    final footer = await _diagnosticFooter();
     final uri = Uri(
       scheme: 'mailto',
       path: 'support@inknironapps.com',
       queryParameters: {
         'subject': 'Ironshelf feedback',
+        'body': 'Your feedback:$footer',
       },
     );
     await launchUrl(uri);
   }
 
   Future<void> _reportBug(BuildContext context) async {
+    final footer = await _diagnosticFooter();
     final uri = Uri(
       scheme: 'mailto',
       path: 'support@inknironapps.com',
       queryParameters: {
         'subject': 'Ironshelf bug report',
+        'body': 'What happened:\n\nSteps to reproduce:\n$footer',
+      },
+    );
+    await launchUrl(uri);
+  }
+
+  Future<void> _reportSecurity(BuildContext context) async {
+    final footer = await _diagnosticFooter();
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'security@inknironapps.com',
+      queryParameters: {
+        'subject': 'Ironshelf security report',
+        'body': 'Describe the vulnerability:$footer',
       },
     );
     await launchUrl(uri);

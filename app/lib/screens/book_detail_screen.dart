@@ -5,6 +5,7 @@ import '../models/book.dart';
 import '../providers/book_provider.dart';
 import '../providers/reading_provider.dart';
 import '../providers/server_provider.dart';
+import '../services/review_service.dart';
 import '../theme.dart';
 import '../widgets/book_cover.dart';
 import '../widgets/error_state.dart';
@@ -475,6 +476,8 @@ class _MarkReadButton extends ConsumerWidget {
           await api.markBookUnread(bookId.toString());
         } else {
           await api.markBookRead(bookId.toString());
+          // Finishing a book is a positive moment — maybe ask for a review.
+          await ReviewService.recordPositiveMoment();
         }
         ref.invalidate(readingStatesProvider);
       } catch (e) {

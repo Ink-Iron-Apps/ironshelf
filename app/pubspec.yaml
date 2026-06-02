@@ -15,6 +15,7 @@ dependencies:
   shared_preferences: ^2.3.0
   cached_network_image: ^3.4.0
   package_info_plus: ^8.0.0
+  in_app_review: ^2.0.9
   google_fonts: ^6.2.0
   shimmer: ^3.0.0
   url_launcher: ^6.3.0
