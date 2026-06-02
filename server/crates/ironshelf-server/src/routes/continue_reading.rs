@@ -48,6 +48,7 @@ pub async fn continue_reading(
     .await
     .map_err(AppError::internal)?;
 
+    let allowed = crate::access::accessible_library_ids(&state, &user).await;
     let libraries = state.libraries.read().await;
     let mut entries: Vec<ContinueReadingEntry> = Vec::new();
 
@@ -66,6 +67,9 @@ pub async fn continue_reading(
         // Search across all libraries for this book.
         let mut found_book: Option<Book> = None;
         for library in libraries.iter() {
+            if !crate::access::library_allowed(&allowed, &library.id) {
+                continue;
+            }
             match library.source.book(book_id_numeric).await {
                 Ok(Some(book)) => {
                     found_book = Some(book);

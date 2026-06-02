@@ -5,6 +5,8 @@ use serde::Deserialize;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
+use crate::access::{accessible_library_ids, library_allowed};
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -56,11 +58,16 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<(u64, u64)> 
 /// GET /api/v1/books/:id/cover — serve cover image
 pub async fn get_cover(
     State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<i64>,
 ) -> Result<Response, AppError> {
+    let allowed = accessible_library_ids(&state, &user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         if let Ok(Some(book)) = library.source.book(book_id).await {
             if !book.has_cover {
                 return Err(AppError::not_found("cover"));
@@ -97,13 +104,18 @@ pub async fn get_cover(
 /// that need to seek within files without downloading entirely.
 pub async fn get_file(
     State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<i64>,
     Query(query): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
+    let allowed = accessible_library_ids(&state, &user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         if let Ok(Some(book)) = library.source.book(book_id).await {
             // Find requested format (default to first available)
             let format = if let Some(ref requested) = query.format {

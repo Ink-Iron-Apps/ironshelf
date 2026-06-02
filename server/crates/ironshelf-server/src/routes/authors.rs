@@ -4,6 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
+use crate::access::{accessible_library_ids, library_allowed};
 use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::pagination::{Paginated, PaginationParams, SortDirection, SortParams};
@@ -47,9 +48,14 @@ pub struct ListAuthorsQuery {
 /// Supports pagination (?page=&per_page=) and sorting (?sort=name|sort_name|book_count|series_count&dir=asc|desc).
 pub async fn list_authors(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(library_id): Path<String>,
     Query(query): Query<ListAuthorsQuery>,
 ) -> Result<Json<Paginated<ironshelf_core::model::Author>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
+    if !library_allowed(&allowed, &library_id) {
+        return Err(AppError::not_found("library"));
+    }
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
@@ -102,11 +108,16 @@ pub async fn list_authors(
 /// GET /api/v1/authors/:id
 pub async fn get_author(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<AuthorDetail>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let authors = library.source.authors().await?;
 
         if let Some(author) = authors.into_iter().find(|a| a.id == author_id) {
@@ -128,11 +139,16 @@ pub async fn get_author(
 /// GET /api/v1/authors/:id/series
 pub async fn author_series(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<Vec<ironshelf_core::model::Series>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let series = library.source.series_by_author(author_id).await?;
 
         if !series.is_empty() {
@@ -146,11 +162,16 @@ pub async fn author_series(
 /// GET /api/v1/authors/:id/standalone
 pub async fn author_standalone(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(author_id): Path<i64>,
 ) -> Result<Json<Vec<ironshelf_core::model::Book>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.standalone_books(author_id).await?;
 
         if !books.is_empty() {

@@ -9,6 +9,7 @@ use axum::Extension;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::access::{accessible_library_ids, library_allowed};
 use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -117,6 +118,7 @@ fn matches_query(value: &str, query: &str) -> bool {
 /// GET /api/v1/search — unified search across all libraries.
 pub async fn global_search(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Query(params): Query<SearchParams>,
 ) -> Result<Json<SearchResponse>, AppError> {
     let query = params.q.trim().to_string();
@@ -143,6 +145,7 @@ pub async fn global_search(
     let include_series = params.search_type == "all" || params.search_type == "series";
     let include_books = params.search_type == "all" || params.search_type == "book";
 
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     let mut author_results: Vec<(RelevanceRank, AuthorResult)> = Vec::new();
@@ -153,6 +156,9 @@ pub async fn global_search(
 
     // Authors and series always use in-memory search (small datasets, no index needed).
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         if include_authors {
             let authors: Vec<Author> = library.source.authors().await.unwrap_or_default();
             for author in authors {
@@ -218,8 +224,10 @@ pub async fn global_search(
                     used_index = true;
                     // Tantivy returns a page of results; we don't have the true total
                     // from the index, so we report the page size as a lower bound.
-                    total_books_count = index_results.len();
                     for result in index_results {
+                        if !library_allowed(&allowed, &result.library_id) {
+                            continue;
+                        }
                         book_results.push(BookResult {
                             id: result.book_id,
                             title: result.title,
@@ -230,6 +238,8 @@ pub async fn global_search(
                             score: Some(result.score),
                         });
                     }
+                    // Lower-bound total after access filtering.
+                    total_books_count = book_results.len();
                 }
                 Err(search_error) => {
                     tracing::warn!(
@@ -244,6 +254,9 @@ pub async fn global_search(
         if !used_index {
             let mut ranked_books: Vec<(RelevanceRank, BookResult)> = Vec::new();
             for library in libraries.iter() {
+                if !library_allowed(&allowed, &library.id) {
+                    continue;
+                }
                 let all_books: Vec<Book> = library.source.all_books().await.unwrap_or_default();
                 for book in all_books {
                     let title_matches = matches_query(&book.title, &query);

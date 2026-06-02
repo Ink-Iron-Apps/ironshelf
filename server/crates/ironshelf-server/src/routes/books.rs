@@ -27,11 +27,16 @@ pub struct ListBooksQuery {
 /// GET /api/v1/books/:id
 pub async fn get_book(
     State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
     Path(book_id): Path<i64>,
 ) -> Result<Json<ironshelf_core::model::Book>, AppError> {
+    let allowed = crate::access::accessible_library_ids(&state, &user).await;
     let libraries = state.libraries.read().await;
 
     for library in libraries.iter() {
+        if !crate::access::library_allowed(&allowed, &library.id) {
+            continue;
+        }
         if let Ok(Some(book)) = library.source.book(book_id).await {
             return Ok(Json(book));
         }
@@ -53,6 +58,10 @@ pub async fn list_books(
     Path(library_id): Path<String>,
     Query(query): Query<ListBooksQuery>,
 ) -> Result<Json<Paginated<ironshelf_core::model::Book>>, AppError> {
+    let allowed = crate::access::accessible_library_ids(&state, &user).await;
+    if !crate::access::library_allowed(&allowed, &library_id) {
+        return Err(AppError::not_found("library"));
+    }
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()

@@ -4,10 +4,12 @@
 //! Tags in Calibre and dc:subject in epub serve as genres.
 
 use axum::extract::{Path, Query, State};
-use axum::Json;
+use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::access::{accessible_library_ids, library_allowed};
+use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::pagination::{Paginated, PaginationParams, SortDirection, SortParams};
 use crate::state::AppState;
@@ -33,8 +35,13 @@ pub struct GenreBooksQuery {
 /// List all unique genres/tags in this library with book counts, sorted alphabetically.
 pub async fn list_library_genres(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(library_id): Path<String>,
 ) -> Result<Json<Vec<GenreEntry>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
+    if !library_allowed(&allowed, &library_id) {
+        return Err(AppError::not_found("library"));
+    }
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
@@ -56,9 +63,14 @@ pub async fn list_library_genres(
 /// Books in a specific genre within a library, paginated + sortable.
 pub async fn list_library_genre_books(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path((library_id, genre_name)): Path<(String, String)>,
     Query(query): Query<GenreBooksQuery>,
 ) -> Result<Json<Paginated<ironshelf_core::model::Book>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
+    if !library_allowed(&allowed, &library_id) {
+        return Err(AppError::not_found("library"));
+    }
     let libraries = state.libraries.read().await;
     let library = libraries
         .iter()
@@ -87,11 +99,16 @@ pub async fn list_library_genre_books(
 /// All genres across ALL libraries, merged and deduped, with total book counts.
 pub async fn list_all_genres(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<GenreEntry>>, AppError> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut merged_genres: HashMap<String, i64> = HashMap::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let genre_counts = library.source.genres().await.unwrap_or_default();
         for (name, count) in genre_counts {
             *merged_genres.entry(name).or_insert(0) += count;
@@ -113,6 +130,7 @@ pub async fn list_all_genres(
 /// Genre detail: books across all libraries, with pagination + sorting.
 pub async fn get_genre_books(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(genre_name): Path<String>,
     Query(query): Query<GenreBooksQuery>,
 ) -> Result<Json<Paginated<ironshelf_core::model::Book>>, AppError> {
@@ -120,10 +138,14 @@ pub async fn get_genre_books(
         .unwrap_or_else(|_| genre_name.clone().into())
         .into_owned();
 
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut all_books = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.books_by_genre(&decoded_genre_name).await.unwrap_or_default();
         all_books.extend(books);
     }
@@ -148,17 +170,22 @@ pub async fn get_genre_books(
 /// Authors who have books tagged with this genre, across all libraries.
 pub async fn genre_authors(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(genre_name): Path<String>,
 ) -> Result<Json<Vec<ironshelf_core::model::Author>>, AppError> {
     let decoded_genre_name = urlencoding::decode(&genre_name)
         .unwrap_or_else(|_| genre_name.clone().into())
         .into_owned();
 
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut author_ids_seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut genre_authors_list: Vec<ironshelf_core::model::Author> = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.books_by_genre(&decoded_genre_name).await.unwrap_or_default();
         if books.is_empty() {
             continue;
@@ -190,17 +217,22 @@ pub async fn genre_authors(
 /// Series that have books tagged with this genre, across all libraries.
 pub async fn genre_series(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(genre_name): Path<String>,
 ) -> Result<Json<Vec<ironshelf_core::model::Series>>, AppError> {
     let decoded_genre_name = urlencoding::decode(&genre_name)
         .unwrap_or_else(|_| genre_name.clone().into())
         .into_owned();
 
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut series_ids_seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut genre_series_list: Vec<ironshelf_core::model::Series> = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.books_by_genre(&decoded_genre_name).await.unwrap_or_default();
         if books.is_empty() {
             continue;
