@@ -242,7 +242,7 @@ class _CollectionsSection extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
                           onTap: () =>
-                              context.go('/collection/${collection.id}'),
+                              context.push('/collection/${collection.id}'),
                           borderRadius: BorderRadius.circular(12),
                           child: Container(
                             width: 160,
@@ -362,7 +362,7 @@ class _LibrariesSection extends ConsumerWidget {
                       ),
                     ),
                     trailing: const Icon(Icons.chevron_right, size: 20),
-                    onTap: () => context.go('/library/${library.id}'),
+                    onTap: () => context.push('/library/${library.id}'),
                   )),
             ],
           ),

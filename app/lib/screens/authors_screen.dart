@@ -112,7 +112,7 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
                     final author = visible[index];
                     return AuthorTile(
                       author: author,
-                      onTap: () => context.go('/author/${author.id}'),
+                      onTap: () => context.push('/author/${author.id}'),
                     );
                   },
                 ),

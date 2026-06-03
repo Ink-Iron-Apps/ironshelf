@@ -46,7 +46,7 @@ class CollectionsScreen extends ConsumerWidget {
                 margin: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
                   onTap: () =>
-                      context.go('/collection/${collection.id}'),
+                      context.push('/collection/${collection.id}'),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
                     padding: const EdgeInsets.all(16),

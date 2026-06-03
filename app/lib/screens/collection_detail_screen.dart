@@ -134,7 +134,7 @@ class CollectionDetailScreen extends ConsumerWidget {
                         subtitle: Text('#${entry.position + 1} in collection'),
                         trailing: const Icon(Icons.chevron_right, size: 20),
                         onTap: bookId != null
-                            ? () => context.go('/book/$bookId')
+                            ? () => context.push('/book/$bookId')
                             : null,
                       );
                     },

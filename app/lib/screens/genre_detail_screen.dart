@@ -79,7 +79,7 @@ class _GenreDetailScreenState extends ConsumerState<GenreDetailScreen> {
                     final book = books[index];
                     return BookCard(
                       book: book,
-                      onTap: () => context.go('/book/${book.id}'),
+                      onTap: () => context.push('/book/${book.id}'),
                     );
                   },
                 ),

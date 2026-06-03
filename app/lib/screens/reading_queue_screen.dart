@@ -88,7 +88,7 @@ class ReadingQueueScreen extends ConsumerWidget {
                         PopupMenuItem(value: 'remove', child: Text('Remove')),
                       ],
                     ),
-                    onTap: () => context.go('/book/${item.bookId}'),
+                    onTap: () => context.push('/book/${item.bookId}'),
                   ),
                 );
               },

@@ -76,7 +76,7 @@ class SearchScreen extends ConsumerWidget {
                               '${author.bookCount} books · ${author.seriesCount} series',
                             ),
                             onTap: () =>
-                                context.go('/author/${author.id}'),
+                                context.push('/author/${author.id}'),
                           )),
                     ],
 
@@ -106,7 +106,7 @@ class SearchScreen extends ConsumerWidget {
                             subtitle: Text(
                                 '${series.bookCount} books'),
                             onTap: () =>
-                                context.go('/series/${series.id}'),
+                                context.push('/series/${series.id}'),
                           )),
                     ],
 
@@ -136,7 +136,7 @@ class SearchScreen extends ConsumerWidget {
                                   )
                                 : null,
                             onTap: () =>
-                                context.go('/book/${book.id}'),
+                                context.push('/book/${book.id}'),
                           )),
                     ],
                   ],

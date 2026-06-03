@@ -96,7 +96,7 @@ class AuthorDetailScreen extends ConsumerWidget {
                       final series = authorDetail.series[index];
                       return SeriesTile(
                         series: series,
-                        onTap: () => context.go('/series/${series.id}'),
+                        onTap: () => context.push('/series/${series.id}'),
                       );
                     },
                     childCount: authorDetail.series.length,
@@ -136,7 +136,7 @@ class AuthorDetailScreen extends ConsumerWidget {
                             return BookCard(
                               book: book,
                               onTap: () =>
-                                  context.go('/book/${book.id}'),
+                                  context.push('/book/${book.id}'),
                             );
                           },
                           childCount: books.length,
