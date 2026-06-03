@@ -255,6 +255,78 @@ export async function handleUpdateServer(
 }
 
 // ---------------------------------------------------------------------------
+// POST /servers/:id/heartbeat — server liveness ping (authed by claim_token)
+//
+// The self-hosted server calls this on a timer. Unlike the user-facing routes,
+// this is authenticated by the server's own claim_token (Bearer), so it can run
+// without a logged-in user. Bumps last_seen_at (and version/url if provided).
+// ---------------------------------------------------------------------------
+
+interface HeartbeatBody {
+  version?: string;
+  url?: string;
+}
+
+export async function handleHeartbeat(
+  request: Request,
+  env: Env,
+  serverId: string,
+): Promise<Response> {
+  const authHeader = request.headers.get('Authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    return jsonResponse({ error: 'Missing claim token' }, 401);
+  }
+
+  const server = await env.DB.prepare(
+    'SELECT id, claim_token FROM servers WHERE id = ?',
+  )
+    .bind(serverId)
+    .first<{ id: string; claim_token: string }>();
+
+  if (!server) {
+    return jsonResponse({ error: 'Server not found' }, 404);
+  }
+  if (server.claim_token !== token) {
+    return jsonResponse({ error: 'Invalid claim token' }, 401);
+  }
+
+  let body: HeartbeatBody = {};
+  try {
+    body = (await request.json()) as HeartbeatBody;
+  } catch {
+    // Empty/invalid body is fine — heartbeat still bumps last_seen_at.
+  }
+
+  const now = new Date().toISOString();
+  const updates: string[] = ['last_seen_at = ?', 'is_verified = 1'];
+  const values: (string | null)[] = [now];
+
+  if (body.version) {
+    updates.push('version = ?');
+    values.push(body.version);
+  }
+  if (body.url) {
+    try {
+      const parsedUrl = new URL(body.url);
+      if (['http:', 'https:'].includes(parsedUrl.protocol)) {
+        updates.push('url = ?');
+        values.push(parsedUrl.origin + parsedUrl.pathname.replace(/\/+$/, ''));
+      }
+    } catch {
+      // ignore bad url
+    }
+  }
+
+  values.push(serverId);
+  await env.DB.prepare(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`)
+    .bind(...values)
+    .run();
+
+  return jsonResponse({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
 // DELETE /servers/:id — unclaim a server
 // ---------------------------------------------------------------------------
 

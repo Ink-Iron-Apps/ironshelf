@@ -25,6 +25,7 @@ import {
   handleListSharedServers,
   handleUpdateServer,
   handleDeleteServer,
+  handleHeartbeat,
 } from './routes/servers';
 import {
   handleShareServer,
@@ -131,6 +132,11 @@ async function routeRequest(
   const membersMatch = path.match(/^\/servers\/([a-f0-9-]+)\/members$/);
   if (membersMatch && method === 'GET') {
     return handleListMembers(request, env, membersMatch[1]);
+  }
+
+  const heartbeatMatch = path.match(/^\/servers\/([a-f0-9-]+)\/heartbeat$/);
+  if (heartbeatMatch && method === 'POST') {
+    return handleHeartbeat(request, env, heartbeatMatch[1]);
   }
 
   // --- Connection / token routes ---

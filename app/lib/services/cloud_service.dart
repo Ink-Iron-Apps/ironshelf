@@ -33,6 +33,16 @@ class CloudServer {
   }
 
   bool get isOwned => permissions == null;
+
+  /// Online if the server has sent a cloud heartbeat recently. The server beats
+  /// every ~60s; allow 3 minutes to tolerate a missed beat or clock skew.
+  bool get isOnline {
+    final seen = lastSeenAt;
+    if (seen == null) return false;
+    final lastSeen = DateTime.tryParse(seen);
+    if (lastSeen == null) return false;
+    return DateTime.now().toUtc().difference(lastSeen.toUtc()).inSeconds < 180;
+  }
 }
 
 /// Token + URL issued by the cloud for connecting to a specific server.

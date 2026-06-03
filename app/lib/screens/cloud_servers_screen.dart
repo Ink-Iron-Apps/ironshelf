@@ -132,14 +132,34 @@ class _CloudServersScreenState extends ConsumerState<CloudServersScreen> {
               itemBuilder: (context, index) {
                 final server = servers[index];
                 final connecting = _connectingId == server.id;
+                final online = server.isOnline;
                 return ListTile(
-                  leading: Icon(
-                    server.isOwned ? Icons.dns_rounded : Icons.share_rounded,
-                    color: theme.colorScheme.primary,
+                  leading: Stack(
+                    children: [
+                      Icon(
+                        server.isOwned ? Icons.dns_rounded : Icons.share_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: online ? Colors.green : theme.colorScheme.outline,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: theme.colorScheme.surface, width: 1.5),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   title: Text(server.name),
                   subtitle: Text(
                     [
+                      online ? 'Online' : 'Offline',
                       if (server.version != null) 'v${server.version}',
                       if (!server.isOwned) server.permissions ?? 'shared',
                     ].join(' · '),

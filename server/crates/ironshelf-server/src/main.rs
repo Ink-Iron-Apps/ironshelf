@@ -182,6 +182,9 @@ async fn main() -> anyhow::Result<()> {
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
     scheduler::start(app_state.clone());
 
+    // Heartbeat to the cloud so it can report this server as online.
+    spawn_cloud_heartbeat(app_state.clone());
+
     // Initialize rate limiters and spawn background cleanup tasks.
     let api_rate_limiter = middleware::rate_limit::RateLimiter::api_tier()
         .with_trust_proxy_headers(config.trust_proxy_headers);
@@ -734,6 +737,44 @@ async fn main() -> anyhow::Result<()> {
 
 /// If the server is claimed to Ironshelf Cloud, update the stored server URL
 /// so cloud routing points to the current tunnel/public address.
+/// Periodically ping the cloud so it can report this server as online. A no-op
+/// until the server is claimed (cloud config present); re-checks each tick so
+/// claiming at runtime starts heartbeats without a restart.
+pub(crate) fn spawn_cloud_heartbeat(application_state: AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            ticker.tick().await;
+            let db = &application_state.ironshelf_db;
+            let server_id = match db.get_cloud_config("server_id").await {
+                Ok(Some(value)) => value,
+                _ => continue,
+            };
+            let cloud_service_url = match db.get_cloud_config("cloud_service_url").await {
+                Ok(Some(value)) => value,
+                _ => continue,
+            };
+            let claim_token = match db.get_cloud_config("claim_token").await {
+                Ok(Some(value)) => value,
+                _ => continue,
+            };
+
+            let heartbeat_url = format!(
+                "{}/servers/{}/heartbeat",
+                cloud_service_url.trim_end_matches('/'),
+                server_id
+            );
+            let _ = application_state
+                .http_client
+                .post(&heartbeat_url)
+                .bearer_auth(&claim_token)
+                .json(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
+                .send()
+                .await;
+        }
+    });
+}
+
 pub(crate) async fn update_cloud_server_url(application_state: &AppState, new_public_url: &str) {
     let server_id = match application_state
         .ironshelf_db
