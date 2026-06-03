@@ -1008,9 +1008,24 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
         Err(_) => "disconnected",
     };
 
+    // Stable per-install identity so the cloud can recognize this server across
+    // changing (e.g. rotating tunnel) URLs and avoid creating duplicate entries.
+    let instance_id = match state.ironshelf_db.get_cloud_config("instance_id").await {
+        Ok(Some(id)) => id,
+        _ => {
+            let new_id = uuid::Uuid::new_v4().to_string();
+            let _ = state
+                .ironshelf_db
+                .set_cloud_config("instance_id", &new_id)
+                .await;
+            new_id
+        }
+    };
+
     Json(json!({
         "status": "healthy",
         "version": env!("CARGO_PKG_VERSION"),
+        "instance_id": instance_id,
         "uptime_seconds": uptime_seconds,
         "libraries_loaded": libraries_loaded,
         "database": database_status,

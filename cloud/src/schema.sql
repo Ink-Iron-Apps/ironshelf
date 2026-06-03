@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS servers (
     is_verified INTEGER DEFAULT 0,
     last_seen_at TEXT,
     version TEXT,
+    instance_id TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
