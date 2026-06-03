@@ -50,22 +50,16 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
   // Normalize URL: strip trailing slash
   const normalizedUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/+$/, '');
 
-  // Check if this URL is already claimed. The same owner re-claiming is allowed
-  // (re-adopt: refresh the claim token) — this makes reconnecting after an
-  // unclaim work, since unclaim only clears local state on the server itself.
-  const existingServer = await env.DB.prepare(
-    'SELECT id, owner_id FROM servers WHERE url = ?',
-  )
-    .bind(normalizedUrl)
-    .first<{ id: string; owner_id: string }>();
-
-  if (existingServer && existingServer.owner_id !== user.id) {
-    return jsonResponse({ error: 'This server URL is already claimed by another user' }, 409);
-  }
+  // Idempotent migration: a server's stable instance_id lets us recognize the
+  // same physical server across changing (rotating-tunnel) URLs.
+  await env.DB.prepare('ALTER TABLE servers ADD COLUMN instance_id TEXT')
+    .run()
+    .catch(() => {});
 
   // Verify the server is reachable by hitting its health endpoint
   let isReachable = false;
   let serverVersion: string | null = null;
+  let instanceId: string | null = null;
   try {
     const healthResponse = await fetch(`${normalizedUrl}/health`, {
       method: 'GET',
@@ -75,8 +69,12 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
     if (healthResponse.ok) {
       isReachable = true;
       try {
-        const healthData = await healthResponse.json() as { version?: string };
+        const healthData = await healthResponse.json() as {
+          version?: string;
+          instance_id?: string;
+        };
         serverVersion = healthData.version ?? null;
+        instanceId = healthData.instance_id ?? null;
       } catch {
         // Health endpoint returned non-JSON — still reachable
       }
@@ -85,18 +83,41 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
     // Server not reachable — we still allow claiming but mark as unverified
   }
 
+  // Find an existing entry for this server. Prefer the stable instance_id (so a
+  // new tunnel URL updates the same server instead of creating a duplicate);
+  // fall back to URL match for servers/older builds without an instance_id.
+  let existingServer: { id: string; owner_id: string } | null = null;
+  if (instanceId) {
+    existingServer = await env.DB.prepare(
+      'SELECT id, owner_id FROM servers WHERE instance_id = ?',
+    )
+      .bind(instanceId)
+      .first<{ id: string; owner_id: string }>();
+  }
+  if (!existingServer) {
+    existingServer = await env.DB.prepare(
+      'SELECT id, owner_id FROM servers WHERE url = ?',
+    )
+      .bind(normalizedUrl)
+      .first<{ id: string; owner_id: string }>();
+  }
+
+  if (existingServer && existingServer.owner_id !== user.id) {
+    return jsonResponse({ error: 'This server is already claimed by another user' }, 409);
+  }
+
   const claimToken = generateToken(48);
   const lastSeen = isReachable ? new Date().toISOString() : null;
 
   let serverId: string;
   if (existingServer) {
-    // Re-adopt: issue a fresh claim token and refresh metadata.
+    // Re-adopt: refresh URL (it may have changed), token, and metadata.
     serverId = existingServer.id;
     await env.DB.prepare(
-      `UPDATE servers SET name = ?, claim_token = ?, is_verified = ?, version = ?, last_seen_at = ?
+      `UPDATE servers SET name = ?, url = ?, claim_token = ?, is_verified = ?, version = ?, last_seen_at = ?, instance_id = COALESCE(?, instance_id)
        WHERE id = ?`,
     )
-      .bind(server_name.trim(), claimToken, isReachable ? 1 : 0, serverVersion, lastSeen, serverId)
+      .bind(server_name.trim(), normalizedUrl, claimToken, isReachable ? 1 : 0, serverVersion, lastSeen, instanceId, serverId)
       .run();
     // Ensure the owner still has an access row.
     await env.DB.prepare(
@@ -108,10 +129,10 @@ export async function handleClaimServer(request: Request, env: Env): Promise<Res
   } else {
     serverId = generateId();
     await env.DB.prepare(
-      `INSERT INTO servers (id, owner_id, name, url, claim_token, is_verified, version, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO servers (id, owner_id, name, url, claim_token, is_verified, version, last_seen_at, instance_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(serverId, user.id, server_name.trim(), normalizedUrl, claimToken, isReachable ? 1 : 0, serverVersion, lastSeen)
+      .bind(serverId, user.id, server_name.trim(), normalizedUrl, claimToken, isReachable ? 1 : 0, serverVersion, lastSeen, instanceId)
       .run();
     await env.DB.prepare(
       `INSERT INTO server_access (server_id, user_id, permissions, granted_by)
