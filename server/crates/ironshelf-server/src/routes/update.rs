@@ -14,8 +14,17 @@ use crate::auth::AuthUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
+/// List endpoint (newest first). We can't use `/releases/latest` because the
+/// same repo also publishes the Flutter app under `app-v*` tags; the server must
+/// only consider its own releases.
 const GITHUB_RELEASES_URL: &str =
-    "https://api.github.com/repos/LightWraith8268/ironshelf/releases/latest";
+    "https://api.github.com/repos/LightWraith8268/ironshelf/releases?per_page=30";
+
+/// Whether a release tag belongs to the server (e.g. `v1.2.3`) rather than the
+/// app (`app-v0.1.0`).
+fn is_server_release_tag(tag: &str) -> bool {
+    tag.starts_with('v')
+}
 
 /// Current server version baked in at compile time.
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -249,12 +258,34 @@ async fn fetch_latest_release(state: &AppState) -> Result<GitHubRelease, AppErro
         )));
     }
 
-    response
-        .json::<GitHubRelease>()
+    let releases = response
+        .json::<Vec<GitHubRelease>>()
         .await
         .map_err(|parse_error| {
-            AppError::Internal(format!("Failed to parse GitHub release: {parse_error}"))
-        })
+            AppError::Internal(format!("Failed to parse GitHub releases: {parse_error}"))
+        })?;
+
+    // Only the server's own releases (skip the app's `app-v*` releases).
+    let mut server_releases: Vec<GitHubRelease> = releases
+        .into_iter()
+        .filter(|release| is_server_release_tag(&release.tag_name))
+        .collect();
+
+    if server_releases.is_empty() {
+        return Err(AppError::Internal(
+            "No server releases found on GitHub".to_string(),
+        ));
+    }
+
+    // Prefer the newest release that actually carries this platform's binary;
+    // otherwise fall back to the newest server release (index 0).
+    let artifact_name = platform_artifact_name();
+    let chosen = server_releases
+        .iter()
+        .position(|release| release.assets.iter().any(|asset| asset.name == artifact_name))
+        .unwrap_or(0);
+
+    Ok(server_releases.swap_remove(chosen))
 }
 
 /// Compare two semver version strings. Returns `true` if `latest` is newer than `current`.
