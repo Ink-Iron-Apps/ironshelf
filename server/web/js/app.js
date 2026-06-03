@@ -2114,7 +2114,7 @@
   // --- Library Detail (Authors) ---
 
   let librarySearchQuery = '';
-  let librarySortField = 'name';
+  let librarySortField = 'sort_name';
   let librarySortDirection = 'asc';
   let libraryPage = 1;
   let libraryScrollObserver = null;
@@ -2292,7 +2292,8 @@
         ${renderToolbar({
           searchPlaceholder: 'Search authors...',
           sortOptions: [
-            { value: 'name', label: 'Name' },
+            { value: 'sort_name', label: 'Last name' },
+            { value: 'name', label: 'First name' },
             { value: 'book_count', label: 'Book Count' },
           ],
           currentSort: librarySortField,
