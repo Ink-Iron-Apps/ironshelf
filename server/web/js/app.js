@@ -3840,13 +3840,15 @@
         methodPanelHtml = `
           <div class="remote-access-status">
             <div class="remote-access-status-header">
-              <span class="remote-access-indicator remote-access-connecting"></span>
-              <strong>Manual Mode</strong>
+              <span class="remote-access-indicator ${status.public_url ? 'remote-access-connected' : 'remote-access-connecting'}"></span>
+              <strong>Manual / own tunnel</strong>
             </div>
             <p class="form-hint" style="margin-top:var(--space-2)">
-              You are managing port forwarding or reverse proxy externally.
-              Configure your router or reverse proxy to forward traffic to this server's port.
+              Use this if you run your own Cloudflare named tunnel, reverse proxy, or port-forwarding. Enter the public URL this server is reachable at — Ironshelf reports it to the cloud (and keeps it fresh) but doesn't launch anything.
             </p>
+            <label class="form-label" for="manual-url-input" style="margin-top:var(--space-3)">Public URL</label>
+            <input type="text" class="form-input" id="manual-url-input" placeholder="https://ironshelf.example.com" value="${escapeHtml(status.public_url || '')}">
+            <button class="btn btn-primary btn-sm" id="manual-url-save-btn" style="margin-top:var(--space-3)">${icon('check', 14)} Save URL</button>
           </div>
         `;
       } else {
@@ -4080,6 +4082,28 @@
       } catch (startError) {
         toast(startError.message || 'Failed to start tunnel', 'error');
         loadRemoteAccessCard();
+      }
+    });
+
+    document.getElementById('manual-url-save-btn')?.addEventListener('click', async () => {
+      const url = document.getElementById('manual-url-input')?.value.trim();
+      if (!url) {
+        toast('Enter a public URL', 'error');
+        return;
+      }
+      const saveButton = document.getElementById('manual-url-save-btn');
+      saveButton.disabled = true;
+      try {
+        const result = await apiPost('/server/remote-access/manual-url', { url });
+        if (result.ok) {
+          toast('Public URL saved and reported to cloud', 'success');
+        } else {
+          toast(result.error || 'Failed to save URL', 'error');
+        }
+        loadRemoteAccessCard();
+      } catch (saveError) {
+        toast(saveError.message || 'Failed to save URL', 'error');
+        if (saveButton) saveButton.disabled = false;
       }
     });
 

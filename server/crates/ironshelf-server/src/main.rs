@@ -646,6 +646,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/remote-access/tunnel/stop",
             axum::routing::post(routes::remote_access::stop_tunnel),
+        )
+        .route(
+            "/api/v1/server/remote-access/manual-url",
+            axum::routing::post(routes::remote_access::set_manual_url),
         );
 
     let protected_routes = Router::new()

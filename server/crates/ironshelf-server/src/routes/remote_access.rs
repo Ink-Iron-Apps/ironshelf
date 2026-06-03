@@ -340,6 +340,46 @@ pub async fn start_tunnel(
 }
 
 /// `POST /api/v1/server/remote-access/tunnel/stop` — stop the Cloudflare Quick Tunnel.
+/// Body for setting a manually-managed public URL (own tunnel / reverse proxy).
+#[derive(Debug, serde::Deserialize)]
+pub struct ManualUrlRequest {
+    pub url: String,
+}
+
+/// `POST /api/v1/server/remote-access/manual-url` — record a public URL the user
+/// manages themselves (their own named tunnel, reverse proxy, etc.). Ironshelf
+/// does NOT launch anything; it just stores the URL and reports it to the cloud
+/// (and the heartbeat keeps it fresh).
+pub async fn set_manual_url(
+    State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Json(request_body): Json<ManualUrlRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !auth_user.is_owner {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let trimmed = request_body.url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Ok(Json(json!({ "ok": false, "error": "URL must not be empty" })));
+    }
+    let normalized = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+
+    let _ = application_state
+        .ironshelf_db
+        .set_cloud_config("remote_access_method", "manual")
+        .await;
+
+    // Report to the cloud now; persists public_url so the heartbeat re-sends it.
+    crate::update_cloud_server_url(&application_state, &normalized).await;
+
+    Ok(Json(json!({ "ok": true, "public_url": normalized, "error": null })))
+}
+
 pub async fn stop_tunnel(
     State(application_state): State<AppState>,
     axum::Extension(auth_user): axum::Extension<AuthUser>,
