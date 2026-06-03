@@ -892,16 +892,34 @@ class ApiService {
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
     ));
-    final response = await dio.post(
-      '/auth/cloud-login',
-      data: {'cloud_token': serverAccessToken},
-    );
-    final data = response.data as Map<String, dynamic>;
-    final sessionId = data['session_id'] as String?;
-    if (sessionId == null || sessionId.isEmpty) {
-      throw const ApiException('Server did not return a session');
+    try {
+      final response = await dio.post(
+        '/auth/cloud-login',
+        data: {'cloud_token': serverAccessToken},
+      );
+      final data = response.data as Map<String, dynamic>;
+      final sessionId = data['session_id'] as String?;
+      if (sessionId == null || sessionId.isEmpty) {
+        throw const ApiException('Server did not return a session');
+      }
+      return sessionId;
+    } on DioException catch (dioError) {
+      final status = dioError.response?.statusCode;
+      if (status != null) {
+        // Reached the server but it rejected the login (e.g. not on a version
+        // that supports cloud login, or token expired).
+        throw ApiException(
+          'Server responded $status at $serverUrl. It may be on an older '
+          'version — update it and try again.',
+          statusCode: status,
+        );
+      }
+      // Never reached the server at all.
+      throw ApiException(
+        "Couldn't reach $serverUrl. Make sure the server is running and its "
+        'remote-access tunnel is up.',
+      );
     }
-    return sessionId;
   }
 
   // ---------------------------------------------------------------------------

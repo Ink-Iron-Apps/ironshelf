@@ -764,11 +764,19 @@ pub(crate) fn spawn_cloud_heartbeat(application_state: AppState) {
                 cloud_service_url.trim_end_matches('/'),
                 server_id
             );
+
+            // Include the current public URL (if known) so the cloud copy stays
+            // correct even when the tunnel URL rotates.
+            let mut body = serde_json::json!({ "version": env!("CARGO_PKG_VERSION") });
+            if let Ok(Some(public_url)) = db.get_cloud_config("public_url").await {
+                body["url"] = serde_json::Value::String(public_url);
+            }
+
             let _ = application_state
                 .http_client
                 .post(&heartbeat_url)
                 .bearer_auth(&claim_token)
-                .json(&serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
+                .json(&body)
                 .send()
                 .await;
         }
@@ -803,20 +811,34 @@ pub(crate) async fn update_cloud_server_url(application_state: &AppState, new_pu
         _ => return,
     };
 
-    let update_url = format!("{}/api/v1/servers/{}", cloud_service_url.trim_end_matches('/'), server_id);
+    // Remember the current public URL so the periodic heartbeat keeps the cloud
+    // copy fresh even if the tunnel URL rotates.
+    let _ = application_state
+        .ironshelf_db
+        .set_cloud_config("public_url", new_public_url)
+        .await;
+
+    // Push it now via the heartbeat endpoint (claim-token authed, no /api/v1
+    // prefix on the cloud worker, field name `url`).
+    let heartbeat_url = format!(
+        "{}/servers/{}/heartbeat",
+        cloud_service_url.trim_end_matches('/'),
+        server_id
+    );
 
     match application_state
         .http_client
-        .patch(&update_url)
+        .post(&heartbeat_url)
         .bearer_auth(&claim_token)
-        .json(&serde_json::json!({ "public_url": new_public_url }))
+        .json(&serde_json::json!({
+            "url": new_public_url,
+            "version": env!("CARGO_PKG_VERSION"),
+        }))
         .send()
         .await
     {
         Ok(response) if response.status().is_success() => {
-            tracing::info!(
-                "updated cloud server URL to {new_public_url}"
-            );
+            tracing::info!("updated cloud server URL to {new_public_url}");
         }
         Ok(response) => {
             tracing::warn!(
@@ -825,9 +847,7 @@ pub(crate) async fn update_cloud_server_url(application_state: &AppState, new_pu
             );
         }
         Err(request_error) => {
-            tracing::warn!(
-                "failed to update cloud server URL: {request_error}"
-            );
+            tracing::warn!("failed to update cloud server URL: {request_error}");
         }
     }
 }
