@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../providers/cloud_provider.dart';
 import '../providers/server_provider.dart';
+import '../services/api_service.dart';
 import '../services/cloud_service.dart';
 import '../theme.dart';
 
@@ -60,8 +61,10 @@ class _CloudServersScreenState extends ConsumerState<CloudServersScreen> {
       }
     } on CloudException catch (e) {
       _showError(e.message);
+    } on ApiException catch (e) {
+      _showError(e.message);
     } catch (e) {
-      _showError('Could not reach "${server.name}". Is it online?');
+      _showError('Could not connect to "${server.name}": $e');
     } finally {
       if (mounted) setState(() => _connectingId = null);
     }
