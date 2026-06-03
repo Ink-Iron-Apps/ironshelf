@@ -485,6 +485,20 @@ const IronshelfPdfReader = (() => {
     document.getElementById('pdf-prev-btn')?.addEventListener('click', () => goToPage(currentPage - 1));
     document.getElementById('pdf-next-btn')?.addEventListener('click', () => goToPage(currentPage + 1));
 
+    // Tap the left/right quarter of the page to turn pages.
+    const pdfViewport = document.getElementById('pdf-viewport');
+    pdfViewport?.addEventListener('click', (event) => {
+      // Ignore clicks that land on toolbar/controls bubbling up.
+      if (event.target.closest('.pdf-toolbar, .pdf-sidebar')) return;
+      const rect = pdfViewport.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      if (x < rect.width * 0.25) {
+        goToPage(currentPage - 1);
+      } else if (x > rect.width * 0.75) {
+        goToPage(currentPage + 1);
+      }
+    });
+
     const pageInput = document.getElementById('pdf-page-input');
     if (pageInput) {
       pageInput.addEventListener('change', () => {
