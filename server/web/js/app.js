@@ -1147,7 +1147,7 @@
 
   // --- Search + Sort Toolbar ---
 
-  function renderToolbar({ searchPlaceholder = 'Search...', sortOptions = [], currentSort = '', currentDirection = 'asc', onSearch, onSort }) {
+  function renderToolbar({ searchPlaceholder = 'Search...', searchValue = '', sortOptions = [], currentSort = '', currentDirection = 'asc', onSearch, onSort }) {
     const sortOptionsHtml = sortOptions.map(opt =>
       `<option value="${opt.value}" ${opt.value === currentSort ? 'selected' : ''}>${escapeHtml(opt.label)}</option>`
     ).join('');
@@ -1157,7 +1157,7 @@
         <div class="toolbar-left">
           <div class="search-bar">
             <span class="search-icon">${Icons.search}</span>
-            <input type="search" placeholder="${escapeHtml(searchPlaceholder)}" aria-label="Search" id="toolbar-search">
+            <input type="search" placeholder="${escapeHtml(searchPlaceholder)}" aria-label="Search" id="toolbar-search" value="${escapeHtml(searchValue)}">
           </div>
         </div>
         ${sortOptions.length > 0 ? `
@@ -1184,6 +1184,16 @@
     if (searchInput && onSearch) {
       const debouncedSearch = debounce((value) => onSearch(value), 300);
       searchInput.addEventListener('input', () => debouncedSearch(searchInput.value));
+
+      // When the toolbar is re-rendered mid-search (the search handler rebuilds
+      // the view), restore focus and put the caret at the end so typing keeps
+      // going instead of resetting to a single character.
+      if (searchInput.value) {
+        searchInput.focus();
+        const preserved = searchInput.value;
+        searchInput.value = '';
+        searchInput.value = preserved;
+      }
     }
 
     if (sortSelect && onSort) {
@@ -2291,6 +2301,7 @@
       let bodyContent = headerHtml + `
         ${renderToolbar({
           searchPlaceholder: 'Search authors...',
+          searchValue: librarySearchQuery,
           sortOptions: [
             { value: 'sort_name', label: 'Last name' },
             { value: 'name', label: 'First name' },
