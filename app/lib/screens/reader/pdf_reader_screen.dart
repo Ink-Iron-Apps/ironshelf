@@ -97,6 +97,18 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
     if (mounted) setState(() {});
   }
 
+  void _previousPage() {
+    if (_currentPage > 1) {
+      _controller.goToPage(pageNumber: _currentPage - 1);
+    }
+  }
+
+  void _nextPage() {
+    if (_totalPages == 0 || _currentPage < _totalPages) {
+      _controller.goToPage(pageNumber: _currentPage + 1);
+    }
+  }
+
   Future<void> _saveProgress() async {
     if (_totalPages <= 0) return;
     final percent = (_currentPage / _totalPages).clamp(0.0, 1.0);
@@ -153,24 +165,49 @@ class _PdfReaderScreenState extends ConsumerState<PdfReaderScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () => setState(() => _chromeVisible = !_chromeVisible),
-              child: PdfViewer.file(
-                _bookFile!.path,
-                controller: _controller,
-                params: PdfViewerParams(
-                  onViewerReady: (document, controller) {
-                    setState(() => _totalPages = document.pages.length);
-                    final restore = _restorePage;
-                    if (restore != null &&
-                        restore >= 1 &&
-                        restore <= document.pages.length) {
-                      controller.goToPage(pageNumber: restore);
-                    }
-                  },
-                  onPageChanged: _onPageChanged,
-                ),
+            PdfViewer.file(
+              _bookFile!.path,
+              controller: _controller,
+              params: PdfViewerParams(
+                onViewerReady: (document, controller) {
+                  setState(() => _totalPages = document.pages.length);
+                  final restore = _restorePage;
+                  if (restore != null &&
+                      restore >= 1 &&
+                      restore <= document.pages.length) {
+                    controller.goToPage(pageNumber: restore);
+                  }
+                },
+                onPageChanged: _onPageChanged,
+              ),
+            ),
+            // Tap zones: left = previous page, right = next, center = toolbar.
+            // Edges only, so pinch-zoom/scroll in the middle still work.
+            Positioned.fill(
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 64,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _previousPage,
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () =>
+                          setState(() => _chromeVisible = !_chromeVisible),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 64,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _nextPage,
+                    ),
+                  ),
+                ],
               ),
             ),
             if (_chromeVisible) _buildTopBar(),

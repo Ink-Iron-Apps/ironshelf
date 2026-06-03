@@ -78,7 +78,7 @@ class _HighlightsTab extends ConsumerWidget {
                     ref.invalidate(allHighlightsProvider);
                   },
                 ),
-                onTap: () => context.go('/book/${highlight.bookId}'),
+                onTap: () => context.push('/book/${highlight.bookId}'),
               );
             },
           ),
@@ -150,7 +150,7 @@ class _BookmarksTab extends ConsumerWidget {
                     ref.invalidate(allBookmarksProvider);
                   },
                 ),
-                onTap: () => context.go('/book/${bookmark.bookId}'),
+                onTap: () => context.push('/book/${bookmark.bookId}'),
               );
             },
           ),

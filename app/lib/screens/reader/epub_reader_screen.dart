@@ -42,11 +42,13 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   // Reader preferences (persisted locally).
   double _fontSize = 16;
   String _themeName = 'dark'; // dark | light | sepia
+  bool _scrolled = false; // false = paginated, true = continuous scroll
 
   Timer? _saveDebounce;
 
   static const _prefsFontKey = 'reader_epub_font_size';
   static const _prefsThemeKey = 'reader_epub_theme';
+  static const _prefsFlowKey = 'reader_epub_scrolled';
 
   @override
   void initState() {
@@ -65,6 +67,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       final prefs = await SharedPreferences.getInstance();
       _fontSize = prefs.getDouble(_prefsFontKey) ?? 16;
       _themeName = prefs.getString(_prefsThemeKey) ?? 'dark';
+      _scrolled = prefs.getBool(_prefsFlowKey) ?? false;
 
       final api = ref.read(apiServiceProvider);
 
@@ -170,6 +173,23 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_prefsFontKey, _fontSize);
     await prefs.setString(_prefsThemeKey, _themeName);
+    await prefs.setBool(_prefsFlowKey, _scrolled);
+  }
+
+  void _toggleFlow() {
+    // Flow is applied from displaySettings when the viewer loads. Toggling
+    // changes the viewer's key, which rebuilds it with the new flow; the saved
+    // CFI is restored in onEpubLoaded.
+    setState(() => _scrolled = !_scrolled);
+    _persistPrefs();
+  }
+
+  void _turnPage(bool forward) {
+    if (forward) {
+      _epubController.next();
+    } else {
+      _epubController.prev();
+    }
   }
 
   void _changeFont(double delta) {
@@ -269,26 +289,52 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () => setState(() => _chromeVisible = !_chromeVisible),
-              child: EpubViewer(
-                epubSource: EpubSource.fromFile(_bookFile!),
-                epubController: _epubController,
-                displaySettings: EpubDisplaySettings(
-                  fontSize: _fontSize.round(),
-                  theme: _epubTheme,
-                  useSnapAnimationAndroid: false,
-                ),
-                onEpubLoaded: () {
-                  if (_savedCfi != null && _savedCfi!.isNotEmpty) {
-                    _epubController.display(cfi: _savedCfi!);
-                  }
-                },
-                onChaptersLoaded: (chapters) {
-                  if (mounted) setState(() => _chapters = chapters);
-                },
-                onRelocated: _onRelocated,
+            EpubViewer(
+              // Keyed by flow so toggling paginated/scroll rebuilds the viewer.
+              key: ValueKey('epub-flow-$_scrolled'),
+              epubSource: EpubSource.fromFile(_bookFile!),
+              epubController: _epubController,
+              displaySettings: EpubDisplaySettings(
+                fontSize: _fontSize.round(),
+                theme: _epubTheme,
+                flow: _scrolled ? EpubFlow.scrolled : EpubFlow.paginated,
+                useSnapAnimationAndroid: false,
+              ),
+              onEpubLoaded: () {
+                if (_savedCfi != null && _savedCfi!.isNotEmpty) {
+                  _epubController.display(cfi: _savedCfi!);
+                }
+              },
+              onChaptersLoaded: (chapters) {
+                if (mounted) setState(() => _chapters = chapters);
+              },
+              onRelocated: _onRelocated,
+            ),
+            // Tap zones: left = previous page, right = next page, center =
+            // toggle the toolbar. In scroll mode the edges still page-jump.
+            Positioned.fill(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () => _turnPage(false),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () =>
+                          setState(() => _chromeVisible = !_chromeVisible),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () => _turnPage(true),
+                    ),
+                  ),
+                ],
               ),
             ),
             if (_chromeVisible) _buildTopBar(),
@@ -325,6 +371,11 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               icon: const Icon(Icons.text_increase),
               tooltip: 'Larger text',
               onPressed: () => _changeFont(1),
+            ),
+            IconButton(
+              icon: Icon(_scrolled ? Icons.menu_book : Icons.vertical_distribute),
+              tooltip: _scrolled ? 'Paged' : 'Scroll',
+              onPressed: _toggleFlow,
             ),
             IconButton(
               icon: const Icon(Icons.brightness_6),

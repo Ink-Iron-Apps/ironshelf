@@ -40,7 +40,7 @@ class LibraryListScreen extends ConsumerWidget {
               return Card(
                 margin: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
-                  onTap: () => context.go('/library/${library.id}'),
+                  onTap: () => context.push('/library/${library.id}'),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
                     padding: const EdgeInsets.all(16),

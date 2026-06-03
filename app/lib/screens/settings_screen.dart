@@ -55,13 +55,13 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.format_quote_rounded),
             title: const Text('Highlights & Bookmarks'),
             trailing: const Icon(Icons.chevron_right, size: 20),
-            onTap: () => context.go('/annotations'),
+            onTap: () => context.push('/annotations'),
           ),
           ListTile(
             leading: const Icon(Icons.notifications_none_rounded),
             title: const Text('Notifications'),
             trailing: const Icon(Icons.chevron_right, size: 20),
-            onTap: () => context.go('/notifications'),
+            onTap: () => context.push('/notifications'),
           ),
 
           const Divider(),
@@ -95,7 +95,7 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.bar_chart_rounded),
             title: const Text('Statistics'),
             trailing: const Icon(Icons.chevron_right, size: 20),
-            onTap: () => context.go('/stats'),
+            onTap: () => context.push('/stats'),
           ),
           ListTile(
             leading: const Icon(Icons.swap_horiz_rounded),

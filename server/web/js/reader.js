@@ -14,6 +14,7 @@ const IronshelfReader = (() => {
   const EPUB_JS = '/js/vendor/epub.min.js';
   const STORAGE_THEME_KEY = 'ironshelf_reader_theme';
   const STORAGE_FONT_SIZE_KEY = 'ironshelf_reader_font_size';
+  const STORAGE_FLOW_KEY = 'ironshelf_reader_flow';
 
   let epubJsLoaded = false;
   let currentBook = null;
@@ -45,6 +46,20 @@ const IronshelfReader = (() => {
 
   function setFontSizeStorage(size) {
     localStorage.setItem(STORAGE_FONT_SIZE_KEY, String(size));
+  }
+
+  // 'paginated' (default) or 'scrolled' (continuous).
+  function getFlow() {
+    return localStorage.getItem(STORAGE_FLOW_KEY) || 'paginated';
+  }
+
+  function setFlow(flow) {
+    localStorage.setItem(STORAGE_FLOW_KEY, flow);
+  }
+
+  // epub.js expects 'paginated' or 'scrolled-doc'.
+  function epubFlowValue() {
+    return getFlow() === 'scrolled' ? 'scrolled-doc' : 'paginated';
   }
 
   // --- CDN Loader ---
@@ -183,6 +198,13 @@ const IronshelfReader = (() => {
             <button class="reader-theme-btn reader-theme-btn-light" data-theme="light">Light</button>
             <button class="reader-theme-btn reader-theme-btn-sepia" data-theme="sepia">Sepia</button>
             <button class="reader-theme-btn reader-theme-btn-dark" data-theme="dark">Dark</button>
+          </div>
+        </div>
+        <div class="reader-settings-group">
+          <div class="reader-settings-label">Layout</div>
+          <div class="reader-theme-options">
+            <button class="reader-flow-btn" data-flow="paginated">Paged</button>
+            <button class="reader-flow-btn" data-flow="scrolled">Scroll</button>
           </div>
         </div>
       </div>
@@ -445,7 +467,7 @@ const IronshelfReader = (() => {
         width: '100%',
         height: '100%',
         spread: 'none',
-        flow: 'paginated',
+        flow: epubFlowValue(),
       });
 
       // Apply stored theme and font size
@@ -695,6 +717,28 @@ const IronshelfReader = (() => {
     const currentTheme = getTheme();
     containerElement.querySelectorAll('.reader-theme-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.theme === currentTheme);
+    });
+
+    // Layout (paginated / scrolled) buttons
+    const syncFlowButtons = () => {
+      const flow = getFlow();
+      containerElement.querySelectorAll('.reader-flow-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.flow === flow);
+      });
+    };
+    syncFlowButtons();
+    containerElement.querySelectorAll('.reader-flow-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setFlow(btn.dataset.flow);
+        syncFlowButtons();
+        if (currentRendition) {
+          try {
+            currentRendition.flow(epubFlowValue());
+          } catch (_) {
+            // Older epub.js may need a redisplay; ignore if unsupported.
+          }
+        }
+      });
     });
 
     // Close settings on outside click
