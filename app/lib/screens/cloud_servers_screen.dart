@@ -140,7 +140,6 @@ class _CloudServersScreenState extends ConsumerState<CloudServersScreen> {
                   title: Text(server.name),
                   subtitle: Text(
                     [
-                      if (!server.isVerified) 'Offline',
                       if (server.version != null) 'v${server.version}',
                       if (!server.isOwned) server.permissions ?? 'shared',
                     ].join(' · '),
