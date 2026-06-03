@@ -153,8 +153,28 @@ async fn main() -> anyhow::Result<()> {
             drop(upnp_guard);
         }
         "tunnel" => {
+            // Named tunnel (stable hostname) if configured, else a quick tunnel.
+            let named_tunnel = {
+                let db = &app_state.ironshelf_db;
+                let mode = db.get_cloud_config("tunnel_mode").await.ok().flatten();
+                let token = db.get_cloud_config("cf_tunnel_token").await.ok().flatten();
+                let hostname = db.get_cloud_config("cf_tunnel_hostname").await.ok().flatten();
+                match (mode.as_deref(), token, hostname) {
+                    (Some("named"), Some(token), Some(hostname))
+                        if !token.is_empty() && !hostname.is_empty() =>
+                    {
+                        Some((token, hostname))
+                    }
+                    _ => None,
+                }
+            };
+
             let mut tunnel_guard = app_state.tunnel_manager.write().await;
-            match tunnel_guard.start().await {
+            let tunnel_result = match &named_tunnel {
+                Some((token, hostname)) => tunnel_guard.start_named(token, hostname).await,
+                None => tunnel_guard.start().await,
+            };
+            match tunnel_result {
                 Ok(public_url) => {
                     tracing::info!("remote access (Cloudflare Tunnel): {public_url}");
 

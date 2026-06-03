@@ -41,6 +41,10 @@ pub struct ListAuthorsQuery {
     pub per_page: Option<u32>,
     pub sort: Option<String>,
     pub dir: Option<String>,
+    /// Filter by author name (case-insensitive contains; matches display name
+    /// and "Last, First" sort name). Accepts `search` or `q`.
+    pub search: Option<String>,
+    pub q: Option<String>,
 }
 
 /// GET /api/v1/libraries/:id/authors
@@ -63,6 +67,18 @@ pub async fn list_authors(
         .ok_or(AppError::not_found("library"))?;
 
     let mut authors = library.source.authors().await?;
+
+    // Filter: by name (case-insensitive contains, matches display + sort name).
+    let search_term = query.search.as_ref().or(query.q.as_ref());
+    if let Some(term) = search_term {
+        let needle = term.trim().to_lowercase();
+        if !needle.is_empty() {
+            authors.retain(|author| {
+                author.name.to_lowercase().contains(&needle)
+                    || author.sort_name.to_lowercase().contains(&needle)
+            });
+        }
+    }
 
     // Sort
     let sort_params = SortParams {

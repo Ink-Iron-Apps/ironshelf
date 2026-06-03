@@ -20,6 +20,7 @@ class AuthorsScreen extends ConsumerStatefulWidget {
 class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
   final ScrollController _scrollController = ScrollController();
   String? _activeLetter;
+  String _query = '';
 
   @override
   void dispose() {
@@ -37,7 +38,16 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
     )));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Authors')),
+      appBar: AppBar(
+        title: TextField(
+          decoration: const InputDecoration(
+            hintText: 'Search authors…',
+            border: InputBorder.none,
+            prefixIcon: Icon(Icons.search, size: 20),
+          ),
+          onChanged: (value) => setState(() => _query = value),
+        ),
+      ),
       body: authorsAsync.when(
         loading: () => const ListSkeleton(count: 12),
         error: (error, stack) => ErrorState(
@@ -59,9 +69,28 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
             );
           }
 
+          // Client-side filter (all authors are loaded up front).
+          final needle = _query.trim().toLowerCase();
+          final visible = needle.isEmpty
+              ? authors
+              : authors
+                  .where((author) =>
+                      author.name.toLowerCase().contains(needle) ||
+                      author.sortName.toLowerCase().contains(needle))
+                  .toList();
+
+          if (visible.isEmpty) {
+            return Center(
+              child: Text('No authors match "$_query"',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  )),
+            );
+          }
+
           // Build available letters
           final availableLetters = <String>{};
-          for (final author in authors) {
+          for (final author in visible) {
             final firstChar = author.sortName.isNotEmpty
                 ? author.sortName[0].toUpperCase()
                 : '#';
@@ -78,9 +107,9 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
                 child: ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: authors.length,
+                  itemCount: visible.length,
                   itemBuilder: (context, index) {
-                    final author = authors[index];
+                    final author = visible[index];
                     return AuthorTile(
                       author: author,
                       onTap: () => context.go('/author/${author.id}'),
@@ -93,7 +122,7 @@ class _AuthorsScreenState extends ConsumerState<AuthorsScreen> {
                 activeLetter: _activeLetter,
                 onLetterTap: (letter) {
                   setState(() => _activeLetter = letter);
-                  _scrollToLetter(letter, authors);
+                  _scrollToLetter(letter, visible);
                 },
               ),
             ],
