@@ -244,11 +244,11 @@ impl TunnelManager {
         };
 
         let mut child = Command::new(cloudflared_binary)
+            .arg("--no-autoupdate")
             .arg("tunnel")
             .arg("run")
             .arg("--token")
             .arg(token)
-            .arg("--no-autoupdate")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true)
