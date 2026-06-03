@@ -26,7 +26,7 @@ dependencies:
   pdfrx: ^1.0.0                 # MIT PDF renderer, no license key
   archive: ^3.6.1               # unzip CBZ archives
   photo_view: ^0.15.0           # zoom/pan comic pages
-  flutter_tts: ^4.2.0           # device text-to-speech (read aloud)
+  flutter_tts: 3.8.5            # device TTS — pinned: 4.x needs newer Kotlin than the Flutter 3.29 Android template
   epubx: ^4.0.0                 # parse EPUB chapter text for TTS
 
 dev_dependencies:
