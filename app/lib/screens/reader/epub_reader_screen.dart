@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../providers/server_provider.dart';
+import '../../services/tts_reader.dart';
 import '../../theme.dart';
 
 /// EPUB reader built on flutter_epub_viewer (epub.js in a webview). Uses CFI
@@ -46,6 +47,10 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
 
   Timer? _saveDebounce;
 
+  // Text-to-speech (lazy: created the first time the user taps Listen).
+  TtsReader? _tts;
+  bool _ttsLoading = false;
+
   static const _prefsFontKey = 'reader_epub_font_size';
   static const _prefsThemeKey = 'reader_epub_theme';
   static const _prefsFlowKey = 'reader_epub_scrolled';
@@ -59,7 +64,64 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
   @override
   void dispose() {
     _saveDebounce?.cancel();
+    _tts?.dispose();
     super.dispose();
+  }
+
+  Future<void> _startListening() async {
+    // Already playing → pause. Already loaded but paused → resume.
+    final existing = _tts;
+    if (existing != null) {
+      if (existing.isPlaying) {
+        await existing.pause();
+      } else {
+        await existing.resume();
+      }
+      return;
+    }
+
+    final file = _bookFile;
+    if (file == null) return;
+    setState(() => _ttsLoading = true);
+    try {
+      final reader = TtsReader();
+      reader.onChapterChanged = (chapter, index) {
+        // Move the visual reader to the chapter being read so saved progress
+        // follows along.
+        if (chapter.href.isNotEmpty) {
+          _epubController.display(cfi: chapter.href);
+        }
+      };
+      reader.addListener(() {
+        if (mounted) setState(() {});
+      });
+      await reader.load(await file.readAsBytes());
+      if (!mounted) {
+        reader.dispose();
+        return;
+      }
+      if (!reader.isReady) {
+        setState(() => _ttsLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No readable text found for read-aloud')),
+        );
+        return;
+      }
+      _tts = reader;
+      setState(() => _ttsLoading = false);
+      // Start from the chapter nearest the current reading position.
+      final startChapter = reader.chapterCount <= 1
+          ? 0
+          : (_progress.clamp(0.0, 1.0) * (reader.chapterCount - 1)).round();
+      await reader.start(startChapter);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _ttsLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Read-aloud failed: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -338,8 +400,63 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               ),
             ),
             if (_chromeVisible) _buildTopBar(),
+            if (_tts != null) _buildTtsBar(),
             if (_chromeVisible) _buildBottomBar(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTtsBar() {
+    final tts = _tts!;
+    return Positioned(
+      bottom: 48,
+      left: 0,
+      right: 0,
+      child: Material(
+        color: IronshelfColors.surface.withValues(alpha: 0.97),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(tts.isPlaying ? Icons.pause : Icons.play_arrow),
+                tooltip: tts.isPlaying ? 'Pause' : 'Play',
+                onPressed: () =>
+                    tts.isPlaying ? tts.pause() : tts.resume(),
+              ),
+              IconButton(
+                icon: const Icon(Icons.stop),
+                tooltip: 'Stop read-aloud',
+                onPressed: () async {
+                  await tts.stop();
+                  _tts?.dispose();
+                  if (mounted) setState(() => _tts = null);
+                },
+              ),
+              Expanded(
+                child: Text(
+                  tts.currentChapterTitle.isEmpty
+                      ? 'Reading aloud'
+                      : tts.currentChapterTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              const Icon(Icons.speed, size: 16),
+              SizedBox(
+                width: 110,
+                child: Slider(
+                  value: tts.rate,
+                  min: 0.2,
+                  max: 1.0,
+                  onChanged: (value) => tts.setRate(value),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -381,6 +498,19 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
               icon: const Icon(Icons.brightness_6),
               tooltip: 'Theme',
               onPressed: _cycleTheme,
+            ),
+            IconButton(
+              icon: _ttsLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon((_tts?.isPlaying ?? false)
+                      ? Icons.pause_circle
+                      : Icons.headphones),
+              tooltip: 'Read aloud',
+              onPressed: _ttsLoading ? null : _startListening,
             ),
             IconButton(
               icon: const Icon(Icons.bookmark_add_outlined),
