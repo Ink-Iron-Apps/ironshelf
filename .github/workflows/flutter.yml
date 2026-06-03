@@ -56,6 +56,19 @@ jobs:
           if ! grep -q "REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
             sed -i 's#\(<manifest[^>]*>\)#\1\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>#' "$MANIFEST"
           fi
+      - name: Raise minSdk to 24 (flutter_tts)
+        working-directory: app
+        run: |
+          GRADLE=android/app/build.gradle.kts
+          if [ -f "$GRADLE" ]; then
+            sed -i -E 's/minSdk *= *flutter\.minSdkVersion/minSdk = 24/' "$GRADLE"
+            sed -i -E 's/minSdk *= *[0-9]+/minSdk = 24/' "$GRADLE"
+          else
+            GRADLE=android/app/build.gradle
+            sed -i -E 's/minSdkVersion +flutter\.minSdkVersion/minSdkVersion 24/' "$GRADLE"
+            sed -i -E 's/minSdkVersion +[0-9]+/minSdkVersion 24/' "$GRADLE"
+          fi
+          grep -in minsdk "$GRADLE" || true
       - name: Get dependencies
         working-directory: app
         run: flutter pub get
