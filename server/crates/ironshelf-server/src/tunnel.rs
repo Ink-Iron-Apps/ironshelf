@@ -208,6 +208,83 @@ impl TunnelManager {
         }
     }
 
+    /// Start a *named* Cloudflare tunnel from a tunnel token.
+    ///
+    /// Unlike a quick tunnel, the public hostname is configured in the
+    /// Cloudflare dashboard (the tunnel's ingress rule points at this server),
+    /// so the caller supplies the stable [`hostname`]; `cloudflared` just
+    /// connects with `tunnel run --token`. The URL never rotates.
+    pub async fn start_named(&mut self, token: &str, hostname: &str) -> Result<String, String> {
+        self.stop().await;
+        self.last_error = None;
+
+        if !Self::is_cloudflared_available().await {
+            let message = "cloudflared is not installed or not in PATH".to_string();
+            self.last_error = Some(message.clone());
+            return Err(message);
+        }
+
+        let trimmed_host = hostname.trim().trim_end_matches('/');
+        if trimmed_host.is_empty() {
+            let message = "Named tunnel requires a public hostname".to_string();
+            self.last_error = Some(message.clone());
+            return Err(message);
+        }
+        let public_url = if trimmed_host.starts_with("http://") || trimmed_host.starts_with("https://")
+        {
+            trimmed_host.to_string()
+        } else {
+            format!("https://{trimmed_host}")
+        };
+
+        let cloudflared_binary = if cfg!(windows) {
+            "cloudflared.exe"
+        } else {
+            "cloudflared"
+        };
+
+        let mut child = Command::new(cloudflared_binary)
+            .arg("tunnel")
+            .arg("run")
+            .arg("--token")
+            .arg(token)
+            .arg("--no-autoupdate")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|spawn_error| {
+                let message = format!("Failed to spawn cloudflared: {spawn_error}");
+                self.last_error = Some(message.clone());
+                message
+            })?;
+
+        // A named tunnel doesn't print a URL. Give it a few seconds to connect;
+        // if the process exits early the token is almost certainly wrong.
+        for _ in 0..6 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let message = format!(
+                        "cloudflared exited during startup (status: {status}) — check the tunnel token"
+                    );
+                    self.last_error = Some(message.clone());
+                    self.is_active = false;
+                    return Err(message);
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+
+        self.child_process = Some(child);
+        self.public_url = Some(public_url.clone());
+        self.is_active = true;
+        self.last_error = None;
+        tracing::info!("Named Cloudflare tunnel running -> {public_url}");
+        Ok(public_url)
+    }
+
     /// Stop the tunnel by killing the child process.
     pub async fn stop(&mut self) {
         if let Some(mut child) = self.child_process.take() {

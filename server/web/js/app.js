@@ -3938,11 +3938,22 @@
         </div>
         ${tunnel.error ? `<p class="remote-access-error" style="margin-top:var(--space-2)">${escapeHtml(tunnel.error)}</p>` : ''}
         <p class="form-hint" style="margin-top:var(--space-2)">
-          Start a Cloudflare Quick Tunnel to get a public URL instantly. No account or configuration required.
+          Start a Cloudflare Quick Tunnel to get a public URL instantly. No account or configuration required. The URL changes each restart.
         </p>
         <div class="remote-access-actions" style="margin-top:var(--space-4)">
-          <button class="btn btn-primary btn-sm" id="tunnel-start-btn">${icon('globe', 14)} Start Tunnel</button>
+          <button class="btn btn-primary btn-sm" id="tunnel-start-btn">${icon('globe', 14)} Start Quick Tunnel</button>
         </div>
+        <details class="remote-access-named" style="margin-top:var(--space-4)">
+          <summary style="cursor:pointer">Use a named tunnel (stable URL)</summary>
+          <p class="form-hint" style="margin-top:var(--space-3)">
+            Create a Tunnel in the <strong>Cloudflare Zero Trust dashboard</strong>, route a hostname to <code>http://localhost:${escapeHtml(String(status.internal_port || 10810))}</code>, then paste the tunnel token and that hostname here. The URL never changes across restarts.
+          </p>
+          <label class="form-label" for="tunnel-named-hostname" style="margin-top:var(--space-3)">Public hostname</label>
+          <input type="text" class="form-input" id="tunnel-named-hostname" placeholder="ironshelf.example.com">
+          <label class="form-label" for="tunnel-named-token" style="margin-top:var(--space-3)">Tunnel token</label>
+          <input type="password" class="form-input" id="tunnel-named-token" placeholder="eyJ...">
+          <button class="btn btn-secondary btn-sm" id="tunnel-start-named-btn" style="margin-top:var(--space-3)">${icon('globe', 14)} Start Named Tunnel</button>
+        </details>
       </div>
     `;
   }
@@ -4057,6 +4068,30 @@
         loadRemoteAccessCard();
       } catch (startError) {
         toast(startError.message || 'Failed to start tunnel', 'error');
+        loadRemoteAccessCard();
+      }
+    });
+
+    document.getElementById('tunnel-start-named-btn')?.addEventListener('click', async () => {
+      const hostname = document.getElementById('tunnel-named-hostname')?.value.trim();
+      const token = document.getElementById('tunnel-named-token')?.value.trim();
+      if (!hostname || !token) {
+        toast('Enter both a hostname and a tunnel token', 'error');
+        return;
+      }
+      const namedButton = document.getElementById('tunnel-start-named-btn');
+      namedButton.disabled = true;
+      namedButton.textContent = 'Starting named tunnel...';
+      try {
+        const tunnelResult = await apiPost('/server/remote-access/tunnel/start', { hostname, token });
+        if (tunnelResult.active) {
+          toast('Named tunnel started', 'success');
+        } else {
+          toast(tunnelResult.error || 'Failed to start named tunnel', 'error');
+        }
+        loadRemoteAccessCard();
+      } catch (startError) {
+        toast(startError.message || 'Failed to start named tunnel', 'error');
         loadRemoteAccessCard();
       }
     });

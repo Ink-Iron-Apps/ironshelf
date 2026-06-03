@@ -144,6 +144,17 @@ pub struct EnableRemoteAccessRequest {
     pub external_port: Option<u16>,
 }
 
+/// Body for starting a Cloudflare tunnel. With no fields → a quick tunnel
+/// (random *.trycloudflare.com). With `token` + `hostname` → a named tunnel
+/// (stable hostname configured in the Cloudflare dashboard).
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct StartTunnelRequest {
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+}
+
 /// `POST /api/v1/server/remote-access/enable` — enable UPnP port forwarding.
 pub async fn enable_remote_access(
     State(application_state): State<AppState>,
@@ -242,10 +253,22 @@ pub async fn test_remote_access(
 pub async fn start_tunnel(
     State(application_state): State<AppState>,
     axum::Extension(auth_user): axum::Extension<AuthUser>,
+    body: Option<Json<StartTunnelRequest>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !auth_user.is_owner {
         return Err(StatusCode::FORBIDDEN);
     }
+
+    let request = body.map(|json| json.0).unwrap_or_default();
+    // Named tunnel when both a token and a hostname are supplied.
+    let named = match (&request.token, &request.hostname) {
+        (Some(token), Some(hostname))
+            if !token.trim().is_empty() && !hostname.trim().is_empty() =>
+        {
+            Some((token.trim().to_string(), hostname.trim().to_string()))
+        }
+        _ => None,
+    };
 
     // Auto-install cloudflared if not available
     if !TunnelManager::is_cloudflared_available().await {
@@ -261,13 +284,38 @@ pub async fn start_tunnel(
 
     let mut tunnel_manager = application_state.tunnel_manager.write().await;
 
-    match tunnel_manager.start().await {
+    let start_result = match &named {
+        Some((token, hostname)) => tunnel_manager.start_named(token, hostname).await,
+        None => tunnel_manager.start().await,
+    };
+
+    match start_result {
         Ok(public_url) => {
             // Persist the choice so the tunnel auto-starts on the next boot.
             let _ = application_state
                 .ironshelf_db
                 .set_cloud_config("remote_access_method", "tunnel")
                 .await;
+            // Persist named-tunnel config (or clear it for a quick tunnel).
+            if let Some((token, hostname)) = &named {
+                let _ = application_state
+                    .ironshelf_db
+                    .set_cloud_config("tunnel_mode", "named")
+                    .await;
+                let _ = application_state
+                    .ironshelf_db
+                    .set_cloud_config("cf_tunnel_token", token)
+                    .await;
+                let _ = application_state
+                    .ironshelf_db
+                    .set_cloud_config("cf_tunnel_hostname", hostname)
+                    .await;
+            } else {
+                let _ = application_state
+                    .ironshelf_db
+                    .set_cloud_config("tunnel_mode", "quick")
+                    .await;
+            }
 
             // If the server is claimed, update the cloud URL in the background.
             let cloud_state = application_state.clone();
