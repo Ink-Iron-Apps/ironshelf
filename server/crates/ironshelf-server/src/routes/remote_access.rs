@@ -111,6 +111,15 @@ pub async fn get_remote_access_status(
         (true, true, tunnel_status.public_url.clone())
     } else if upnp_status.is_enabled {
         (true, upnp_status.is_active, upnp_status.public_url.clone())
+    } else if active_method == "manual" {
+        // Manual mode: surface the stored public URL so the UI keeps showing it.
+        let stored = application_state
+            .ironshelf_db
+            .get_cloud_config("public_url")
+            .await
+            .ok()
+            .flatten();
+        (stored.is_some(), stored.is_some(), stored)
     } else {
         (false, false, None)
     };
