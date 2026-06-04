@@ -200,3 +200,16 @@ jobs:
           gh release create "$TAG" "$APK" \
             --title "Ironshelf App v$VERSION" \
             --notes-file /tmp/app-notes.md
+
+          # Maintain a moving `app-latest` prerelease so the README can link to a
+          # stable URL for the newest APK. Marked prerelease so it never claims the
+          # repo's "Latest" badge (that stays on the server v* release) and so the
+          # in-app updater (which only matches app-v* tags) ignores it.
+          LATEST_APK="Ironshelf-latest-debug.apk"
+          cp build/app/outputs/flutter-apk/app-debug.apk "$LATEST_APK"
+          gh release delete app-latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create app-latest "$LATEST_APK" \
+            --target main \
+            --prerelease \
+            --title "Latest Android App (app-v$VERSION)" \
+            --notes "Always points to the newest Ironshelf Android build (currently **v$VERSION**). Direct download: \`$LATEST_APK\` below. For version history, see the \`app-v*\` releases. Once installed, the app's built-in updater handles upgrades automatically."
