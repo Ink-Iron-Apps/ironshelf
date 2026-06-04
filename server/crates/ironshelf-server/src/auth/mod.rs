@@ -57,6 +57,13 @@ pub async fn auth_middleware(
     // Allow auth via an `access_token` query param so cross-origin `<img>` /
     // download requests (which can't set an Authorization header) work.
     let query_token = request.uri().query().and_then(parse_access_token);
+    // Capture the peer IP up front (Copy) so the bypass check doesn't borrow the
+    // non-Sync request body across await points.
+    let client_ip = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|connect_info| connect_info.ip());
+
     match extract_auth_user(&state, request.headers(), query_token.as_deref()).await {
         Ok(auth_user) => {
             request.extensions_mut().insert(auth_user);
@@ -66,7 +73,7 @@ pub async fn auth_middleware(
             // Local-only convenience bypass (opt-in). Only when enabled, NOT
             // connected to cloud, NO remote access configured, and the request
             // comes from a loopback/LAN address — then treat it as the owner.
-            if let Some(owner) = try_local_bypass(&state, &request).await {
+            if let Some(owner) = try_local_bypass(&state, client_ip).await {
                 request.extensions_mut().insert(owner);
                 return Ok(next.run(request).await);
             }
@@ -77,7 +84,7 @@ pub async fn auth_middleware(
 
 /// Whether an unauthenticated request may be served as the owner via the
 /// local-only auth bypass. Fails closed: every guard must pass.
-async fn try_local_bypass(state: &AppState, request: &Request) -> Option<AuthUser> {
+async fn try_local_bypass(state: &AppState, client_ip: Option<std::net::IpAddr>) -> Option<AuthUser> {
     let db = &state.ironshelf_db;
 
     // Must be explicitly enabled by the owner.
@@ -98,13 +105,9 @@ async fn try_local_bypass(state: &AppState, request: &Request) -> Option<AuthUse
         _ => return None,
     }
 
-    // Client must be on a loopback or private/LAN address. Use the real peer
+    // Client must be on a loopback or private/LAN address. Uses the real peer
     // socket (never the spoofable X-Forwarded-For).
-    let client_ip = request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|connect_info| connect_info.ip())?;
-    if !is_local_ip(client_ip) {
+    if !is_local_ip(client_ip?) {
         return None;
     }
 
