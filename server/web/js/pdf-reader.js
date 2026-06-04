@@ -14,6 +14,19 @@ const IronshelfPdfReader = (() => {
     if (!token) return url;
     return url + (url.includes("?") ? "&" : "?") + "access_token=" + encodeURIComponent(token);
   }
+
+  // For media (book file) URLs only: prefer the short-lived scoped media token
+  // exposed by app.js, falling back to the session token. The scoped token is
+  // only accepted by media routes, so it must NOT be used for /progress etc.
+  function withMediaToken(url) {
+    const mediaToken = typeof window.IronshelfMediaToken === 'function'
+      ? window.IronshelfMediaToken()
+      : null;
+    if (mediaToken) {
+      return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(mediaToken);
+    }
+    return withToken(url);
+  }
   const PDFJS_CDN = '/js/vendor/pdf.min.mjs';
   const PDFJS_WORKER_CDN = '/js/vendor/pdf.worker.min.mjs';
   const STORAGE_ZOOM_KEY = 'ironshelf_pdf_zoom';
@@ -729,7 +742,7 @@ const IronshelfPdfReader = (() => {
       await loadPdfJs();
 
       const savedProgress = await fetchProgress(bookId);
-      const fileUrl = withToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
+      const fileUrl = withMediaToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
 
       const loadingTask = pdfjsLib.getDocument(fileUrl);
       currentDocument = await loadingTask.promise;

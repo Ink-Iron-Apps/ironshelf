@@ -317,6 +317,25 @@ pub async fn me(
     })))
 }
 
+/// GET /api/v1/auth/media-token — mint a short-lived, media-only token.
+///
+/// Cross-origin `<img>` / download requests from the hosted web UI can't set an
+/// `Authorization` header. Instead of leaking the raw session id in the URL, the
+/// client fetches this scoped token and appends it as `?token=...`. The token is
+/// only honoured by the cover / file / author-photo routes.
+pub async fn media_token(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<AuthUser>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let token = crate::auth::media_token::mint(&state, &user.user_id)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok(Json(serde_json::json!({
+        "token": token,
+        "expires_in": crate::auth::media_token::MEDIA_TOKEN_TTL_SECS,
+    })))
+}
+
 /// POST /api/v1/auth/api-keys — create new API key
 pub async fn create_api_key(
     State(state): State<AppState>,

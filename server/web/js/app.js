@@ -14,12 +14,82 @@
   const CLOUD_API = 'https://cloud.inknironapps.com';
 
   // Cross-origin media (<img>/downloads) can't set an Authorization header, so
-  // append the server token as a query param the server also accepts. Empty
-  // (no-op) on the same-origin server UI.
+  // we append a token as a query param the server also accepts. Empty (no-op) on
+  // the same-origin server UI, which authenticates media via the session cookie.
+  //
+  // Preferred credential is a SHORT-LIVED, media-only scoped token fetched from
+  // /auth/media-token (cached below). A leaked media URL then only exposes media
+  // access for ~15 min, not a live session. If that token isn't available yet we
+  // fall back to the legacy `access_token=<session-id>` so nothing breaks.
+  let cachedMediaToken = null;        // current scoped media token string
+  let cachedMediaTokenExpiry = 0;     // epoch ms when it expires
+  let mediaTokenRefreshInFlight = null; // de-dupe concurrent refreshes
+
+  // Re-fetch when within this window of expiry (or already expired).
+  const MEDIA_TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
+
+  function mediaTokenIsFresh() {
+    return !!cachedMediaToken
+      && (cachedMediaTokenExpiry - Date.now()) > MEDIA_TOKEN_REFRESH_MARGIN_MS;
+  }
+
+  // Fetch + cache a scoped media token. Safe to call repeatedly; only hits the
+  // network when the cache is stale (or `force`). Never throws — on failure the
+  // cache is left as-is and synchronous URL builders fall back to the session.
+  async function refreshMediaToken(force = false) {
+    if (!HOSTED) return;
+    if (!force && mediaTokenIsFresh()) return;
+    if (mediaTokenRefreshInFlight) return mediaTokenRefreshInFlight;
+
+    mediaTokenRefreshInFlight = (async () => {
+      try {
+        const result = await apiGet('/auth/media-token');
+        if (result && result.token) {
+          cachedMediaToken = result.token;
+          const ttlSeconds = Number(result.expires_in) || 900;
+          cachedMediaTokenExpiry = Date.now() + ttlSeconds * 1000;
+        }
+      } catch {
+        // Leave cache untouched; fall back to legacy behaviour.
+      } finally {
+        mediaTokenRefreshInFlight = null;
+      }
+    })();
+    return mediaTokenRefreshInFlight;
+  }
+
+  function clearMediaToken() {
+    cachedMediaToken = null;
+    cachedMediaTokenExpiry = 0;
+  }
+
+  // Expose the scoped media token to the separate reader IIFE modules
+  // (reader.js / pdf-reader.js / cbz-reader.js) so their book-file URLs can use
+  // it too. Returns the current token only while fresh; readers fall back to the
+  // session token when this is null. Also kicks a background refresh when stale.
+  window.IronshelfMediaToken = function () {
+    if (!HOSTED) return null;
+    if (mediaTokenIsFresh()) return cachedMediaToken;
+    refreshMediaToken();
+    return cachedMediaToken; // possibly near-expiry; readers fall back if null
+  };
+
   function mediaToken(separator = '?') {
     if (!HOSTED) return '';
-    const token = localStorage.getItem('ironshelf_server_token');
-    return token ? `${separator}access_token=${encodeURIComponent(token)}` : '';
+    // Prefer the scoped media token. Kick off a background refresh when it's
+    // getting close to expiry so subsequent synchronous builds stay valid.
+    if (mediaTokenIsFresh()) {
+      return `${separator}token=${encodeURIComponent(cachedMediaToken)}`;
+    }
+    if (cachedMediaToken) {
+      // Still present but near/at expiry — use it once more and refresh.
+      refreshMediaToken();
+      return `${separator}token=${encodeURIComponent(cachedMediaToken)}`;
+    }
+    // No scoped token yet — trigger a fetch for next time, fall back to session.
+    refreshMediaToken();
+    const sessionToken = localStorage.getItem('ironshelf_server_token');
+    return sessionToken ? `${separator}access_token=${encodeURIComponent(sessionToken)}` : '';
   }
 
   // Reusable author avatar: a circular initial with the portrait layered on top
@@ -1068,6 +1138,10 @@
   async function checkAuth() {
     try {
       currentUser = await apiGet('/auth/me');
+      // Pre-fetch a scoped media token so synchronous URL builders (covers,
+      // author photos, download links) can use it instead of the session id.
+      // Non-blocking and best-effort: media falls back to the session if absent.
+      refreshMediaToken(true);
       return true;
     } catch {
       return false;
@@ -1362,6 +1436,7 @@
     document.getElementById('logout-btn')?.addEventListener('click', async () => {
       await apiPost('/auth/logout', {}).catch(() => {});
       if (HOSTED) localStorage.removeItem('ironshelf_server_token');
+      clearMediaToken();
       currentUser = null;
       stopNotificationPolling();
       closeNotificationPanel();
