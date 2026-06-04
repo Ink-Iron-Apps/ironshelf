@@ -4,20 +4,122 @@ name: App Release
 # an `app-v<version>` tag. The in-app updater polls these releases — no separate
 # mirror repo or PAT is needed because the repo is public and we use GITHUB_TOKEN.
 #
-# Bump `version:` in app/pubspec.yaml, then run this workflow (manually) to cut a
-# sideload release. Re-running for an existing version is a no-op.
+# Auto-runs on pushes to main that touch app/** and contain conventional commits
+# (feat/fix/perf/refactor). The version-bump job derives the next version from
+# those commits (scoped to app/), writes it into app/pubspec.yaml (semver + build
+# number), commits the bump with [skip ci], and tags app-v<version>. The build
+# job then builds that tagged commit and cuts the release. Can also be dispatched
+# manually; a run with no version-bumping app commits since the last tag is a
+# clean no-op.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Serialize releases. Concurrent runs would each compute the same version bump
+# from the same last tag, then race on tag/push/release-create.
+concurrency:
+  group: app-release
+  cancel-in-progress: false
+
 jobs:
-  release-apk:
+  version-bump:
     runs-on: ubuntu-latest
+    # Skip if this push is already a version bump commit.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+      changes: ${{ steps.bump.outputs.changes }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          # Last APP tag (app-v1.2.3). Ignores server tags (v1.2.3).
+          LAST_TAG=$(git tag --list 'app-v*' --sort=-v:refname | head -n1)
+
+          # Current build number lives in pubspec (version: X.Y.Z+BUILD).
+          CURRENT_FULL=$(grep '^version:' app/pubspec.yaml | sed 's/version:[[:space:]]*//')
+          CURRENT_BUILD="${CURRENT_FULL#*+}"
+          [ "$CURRENT_BUILD" = "$CURRENT_FULL" ] && CURRENT_BUILD=0
+
+          if [ -z "$LAST_TAG" ]; then
+            # No app release yet: consider every commit touching app/.
+            COMMITS=$(git log --oneline --format="%s" -- app/)
+            CURRENT_VERSION="${CURRENT_FULL%+*}"
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --format="%s" -- app/)
+            CURRENT_VERSION="${LAST_TAG#app-v}"
+          fi
+
+          # Determine bump type from conventional commits touching app/.
+          BUMP="none"
+          if echo "$COMMITS" | grep -qiE "^feat(\(.*\))?!:|BREAKING CHANGE"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qiE "^feat(\(.*\))?:"; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -qiE "^(fix|perf|refactor)(\(.*\))?:"; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "No version-bumping app commits since ${LAST_TAG:-repo start}. Skipping app release."
+            exit 0
+          fi
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          case "$BUMP" in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+          esac
+          NEW_BUILD="$((CURRENT_BUILD + 1))"
+
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "Bumping app: ${CURRENT_VERSION} → ${NEW_VERSION} (${BUMP}), build ${CURRENT_BUILD} → ${NEW_BUILD}"
+
+          # Commit subjects for this release, for the build job's release notes.
+          {
+            echo "changes<<__CHANGES_EOF__"
+            echo "$COMMITS"
+            echo "__CHANGES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          # Write version + build into pubspec, commit, tag.
+          sed -i -E "s/^version:[[:space:]]*.*/version: ${NEW_VERSION}+${NEW_BUILD}/" app/pubspec.yaml
+          grep '^version:' app/pubspec.yaml
+          git add app/pubspec.yaml
+          git commit -m "chore: bump app version to ${NEW_VERSION}+${NEW_BUILD} [skip ci]"
+          git tag -f "app-v${NEW_VERSION}"
+          git push origin main --tags --force
+
+  release-apk:
+    runs-on: ubuntu-latest
+    needs: version-bump
+    if: needs.version-bump.outputs.bumped == 'true'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Build the bumped commit so the APK version matches the release tag.
+          ref: app-v${{ needs.version-bump.outputs.new_version }}
       - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
@@ -65,16 +167,36 @@ jobs:
         working-directory: app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGES: ${{ needs.version-bump.outputs.changes }}
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | cut -d'+' -f1)
+          VERSION="${{ needs.version-bump.outputs.new_version }}"
           TAG="app-v$VERSION"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — nothing to do."
-            exit 0
-          fi
           APK="Ironshelf-v$VERSION-debug.apk"
           cp build/app/outputs/flutter-apk/app-debug.apk "$APK"
-          NOTES=$(awk '/^## /{if(p)exit} /^## /{p=1} p' CHANGELOG.md)
+
+          # Build release notes from this release's app commits.
+          FEATURES=""; FIXES=""; OTHER=""
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            [[ "$line" =~ ^(Merge|Auto-merge|chore:\ bump) ]] && continue
+            if [[ "$line" =~ ^feat ]]; then
+              desc="${line#feat: }"; desc="${desc#feat\(*\): }"
+              FEATURES="${FEATURES}- ${desc}\n"
+            elif [[ "$line" =~ ^fix ]]; then
+              desc="${line#fix: }"; desc="${desc#fix\(*\): }"
+              FIXES="${FIXES}- ${desc}\n"
+            elif [[ "$line" =~ ^(refactor|perf) ]]; then
+              OTHER="${OTHER}- ${line}\n"
+            fi
+          done <<< "$CHANGES"
+
+          NOTES="## What's New\n\n"
+          [ -n "$FEATURES" ] && NOTES="${NOTES}### Features\n\n${FEATURES}\n"
+          [ -n "$FIXES" ] && NOTES="${NOTES}### Bug Fixes\n\n${FIXES}\n"
+          [ -n "$OTHER" ] && NOTES="${NOTES}### Other Changes\n\n${OTHER}\n"
+          NOTES="${NOTES}---\n\nSideload APK below. The in-app updater installs newer versions automatically."
+          echo -e "$NOTES" > /tmp/app-notes.md
+
           gh release create "$TAG" "$APK" \
             --title "Ironshelf App v$VERSION" \
-            --notes "$NOTES"
+            --notes-file /tmp/app-notes.md
