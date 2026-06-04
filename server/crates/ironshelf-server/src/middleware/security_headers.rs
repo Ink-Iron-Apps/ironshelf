@@ -59,5 +59,13 @@ pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Bo
         HeaderValue::from_static(CONTENT_SECURITY_POLICY),
     );
 
+    // HSTS — once a browser sees this over HTTPS it refuses plaintext for a year.
+    // Only meaningful (and only sent) on HTTPS, which is enforced at the edge for
+    // tunnel/cloud access. Harmless on plain-HTTP LAN (browsers ignore it there).
+    headers.insert(
+        "strict-transport-security",
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+
     response
 }

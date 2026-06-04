@@ -162,6 +162,19 @@ impl RateLimiter {
 /// prevent attackers from spoofing their IP via headers to bypass rate limiting.
 fn extract_client_address<B>(request: &Request<B>, trust_proxy_headers: bool) -> IpAddr {
     if trust_proxy_headers {
+        // CF-Connecting-IP: set by Cloudflare (tunnel/proxy) to the real client
+        // IP and stripped of any client-supplied value, so it can't be spoofed
+        // when traffic genuinely transits Cloudflare. Highest priority — this is
+        // what makes per-client rate limiting work behind a Cloudflare tunnel
+        // (where the peer socket would otherwise be 127.0.0.1 for everyone).
+        if let Some(cf_ip) = request.headers().get("cf-connecting-ip") {
+            if let Ok(header_value) = cf_ip.to_str() {
+                if let Ok(parsed_address) = header_value.trim().parse::<IpAddr>() {
+                    return parsed_address;
+                }
+            }
+        }
+
         // X-Forwarded-For: client, proxy1, proxy2 — take first.
         if let Some(forwarded_for) = request.headers().get("x-forwarded-for") {
             if let Ok(header_value) = forwarded_for.to_str() {
