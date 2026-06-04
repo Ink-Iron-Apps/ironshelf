@@ -650,6 +650,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/remote-access/manual-url",
             axum::routing::post(routes::remote_access::set_manual_url),
+        )
+        .route(
+            "/api/v1/server/remote-access/local-bypass",
+            axum::routing::post(routes::remote_access::set_local_bypass),
         );
 
     let protected_routes = Router::new()

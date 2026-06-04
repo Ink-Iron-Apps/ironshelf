@@ -115,11 +115,32 @@ pub async fn get_remote_access_status(
         (false, false, None)
     };
 
+    let cloud_connected = application_state
+        .ironshelf_db
+        .get_cloud_config("claim_token")
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    let local_bypass = application_state
+        .ironshelf_db
+        .get_cloud_config("local_auth_bypass")
+        .await
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
+    // The bypass is only permissible when fully local (no cloud, no remote access).
+    let local_bypass_allowed = !cloud_connected && active_method == "none";
+
     Ok(Json(json!({
         "method": active_method,
         "enabled": is_enabled,
         "active": is_active,
         "public_url": public_url,
+        "cloud_connected": cloud_connected,
+        "local_bypass": local_bypass,
+        "local_bypass_allowed": local_bypass_allowed,
         "upnp": {
             "enabled": upnp_status.is_enabled,
             "active": upnp_status.is_active,
@@ -378,6 +399,59 @@ pub async fn set_manual_url(
     crate::update_cloud_server_url(&application_state, &normalized).await;
 
     Ok(Json(json!({ "ok": true, "public_url": normalized, "error": null })))
+}
+
+/// Body for toggling the local-only auth bypass.
+#[derive(Debug, serde::Deserialize)]
+pub struct LocalBypassRequest {
+    pub enabled: bool,
+}
+
+/// `POST /api/v1/server/remote-access/local-bypass` — owner-only.
+/// Enables/disables the local-network auth bypass. Enabling is refused while the
+/// server is connected to a cloud account or has any remote access configured,
+/// since that would expose an unauthenticated server beyond the LAN.
+pub async fn set_local_bypass(
+    State(application_state): State<AppState>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
+    Json(request_body): Json<LocalBypassRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !auth_user.is_owner {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if request_body.enabled {
+        let cloud_connected = application_state
+            .ironshelf_db
+            .get_cloud_config("claim_token")
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        let method = application_state
+            .ironshelf_db
+            .get_cloud_config("remote_access_method")
+            .await
+            .ok()
+            .flatten();
+        let remote_on = !matches!(method.as_deref(), None | Some("") | Some("none"));
+        if cloud_connected || remote_on {
+            return Ok(Json(json!({
+                "enabled": false,
+                "error": "Disable cloud connection and remote access before enabling the local bypass.",
+            })));
+        }
+    }
+
+    let _ = application_state
+        .ironshelf_db
+        .set_cloud_config(
+            "local_auth_bypass",
+            if request_body.enabled { "true" } else { "false" },
+        )
+        .await;
+
+    Ok(Json(json!({ "enabled": request_body.enabled, "error": null })))
 }
 
 pub async fn stop_tunnel(
