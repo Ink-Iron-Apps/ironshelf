@@ -236,10 +236,6 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::post(routes::cloud_auth::cloud_login),
         )
         .route(
-            "/api/v1/auth/claim",
-            axum::routing::post(routes::cloud_auth::claim_server),
-        )
-        .route(
             "/api/v1/auth/claim-status",
             get(routes::cloud_auth::claim_status),
         )
@@ -274,6 +270,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/auth/unclaim",
             axum::routing::delete(routes::cloud_auth::unclaim_server),
+        )
+        .route(
+            "/api/v1/auth/claim",
+            axum::routing::post(routes::cloud_auth::claim_server),
         )
         .route("/api/v1/users", get(routes::users::list_users))
         .route(

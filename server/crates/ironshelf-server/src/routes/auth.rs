@@ -199,10 +199,18 @@ pub async fn login(
         .bind(&request.username)
         .fetch_optional(pool)
         .await
-        .map_err(AppError::internal)?
-        .ok_or_else(|| AppError::Unauthorized(
-            "Invalid credentials".to_string(),
-        ))?;
+        .map_err(AppError::internal)?;
+
+    let row = match row {
+        Some(row) => row,
+        None => {
+            // Run an argon2 hash anyway so a missing username takes about as long
+            // as a wrong password — otherwise the timing difference leaks which
+            // usernames exist.
+            let _ = crate::auth::hash_password(&request.password);
+            return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+        }
+    };
 
     let password_hash: String = row.get("password_hash");
     if !verify_password(&request.password, &password_hash) {
@@ -262,7 +270,7 @@ pub async fn logout(
     // This preserves sessions on other devices (phone, tablet, etc).
     if let Some(ref current_session_id) = user.session_id {
         sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
-            .bind(current_session_id)
+            .bind(crate::auth::hash_session_id(current_session_id))
             .bind(&user.user_id)
             .execute(pool)
             .await
@@ -405,8 +413,9 @@ async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String
     let expires_at = (chrono::Utc::now() + chrono::Duration::days(7))
         .to_rfc3339();
 
+    // Store only the hash of the session id; the raw id is returned to the client.
     sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
-        .bind(&session_id)
+        .bind(crate::auth::hash_session_id(&session_id))
         .bind(user_id)
         .bind(&expires_at)
         .execute(pool)

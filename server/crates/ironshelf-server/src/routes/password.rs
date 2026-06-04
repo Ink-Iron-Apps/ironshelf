@@ -69,7 +69,7 @@ pub async fn change_password(
     if let Some(ref current_session_id) = current_user.session_id {
         sqlx::query("DELETE FROM sessions WHERE user_id = ? AND id != ?")
             .bind(&current_user.user_id)
-            .bind(current_session_id)
+            .bind(crate::auth::hash_session_id(current_session_id))
             .execute(pool)
             .await
             .map_err(AppError::internal)?;

@@ -498,7 +498,7 @@ async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String
     let expires_at = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
 
     sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
-        .bind(&session_id)
+        .bind(crate::auth::hash_session_id(&session_id))
         .bind(user_id)
         .bind(&expires_at)
         .execute(pool)
