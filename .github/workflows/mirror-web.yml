@@ -45,13 +45,35 @@ jobs:
           rsync -a --delete server/web/css/ web-mirror/css/
           cp server/web/favicon.svg web-mirror/favicon.svg 2>/dev/null || true
 
+      - name: Cache-bust asset refs in hosted index.html
+        working-directory: web-mirror
+        run: |
+          # GitHub Pages serves /js + /css with Cache-Control: max-age=600 and no
+          # filename hashing. With unversioned <script src="/js/app.js">, a CDN
+          # edge or browser can keep serving a STALE app.js against the current
+          # index.html for up to 10 minutes after a mirror — the "old works / new
+          # fails" skew. Stamp every local JS/CSS ref with ?v=<sha> so a new build
+          # always forces the matching asset. Only the query strings change; the
+          # hosted index.html keeps its own IRONSHELF_HOSTED flag and CNAME.
+          SHA="${GITHUB_SHA::7}"
+          if [ -f index.html ]; then
+            sed -i -E \
+              -e "s#(src=\"/js/[A-Za-z0-9._-]+\.js)(\?v=[A-Za-z0-9]+)?\"#\1?v=${SHA}\"#g" \
+              -e "s#(href=\"/css/[A-Za-z0-9._-]+\.css)(\?v=[A-Za-z0-9]+)?\"#\1?v=${SHA}\"#g" \
+              index.html
+            echo "Stamped index.html asset refs with v=${SHA}:"
+            grep -nE "/(js|css)/[A-Za-z0-9._-]+\.(js|css)\?v=" index.html || true
+          else
+            echo "No index.html in hosted repo — skipping cache-bust."
+          fi
+
       - name: Commit + push if changed
         working-directory: web-mirror
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if [ -n "$(git status --porcelain)" ]; then
-            git add js css favicon.svg
+            git add js css favicon.svg index.html
             git commit -m "chore: mirror web UI from ironshelf@${GITHUB_SHA::7}"
             git push
           else
