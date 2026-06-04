@@ -437,6 +437,11 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::patch(routes::reading_queue::move_queue_item),
         )
         .route(
+            "/api/v1/me/pinned-libraries",
+            get(routes::pinned_libraries::list_pinned_libraries)
+                .put(routes::pinned_libraries::set_pinned_libraries),
+        )
+        .route(
             "/api/v1/me/reading-goal",
             get(routes::reading_goals::get_reading_goal)
                 .post(routes::reading_goals::set_reading_goal),
