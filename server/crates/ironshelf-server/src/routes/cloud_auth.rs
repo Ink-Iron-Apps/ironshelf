@@ -42,8 +42,13 @@ pub struct ClaimResponse {
 
 pub async fn claim_server(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(request): Json<ClaimRequest>,
 ) -> Result<Json<ClaimResponse>, AppError> {
+    // Owner-only: the claim token is the HMAC key that the cloud-login path
+    // trusts, so an unauthenticated claim would let anyone forge owner sessions.
+    crate::auth::require_owner(&auth_user)?;
+
     let claim_token = request.claim_token.trim();
     if claim_token.is_empty() {
         return Err(AppError::BadRequest(
@@ -134,7 +139,10 @@ pub async fn claim_server(
 
 pub async fn unclaim_server(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<ClaimResponse>, AppError> {
+    crate::auth::require_owner(&auth_user)?;
+
     let ironshelf_db = &state.ironshelf_db;
 
     // Delete all cloud config entries
@@ -318,7 +326,7 @@ pub async fn cloud_login(
     sqlx::query(
         "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)",
     )
-    .bind(&session_id)
+    .bind(crate::auth::hash_session_id(&session_id))
     .bind(&user_id)
     .bind(expires_at.to_rfc3339())
     .execute(pool)
@@ -447,6 +455,16 @@ async fn verify_cloud_token(
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err("Invalid token format".to_string());
+    }
+
+    // Pin the algorithm to HS256. Without this an attacker could present a token
+    // with "alg":"none" or a different scheme (algorithm-confusion).
+    let header_bytes =
+        base64_url_decode(parts[0]).map_err(|_| "Invalid token header".to_string())?;
+    let header: serde_json::Value = serde_json::from_slice(&header_bytes)
+        .map_err(|_| "Invalid token header".to_string())?;
+    if header["alg"].as_str() != Some("HS256") {
+        return Err("Unsupported token algorithm".to_string());
     }
 
     let header_payload = format!("{}.{}", parts[0], parts[1]);

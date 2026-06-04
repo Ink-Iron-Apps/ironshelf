@@ -152,13 +152,25 @@ pub(crate) async fn validate_api_key(pool: &sqlx::SqlitePool, token: &str) -> Re
 }
 
 /// Validate a session ID.
+/// Hash a raw session id for storage/lookup. The raw id is the bearer
+/// credential held by the client; only its SHA-256 is kept server-side, so a DB
+/// or backup leak doesn't expose usable sessions. (SHA-256 is fine here — session
+/// ids are already high-entropy UUIDs, unlike passwords.)
+pub fn hash_session_id(session_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(session_id.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 async fn validate_session(pool: &sqlx::SqlitePool, session_id: &str) -> Result<AuthUser, StatusCode> {
+    let hashed = hash_session_id(session_id);
     let row = sqlx::query(
         "SELECT s.user_id, u.username, u.is_owner, s.expires_at \
          FROM sessions s JOIN users u ON u.id = s.user_id \
          WHERE s.id = ?",
     )
-    .bind(session_id)
+    .bind(&hashed)
     .fetch_optional(pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

@@ -20,10 +20,12 @@ pub async fn accessible_library_ids(
         return None;
     }
     match state.ironshelf_db.get_accessible_libraries(&user.user_id).await {
+        // Specific grants configured → restrict to them.
         Ok(Some(ids)) => Some(ids.into_iter().collect()),
-        // No restriction configured, or a lookup error → fail open to "all".
-        // (Grants are additive; a DB hiccup shouldn't lock a user out.)
-        _ => None,
+        // No grant rows → unrestricted (sees all libraries).
+        Ok(None) => None,
+        // Lookup error → fail CLOSED (deny all) rather than leak every library.
+        Err(_) => Some(HashSet::new()),
     }
 }
 
