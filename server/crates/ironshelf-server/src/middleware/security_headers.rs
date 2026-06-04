@@ -21,7 +21,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
     font-src https://fonts.gstatic.com; \
     img-src 'self' data: blob: https:; \
-    connect-src 'self' https://*.workers.dev https://*.trycloudflare.com";
+    connect-src 'self' https://cloud.inknironapps.com https://*.workers.dev https://*.trycloudflare.com";
 
 /// Middleware that appends security headers to every response.
 pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Body> {

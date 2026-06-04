@@ -69,8 +69,7 @@ class CloudException implements Exception {
 /// auth broker + server directory — it is not a proxy. After listing servers
 /// and issuing a per-server access token, the app talks to the server directly.
 class CloudService {
-  static const String baseUrl =
-      'https://ironshelf-cloud.padragantrbs.workers.dev';
+  static const String baseUrl = 'https://cloud.inknironapps.com';
 
   final Dio _dio = Dio(BaseOptions(
     baseUrl: baseUrl,

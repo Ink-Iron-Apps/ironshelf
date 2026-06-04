@@ -11,7 +11,7 @@
   const HOSTED = !!window.IRONSHELF_HOSTED;
   const SERVER_URL = HOSTED ? (localStorage.getItem('ironshelf_server_url') || '') : '';
   const API = (HOSTED && SERVER_URL) ? `${SERVER_URL}/api/v1` : '/api/v1';
-  const CLOUD_API = 'https://ironshelf-cloud.padragantrbs.workers.dev';
+  const CLOUD_API = 'https://cloud.inknironapps.com';
 
   // Cross-origin media (<img>/downloads) can't set an Authorization header, so
   // append the server token as a query param the server also accepts. Empty
