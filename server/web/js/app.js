@@ -9689,6 +9689,25 @@
     });
   }
 
+  // Remove (unclaim) a server from the cloud account. Owner-authed via the cloud
+  // JWT, so it works even when the server itself is offline/broken — unlike the
+  // server-side /auth/unclaim path, which needs the server reachable. Returns
+  // true if removed, false if the user cancelled the confirm.
+  async function removeCloudServer(serviceUrl, serviceToken, serverId, serverName) {
+    if (!window.confirm(`Remove "${serverName}" from your cloud account?\n\nThis unlinks it from Ironshelf Cloud (it does not modify the server itself). You can re-claim it later from the server's Settings → Ironshelf Cloud.`)) {
+      return false;
+    }
+    const response = await fetch(`${serviceUrl}/servers/${serverId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${serviceToken}` },
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to remove server');
+    }
+    return true;
+  }
+
   async function renderCloudServerPicker() {
     setTitle(['Select Server']);
     breadcrumbTrail = [];
@@ -9749,16 +9768,19 @@
       }
 
       const serverListHtml = allServers.map(server => `
-        <button class="cloud-server-btn" data-server-id="${escapeHtml(server.id)}" data-server-url="${escapeHtml(server.url)}">
-          <div class="cloud-server-info">
-            <span class="cloud-server-name">${icon('server', 16)} ${escapeHtml(server.name)}</span>
-            <span class="cloud-server-url text-muted">${escapeHtml(server.url)}</span>
-          </div>
-          <div class="cloud-server-meta">
-            <span class="badge ${server.relationship === 'owned' ? 'badge-primary' : 'badge-default'}">${server.relationship}</span>
-            ${server.is_verified ? `<span class="badge badge-success" title="Verified">${icon('check', 12)}</span>` : `<span class="badge badge-warning" title="Unverified">${icon('alertCircle', 12)}</span>`}
-          </div>
-        </button>
+        <div class="cloud-server-row" style="display:flex;gap:8px;align-items:stretch">
+          <button class="cloud-server-btn" style="flex:1" data-server-id="${escapeHtml(server.id)}" data-server-url="${escapeHtml(server.url)}">
+            <div class="cloud-server-info">
+              <span class="cloud-server-name">${icon('server', 16)} ${escapeHtml(server.name)}</span>
+              <span class="cloud-server-url text-muted">${escapeHtml(server.url)}</span>
+            </div>
+            <div class="cloud-server-meta">
+              <span class="badge ${server.relationship === 'owned' ? 'badge-primary' : 'badge-default'}">${server.relationship}</span>
+              ${server.is_verified ? `<span class="badge badge-success" title="Verified">${icon('check', 12)}</span>` : `<span class="badge badge-warning" title="Unverified">${icon('alertCircle', 12)}</span>`}
+            </div>
+          </button>
+          ${server.relationship === 'owned' ? `<button class="btn btn-danger cloud-server-remove" data-server-id="${escapeHtml(server.id)}" data-server-name="${escapeHtml(server.name)}" title="Remove server" aria-label="Remove ${escapeHtml(server.name)}">${icon('trash', 16)}</button>` : ''}
+        </div>
       `).join('');
 
       document.querySelector('.cloud-servers-loading').innerHTML = `
@@ -9782,6 +9804,27 @@
             toast(err.message, 'error');
             btn.disabled = false;
             btn.style.opacity = '1';
+          }
+        });
+      });
+
+      // Bind remove handlers (owned servers only)
+      document.querySelectorAll('.cloud-server-remove').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const serverId = btn.dataset.serverId;
+          const serverName = btn.dataset.serverName;
+          btn.disabled = true;
+          try {
+            const removed = await removeCloudServer(cloudServiceUrl, cloudToken, serverId, serverName);
+            if (removed) {
+              toast(`Removed "${serverName}"`, 'success');
+              renderCloudServerPicker();
+            } else {
+              btn.disabled = false;
+            }
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
           }
         });
       });
@@ -10289,7 +10332,10 @@
 
         const owned = (await ownedRes.json())?.data || [];
         const shared = (await sharedRes.json())?.data || [];
-        const allServers = [...owned, ...shared];
+        const allServers = [
+          ...owned.map(s => ({ ...s, _owned: true })),
+          ...shared.map(s => ({ ...s, _owned: false })),
+        ];
 
         if (allServers.length === 0) {
           serverList.innerHTML = `
@@ -10304,10 +10350,13 @@
         }
 
         serverList.innerHTML = allServers.map(server => `
-          <button class="cloud-server-btn" data-server-url="${escapeHtml(server.url)}" data-server-id="${escapeHtml(server.id)}" data-server-name="${escapeHtml(server.name)}">
-            <span class="cloud-server-name">${escapeHtml(server.name)}</span>
-            <span class="cloud-server-url">${escapeHtml(server.url)}</span>
-          </button>
+          <div class="cloud-server-row" style="display:flex;gap:8px;align-items:stretch">
+            <button class="cloud-server-btn" style="flex:1" data-server-url="${escapeHtml(server.url)}" data-server-id="${escapeHtml(server.id)}" data-server-name="${escapeHtml(server.name)}">
+              <span class="cloud-server-name">${escapeHtml(server.name)}</span>
+              <span class="cloud-server-url">${escapeHtml(server.url)}</span>
+            </button>
+            ${server._owned ? `<button class="btn btn-danger cloud-server-remove" data-server-id="${escapeHtml(server.id)}" data-server-name="${escapeHtml(server.name)}" title="Remove server" aria-label="Remove ${escapeHtml(server.name)}">${icon('trash', 16)}</button>` : ''}
+          </div>
         `).join('');
 
         // Click server → connect
@@ -10351,6 +10400,27 @@
               btn.disabled = false;
               btn.querySelector('.cloud-server-url').textContent = err.message;
               btn.querySelector('.cloud-server-url').style.color = 'var(--color-danger)';
+            }
+          });
+        });
+
+        // Remove (unclaim) owned servers — works even if the server is offline
+        serverList.querySelectorAll('.cloud-server-remove').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const serverId = btn.dataset.serverId;
+            const serverName = btn.dataset.serverName;
+            btn.disabled = true;
+            try {
+              const removed = await removeCloudServer(CLOUD_API, token, serverId, serverName);
+              if (removed) {
+                toast(`Removed "${serverName}"`, 'success');
+                await loadCloudServers(token);
+              } else {
+                btn.disabled = false;
+              }
+            } catch (err) {
+              toast(err.message, 'error');
+              btn.disabled = false;
             }
           });
         });
