@@ -1289,12 +1289,17 @@
   function renderShell(bodyContent, activePage = '') {
     const app = document.getElementById('app');
 
-    const mainNavItems = [
-      { id: 'home', label: 'Home', icon: 'home', path: '/' },
-      { id: 'mybooks', label: 'My Books', icon: 'bookOpen', path: '/mybooks' },
+    // Grouped sidebar nav. Home sits on top with no heading; the rest is split
+    // into "Library" (browse) and "Reading" (personal) sections so the section
+    // headings actually describe what's under them.
+    const homeNavItem = { id: 'home', label: 'Home', icon: 'home', path: '/' };
+    const libraryNavItems = [
       { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
+    ];
+    const readingNavItems = [
+      { id: 'mybooks', label: 'My Books', icon: 'bookOpen', path: '/mybooks' },
+      { id: 'queue', label: 'Reading Queue', icon: 'clock', path: '/queue' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
-      { id: 'queue', label: 'Queue', icon: 'clock', path: '/queue' },
       { id: 'highlights', label: 'Highlights', icon: 'edit', path: '/highlights' },
       { id: 'bookmarks', label: 'Bookmarks', icon: 'bookmark', path: '/bookmarks' },
       { id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' },
@@ -1316,22 +1321,25 @@
       </a>
     `;
 
-    // Pinned libraries sit directly below Home, above the rest of the nav.
-    const pinnedLibraries = getPinnedLibraries();
-    const pinnedLibrariesHtml = pinnedLibraries.length === 0 ? '' : `
-      <div class="sidebar-section-label">Libraries</div>
-      ${pinnedLibraries.map(lib => {
-        const sourceIcon = lib.source_kind === 'calibre' ? 'book' : 'folder';
-        return `<a href="#/library/${lib.id}" aria-label="${escapeHtml(lib.name)} library">
-          ${icon(sourceIcon)}
-          <span>${escapeHtml(lib.name)}</span>
-        </a>`;
-      }).join('')}
-    `;
+    const sectionLabel = (text) => `<div class="sidebar-section-label">${text}</div>`;
 
-    const navHtml = mainNavItems
-      .map((item, index) => index === 0 ? renderNavItem(item) + pinnedLibrariesHtml : renderNavItem(item))
-      .join('');
+    // Pinned-library links (no heading of their own — they live under "Library").
+    const pinnedLibraries = getPinnedLibraries();
+    const pinnedLibrariesHtml = pinnedLibraries.map(lib => {
+      const sourceIcon = lib.source_kind === 'calibre' ? 'book' : 'folder';
+      return `<a href="#/library/${lib.id}" aria-label="${escapeHtml(lib.name)} library">
+        ${icon(sourceIcon)}
+        <span>${escapeHtml(lib.name)}</span>
+      </a>`;
+    }).join('');
+
+    const navHtml =
+      renderNavItem(homeNavItem) +
+      sectionLabel('Library') +
+      pinnedLibrariesHtml +
+      libraryNavItems.map(renderNavItem).join('') +
+      sectionLabel('Reading') +
+      readingNavItems.map(renderNavItem).join('');
 
     const isAdminActive = adminNavItems.some(item => activePage === item.id);
     const adminSectionHtml = adminNavItems.length > 0 ? `
