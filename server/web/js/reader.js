@@ -90,6 +90,19 @@ const IronshelfReader = (() => {
     return url + (url.includes('?') ? '&' : '?') + 'access_token=' + encodeURIComponent(token);
   }
 
+  // For media (book file) URLs only: prefer the short-lived scoped media token
+  // exposed by app.js, falling back to the session token. The scoped token is
+  // only accepted by media routes, so it must NOT be used for /progress etc.
+  function withMediaToken(url) {
+    const mediaToken = typeof window.IronshelfMediaToken === 'function'
+      ? window.IronshelfMediaToken()
+      : null;
+    if (mediaToken) {
+      return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(mediaToken);
+    }
+    return withToken(url);
+  }
+
   // --- Progress API ---
   async function fetchProgress(bookId) {
     try {
@@ -435,7 +448,7 @@ const IronshelfReader = (() => {
       // the URL directly makes epub.js treat it as an unpacked directory (it
       // fetches META-INF/container.xml relative to the path) and hang; an
       // ArrayBuffer forces archive mode and carries the session cookie.
-      const bookUrl = withToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
+      const bookUrl = withMediaToken(`${API}/books/${bookId}/file?format=${fileFormat}`);
       const bookResponse = await fetch(bookUrl, { credentials: 'same-origin' });
       if (!bookResponse.ok) {
         throw new Error(`Failed to download book (${bookResponse.status})`);
