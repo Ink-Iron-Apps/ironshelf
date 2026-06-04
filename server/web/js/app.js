@@ -5114,11 +5114,15 @@
             </div>
             <div class="continue-reading-row">
         `;
-        for (const book of continueBooks) {
+        for (const entry of continueBooks) {
+          // /books/continue returns { book: {...}, progress: { percent, format } }.
+          const book = entry.book || entry;
+          const progress = entry.progress || {};
           const coverUrl = book.has_cover ? `${API}/books/${book.id}/cover${mediaToken()}` : '';
-          const progressPercent = Math.round((book.progress || 0) * 100);
+          const progressPercent = Math.round((progress.percent || 0) * 100);
+          const readFormat = (progress.format || 'epub').toLowerCase();
           bodyContent += `
-            <div class="continue-reading-card" data-read-book-id="${book.id}" data-read-format="${book.format || 'epub'}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
+            <div class="continue-reading-card" data-read-book-id="${book.id}" data-read-format="${readFormat}" role="link" tabindex="0" aria-label="Continue reading ${escapeHtml(book.title)}">
               ${coverUrl
                 ? `<div class="book-cover"><img src="${coverUrl}" alt="" loading="lazy"><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
                 : `<div class="book-cover-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><div class="cover-progress-wrap"><div class="cover-progress-bar"><div class="cover-progress-fill" style="width:${progressPercent}%"></div></div><div class="cover-progress-label">${progressPercent}%</div></div></div>`
