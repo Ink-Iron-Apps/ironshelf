@@ -313,12 +313,44 @@
     return [];
   }
 
+  // localStorage holds a cache of the server-synced pins for instant render and
+  // offline use; the server is the source of truth (see refreshPinnedLibraries).
   function setPinnedLibraries(pinned) {
     localStorage.setItem(PINNED_LIBRARIES_KEY, JSON.stringify(pinned));
   }
 
   function isLibraryPinned(libraryId) {
     return getPinnedLibraries().some(p => p.id === libraryId);
+  }
+
+  // Push the full pin set to the server (pin/unpin/reorder are all "replace the
+  // list"). Best-effort: the localStorage cache is already updated, so a failed
+  // sync just means it retries on the next change / next load.
+  async function syncPinnedLibraries(pinned) {
+    try {
+      await apiPut('/me/pinned-libraries', { libraries: pinned });
+    } catch (syncError) {
+      console.warn('Failed to sync pinned libraries to server:', syncError);
+    }
+  }
+
+  // Pull the authoritative pin set from the server into the localStorage cache.
+  // Called after auth so pins follow the account across devices/origins. Silent
+  // on failure (offline, or an older server without the endpoint) — the cache
+  // is kept as-is so pins still render.
+  async function refreshPinnedLibraries() {
+    try {
+      const serverPinned = await apiGet('/me/pinned-libraries');
+      if (!Array.isArray(serverPinned)) return;
+      const localPinned = getPinnedLibraries();
+      // First run after upgrade: the user has local pins but the server has none
+      // yet. Migrate the local set up instead of clobbering it with empty.
+      if (serverPinned.length === 0 && localPinned.length > 0) {
+        await syncPinnedLibraries(localPinned);
+        return;
+      }
+      setPinnedLibraries(serverPinned);
+    } catch { /* keep cached pins */ }
   }
 
   function togglePinLibrary(library) {
@@ -338,6 +370,7 @@
       });
     }
     setPinnedLibraries(pinned);
+    syncPinnedLibraries(pinned);
     return true;
   }
 
@@ -1142,6 +1175,9 @@
       // author photos, download links) can use it instead of the session id.
       // Non-blocking and best-effort: media falls back to the session if absent.
       refreshMediaToken(true);
+      // Sync server-side pinned libraries into the localStorage cache before the
+      // first render so the sidebar shows the account's pins on any device/origin.
+      await refreshPinnedLibraries();
       return true;
     } catch {
       return false;

@@ -345,6 +345,15 @@ pub struct StoredReadingQueueItem {
     pub added_at: String,
 }
 
+/// A pinned library as stored in the database.
+#[derive(Debug, Clone)]
+pub struct StoredPinnedLibrary {
+    pub library_id: String,
+    pub name: String,
+    pub source_kind: String,
+    pub position: i64,
+}
+
 /// A reading goal as stored in the database.
 #[derive(Debug, Clone)]
 pub struct StoredReadingGoal {
@@ -465,6 +474,9 @@ impl IronshelfDb {
 
         let migration_019 = include_str!("migrations/019_author_info.sql");
         sqlx::raw_sql(migration_019).execute(&self.pool).await?;
+
+        let migration_020 = include_str!("migrations/020_pinned_libraries.sql");
+        sqlx::raw_sql(migration_020).execute(&self.pool).await?;
 
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
@@ -2497,6 +2509,68 @@ impl IronshelfDb {
             .execute(&self.pool)
             .await?;
         }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Pinned Libraries
+    // =========================================================================
+
+    /// Get a user's pinned libraries, ordered by their pinned position.
+    pub async fn get_pinned_libraries(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<StoredPinnedLibrary>, DbError> {
+        let rows = sqlx::query(
+            "SELECT library_id, name, source_kind, position \
+             FROM pinned_libraries WHERE user_id = ? ORDER BY position ASC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| StoredPinnedLibrary {
+                library_id: row.get("library_id"),
+                name: row.get("name"),
+                source_kind: row.get("source_kind"),
+                position: row.get("position"),
+            })
+            .collect())
+    }
+
+    /// Replace a user's entire set of pinned libraries with the given ordered
+    /// list. The slice is `(library_id, name, source_kind)` in display order;
+    /// position is assigned from the index. Runs in a transaction so a failed
+    /// re-insert never leaves the user with an empty pin set.
+    pub async fn set_pinned_libraries(
+        &self,
+        user_id: &str,
+        libraries: &[(String, String, String)],
+    ) -> Result<(), DbError> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query("DELETE FROM pinned_libraries WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        for (index, (library_id, name, source_kind)) in libraries.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO pinned_libraries (user_id, library_id, name, source_kind, position) \
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(user_id)
+            .bind(library_id)
+            .bind(name)
+            .bind(source_kind)
+            .bind(index as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 

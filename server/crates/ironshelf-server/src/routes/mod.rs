@@ -25,6 +25,7 @@ pub mod oidc;
 pub mod opds;
 pub mod password;
 pub mod personal_stats;
+pub mod pinned_libraries;
 pub mod progress;
 pub mod ratings_reviews;
 pub mod reading_goals;
