@@ -3863,7 +3863,29 @@
         `;
       }
 
-      cardContainer.innerHTML = methodSelectorHtml + methodPanelHtml;
+      // Local-network auth bypass — only offered when fully local.
+      let localBypassHtml = '';
+      if (status.local_bypass_allowed || status.local_bypass) {
+        localBypassHtml = `
+          <div class="card" style="margin-top:var(--space-5);padding:var(--space-4)">
+            <label style="display:flex;align-items:center;gap:var(--space-3);cursor:pointer">
+              <input type="checkbox" id="local-bypass-toggle" ${status.local_bypass ? 'checked' : ''}>
+              <strong>Skip login on the local network</strong>
+            </label>
+            <p class="form-hint" style="margin-top:var(--space-2)">
+              Anyone on your local network can open this server <em>without signing in</em>. Use only on a trusted home network. Automatically disabled if you connect to cloud or enable remote access.
+            </p>
+          </div>`;
+      } else {
+        localBypassHtml = `
+          <p class="form-hint" style="margin-top:var(--space-5)">
+            ${status.cloud_connected
+              ? 'Local-network login bypass is unavailable while connected to a cloud account.'
+              : 'Local-network login bypass is unavailable while remote access is enabled.'}
+          </p>`;
+      }
+
+      cardContainer.innerHTML = methodSelectorHtml + methodPanelHtml + localBypassHtml;
 
       // Bind event handlers.
       bindRemoteAccessEvents(status);
@@ -4082,6 +4104,40 @@
       } catch (startError) {
         toast(startError.message || 'Failed to start tunnel', 'error');
         loadRemoteAccessCard();
+      }
+    });
+
+    document.getElementById('local-bypass-toggle')?.addEventListener('change', async (event) => {
+      const toggle = event.target;
+      const wantEnabled = toggle.checked;
+
+      const apply = async (enabled) => {
+        try {
+          const result = await apiPost('/server/remote-access/local-bypass', { enabled });
+          if (result.error) {
+            toast(result.error, 'error');
+          } else {
+            toast(enabled ? 'Local login bypass enabled' : 'Local login bypass disabled',
+              enabled ? 'warning' : 'success');
+          }
+        } catch (bypassError) {
+          toast(bypassError.message || 'Failed to update', 'error');
+        }
+        loadRemoteAccessCard();
+      };
+
+      if (wantEnabled) {
+        // Revert the optimistic check until confirmed.
+        toggle.checked = false;
+        showConfirmModal({
+          title: 'Disable login for your local network?',
+          message: 'Anyone who can reach this server on your local network will be able to read your whole library and change settings WITHOUT a password. Only do this on a trusted private network. Are you sure?',
+          confirmText: 'Yes, skip local login',
+          confirmClass: 'btn-danger',
+          onConfirm: () => apply(true),
+        });
+      } else {
+        apply(false);
       }
     });
 
