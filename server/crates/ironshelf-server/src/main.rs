@@ -246,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
     // for Rust's trait solver to verify the middleware Service bounds.
     let auth_management_routes = Router::new()
         .route("/api/v1/auth/me", get(routes::auth::me))
+        .route("/api/v1/auth/media-token", get(routes::auth::media_token))
         .route("/api/v1/auth/logout", axum::routing::post(routes::auth::logout))
         .route(
             "/api/v1/auth/password",

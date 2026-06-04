@@ -13,6 +13,8 @@ use axum::{
 };
 use sqlx::Row;
 
+pub mod media_token;
+
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -55,8 +57,15 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Allow auth via an `access_token` query param so cross-origin `<img>` /
-    // download requests (which can't set an Authorization header) work.
-    let query_token = request.uri().query().and_then(parse_access_token);
+    // download requests (which can't set an Authorization header) work. Also
+    // accept a `token` param, used by the scoped media-token path.
+    let query = request.uri().query();
+    let query_token = query.and_then(|q| parse_query_param(q, "access_token"));
+    let media_query_token = query.and_then(|q| parse_query_param(q, "token"));
+    // Capture the request path up front (owned String) so media-token scoping can
+    // be checked in the failure branch without borrowing the non-Sync request body
+    // across await points (which would make this future non-Send).
+    let request_path = request.uri().path().to_string();
     // Capture the peer IP up front (Copy) so the bypass check doesn't borrow the
     // non-Sync request body across await points.
     let client_ip = request
@@ -70,6 +79,23 @@ pub async fn auth_middleware(
             Ok(next.run(request).await)
         }
         Err(status) => {
+            // Scoped media token: ONLY honoured for GET media routes (cover, book
+            // file, author photo). A media token can never authenticate a general
+            // API call — if standard auth failed and this isn't a media route, the
+            // token is ignored. The token may arrive as either `token=` or, for
+            // back-compat with the old client, `access_token=`.
+            if is_media_route(&request_path) {
+                let candidate = media_query_token
+                    .as_deref()
+                    .or(query_token.as_deref())
+                    .filter(|token| media_token::looks_like_media_token(token));
+                if let Some(token) = candidate {
+                    if let Some(media_user) = media_token::verify(&state, token).await {
+                        request.extensions_mut().insert(media_user);
+                        return Ok(next.run(request).await);
+                    }
+                }
+            }
             // Local-only convenience bypass (opt-in). Only when enabled, NOT
             // connected to cloud, NO remote access configured, and the request
             // comes from a loopback/LAN address — then treat it as the owner.
@@ -80,6 +106,22 @@ pub async fn auth_middleware(
             Err(status)
         }
     }
+}
+
+/// Whether `path` is one of the GET media routes that may accept a scoped media
+/// token (book cover, book file, author photo). Matches the axum route shapes
+/// `/api/v1/books/{id}/cover`, `/api/v1/books/{id}/file`,
+/// `/api/v1/authors/{id}/photo`.
+fn is_media_route(path: &str) -> bool {
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    // ["api","v1","books","{id}","cover"|"file"] or ["api","v1","authors","{id}","photo"]
+    if segments.len() != 5 || segments[0] != "api" || segments[1] != "v1" {
+        return false;
+    }
+    matches!(
+        (segments[2], segments[4]),
+        ("books", "cover") | ("books", "file") | ("authors", "photo")
+    )
 }
 
 /// Whether an unauthenticated request may be served as the owner via the
@@ -140,12 +182,12 @@ fn is_local_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// Pull the `access_token` value out of a URL query string. Tokens are session
-/// ids or `irs_` API keys (no percent-encoded characters), so no decoding.
-fn parse_access_token(query: &str) -> Option<String> {
+/// Pull a named value out of a URL query string. Tokens (session ids, `irs_` API
+/// keys, media tokens) contain no percent-encoded characters, so no decoding.
+fn parse_query_param(query: &str, name: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
-        if key == "access_token" {
+        if key == name {
             Some(value.to_string())
         } else {
             None
