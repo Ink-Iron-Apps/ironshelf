@@ -7,7 +7,8 @@
 <!-- ![License](https://img.shields.io/github/license/LightWraith8268/ironshelf) -->
 <!-- ![Latest Release](https://img.shields.io/github/v/release/LightWraith8268/ironshelf) -->
 
-[![Latest Android app](https://img.shields.io/github/v/release/LightWraith8268/ironshelf?filter=app-v*&label=Android%20app&color=095F73)](https://github.com/LightWraith8268/ironshelf/releases?q=app-v&expanded=true)
+[![Latest server release](https://img.shields.io/github/v/release/LightWraith8268/ironshelf?filter=v*&label=server&color=095F73)](https://github.com/LightWraith8268/ironshelf/releases/latest)
+[![Latest Android app](https://img.shields.io/github/v/release/LightWraith8268/ironshelf?filter=app-v*&label=Android%20app&color=3BB3C9)](https://github.com/LightWraith8268/ironshelf/releases/tag/app-latest)
 
 Ironshelf is a self-hosted ebook management server that finally gets library browsing right. Unlike Calibre-Web, Stump, or Kavita, Ironshelf organizes your collection around the relationship readers actually care about: who wrote it, what series it belongs to, and where it falls in reading order. It reads your existing Calibre database without modification, layers in folder-based scanning for non-Calibre collections, and serves everything through a clean web interface and OPDS-compatible API.
 
@@ -84,7 +85,7 @@ Download the binary for your platform from the [Releases](https://github.com/Lig
 
 #### Android app
 
-Get the companion Android app from the **[latest app release](https://github.com/LightWraith8268/ironshelf/releases?q=app-v&expanded=true)** (filtered to app builds so they don't get lost among server releases). Download the `Ironshelf-v<version>-debug.apk` asset and open it on your device to install. Once installed, the app's built-in updater checks for and installs newer versions automatically — no need to revisit Releases.
+Download the **[latest app APK](https://github.com/LightWraith8268/ironshelf/releases/download/app-latest/Ironshelf-latest-debug.apk)** directly, or browse the **[latest app release](https://github.com/LightWraith8268/ironshelf/releases/tag/app-latest)** page (the `app-latest` release always points to the newest build, so it never gets lost among server releases). Open the APK on your device to install. Once installed, the app's built-in updater checks for and installs newer versions automatically — no need to revisit Releases.
 
 ### 2. Create a configuration file
 
