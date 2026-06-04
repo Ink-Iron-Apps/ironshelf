@@ -1297,7 +1297,6 @@
       { id: 'genres', label: 'Genres', icon: 'collection', path: '/genres' },
     ];
     const readingNavItems = [
-      { id: 'mybooks', label: 'My Books', icon: 'bookOpen', path: '/mybooks' },
       { id: 'queue', label: 'Reading Queue', icon: 'clock', path: '/queue' },
       { id: 'collections', label: 'Collections', icon: 'collection', path: '/collections' },
       { id: 'highlights', label: 'Highlights', icon: 'edit', path: '/highlights' },
