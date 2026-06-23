@@ -4,9 +4,11 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use totp_rs::{Algorithm, Secret, TOTP};
 
 use crate::auth::{hash_password, verify_password, AuthUser};
 use crate::error::AppError;
+use crate::routes::login_state::PendingTotp;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -50,6 +52,12 @@ pub struct ApiKeySummary {
     pub prefix: String,
     pub label: String,
     pub created_at: String,
+}
+
+#[derive(Deserialize)]
+pub struct TwoFactorLoginRequest {
+    pub token: String,
+    pub code: String,
 }
 
 /// POST /api/v1/auth/register — first user becomes owner
@@ -173,7 +181,7 @@ pub async fn register(
     }
 
     // Create session
-    let session_id = create_session(pool, &user_id).await
+    let session_id = crate::routes::sso::create_session(pool, &user_id).await
         .map_err(AppError::internal)?;
 
     Ok((
@@ -188,6 +196,10 @@ pub async fn register(
 }
 
 /// POST /api/v1/auth/login
+///
+/// Two-step when 2FA is enabled:
+///   Step 1 returns {two_factor_required: true, two_factor_token: "<token>"}.
+///   Step 2 is POST /api/v1/auth/login/2fa {token, code}.
 pub async fn login(
     State(state): State<AppState>,
     request_headers: axum::http::HeaderMap,
@@ -195,35 +207,80 @@ pub async fn login(
 ) -> Result<Response, AppError> {
     let pool = state.ironshelf_db.pool();
 
-    let row = sqlx::query("SELECT id, username, password_hash, is_owner FROM users WHERE username = ?")
-        .bind(&request.username)
-        .fetch_optional(pool)
-        .await
-        .map_err(AppError::internal)?;
+    // 1. Lockout check — before any DB work.
+    let (is_locked, retry_after) = state.login_attempt_store.check_locked(&request.username).await;
+    if is_locked {
+        return Err(AppError::TooManyRequests(retry_after));
+    }
+
+    let row = sqlx::query(
+        "SELECT id, username, password_hash, is_owner FROM users WHERE username = ?",
+    )
+    .bind(&request.username)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::internal)?;
 
     let row = match row {
         Some(row) => row,
         None => {
-            // Run an argon2 hash anyway so a missing username takes about as long
-            // as a wrong password — otherwise the timing difference leaks which
-            // usernames exist.
+            // Run a dummy hash so a missing username takes the same time as a wrong password.
             let _ = crate::auth::hash_password(&request.password);
+            state.login_attempt_store.record_failure(&request.username).await;
             return Err(AppError::Unauthorized("Invalid credentials".to_string()));
         }
     };
 
     let password_hash: String = row.get("password_hash");
     if !verify_password(&request.password, &password_hash) {
-        return Err(AppError::Unauthorized(
-            "Invalid credentials".to_string(),
-        ));
+        let (now_locked, locked_retry_after) = state
+            .login_attempt_store
+            .record_failure(&request.username)
+            .await;
+        if now_locked {
+            return Err(AppError::TooManyRequests(locked_retry_after));
+        }
+        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
+
+    // Credentials OK — reset lockout counter.
+    state.login_attempt_store.record_success(&request.username).await;
 
     let user_id: String = row.get("id");
     let username: String = row.get("username");
     let is_owner: bool = row.get::<i32, _>("is_owner") != 0;
 
-    let session_id = create_session(pool, &user_id).await
+    // 2. Check whether 2FA is enabled for this user.
+    let totp_enabled: bool = sqlx::query_scalar::<_, i32>(
+        "SELECT enabled FROM user_totp WHERE user_id = ?",
+    )
+    .bind(&user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::internal)?
+    .map(|enabled| enabled != 0)
+    .unwrap_or(false);
+
+    if totp_enabled {
+        // Issue a short-lived pending token; don't create a session yet.
+        let totp_token = uuid::Uuid::new_v4().to_string();
+        state
+            .pending_totp_store
+            .insert(totp_token.clone(), PendingTotp::new(user_id, username, is_owner))
+            .await;
+
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "two_factor_required": true,
+                "two_factor_token": totp_token,
+            })),
+        )
+            .into_response());
+    }
+
+    // No 2FA — create session immediately.
+    let session_id = crate::routes::sso::create_session(pool, &user_id).await
         .map_err(AppError::internal)?;
 
     let body = serde_json::json!({
@@ -233,30 +290,149 @@ pub async fn login(
         "session_id": session_id,
     });
 
-    // Determine whether to set the Secure flag on the session cookie.
-    // Use the config flag, or detect TLS via X-Forwarded-Proto header from a reverse proxy.
-    let is_tls = state.config.tls_enabled
-        || request_headers
-            .get("x-forwarded-proto")
-            .and_then(|value| value.to_str().ok())
-            .map(|proto| proto.eq_ignore_ascii_case("https"))
-            .unwrap_or(false);
+    let cookie = build_session_cookie(&session_id, &state, &request_headers);
 
-    let secure_suffix = if is_tls { "; Secure" } else { "" };
-
-    let cookie = format!(
-        "ironshelf_session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800{}",
-        session_id, secure_suffix
-    );
-
-    let response = (
+    Ok((
         StatusCode::OK,
         [(header::SET_COOKIE, cookie)],
         Json(body),
     )
-        .into_response();
+        .into_response())
+}
 
-    Ok(response)
+/// POST /api/v1/auth/login/2fa
+///
+/// Step 2 of two-factor login: validate TOTP code (or a recovery code)
+/// then create the real session.
+pub async fn login_two_factor(
+    State(state): State<AppState>,
+    request_headers: axum::http::HeaderMap,
+    Json(request): Json<TwoFactorLoginRequest>,
+) -> Result<Response, AppError> {
+    let pool = state.ironshelf_db.pool();
+
+    // Peek attempt count — auto-removes token on MAX_TOTP_ATTEMPTS.
+    let attempt = state
+        .pending_totp_store
+        .increment_attempt(&request.token)
+        .await;
+
+    if attempt.is_none() {
+        return Err(AppError::Unauthorized(
+            "Invalid or expired 2FA token".to_string(),
+        ));
+    }
+
+    // Consume the token to get user details for verification.
+    let pending = state
+        .pending_totp_store
+        .take(&request.token)
+        .await
+        .ok_or_else(|| AppError::Unauthorized("Invalid or expired 2FA token".to_string()))?;
+
+    let user_id = &pending.user_id;
+
+    // Try TOTP code first.
+    let totp_row = sqlx::query("SELECT secret FROM user_totp WHERE user_id = ? AND enabled = 1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(AppError::internal)?;
+
+    let mut code_valid = false;
+
+    if let Some(totp_row) = totp_row {
+        let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .map_err(AppError::internal)?;
+
+        let secret_base32: String = totp_row.get("secret");
+        let secret_bytes = Secret::Encoded(secret_base32)
+            .to_bytes()
+            .map_err(|totp_error| AppError::Internal(format!("secret decode: {totp_error}")))?;
+
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            secret_bytes,
+            Some("Ironshelf".to_string()),
+            username,
+        )
+        .map_err(|totp_error| AppError::Internal(format!("totp init: {totp_error}")))?;
+
+        code_valid = totp.check_current(&request.code).unwrap_or(false);
+    }
+
+    // If TOTP failed, try recovery codes.
+    if !code_valid {
+        let recovery_rows = sqlx::query(
+            "SELECT rowid, code_hash FROM user_totp_recovery WHERE user_id = ? AND used = 0",
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(AppError::internal)?;
+
+        for recovery_row in &recovery_rows {
+            let code_hash: String = recovery_row.get("code_hash");
+            if verify_password(&request.code, &code_hash) {
+                // Mark this code as used.
+                let row_id: i64 = recovery_row.get("rowid");
+                sqlx::query(
+                    "UPDATE user_totp_recovery SET used = 1 WHERE rowid = ?",
+                )
+                .bind(row_id)
+                .execute(pool)
+                .await
+                .map_err(AppError::internal)?;
+                code_valid = true;
+                break;
+            }
+        }
+    }
+
+    if !code_valid {
+        // Re-insert so the user can retry with the same token (up to MAX_TOTP_ATTEMPTS).
+        // Preserve original created_at so the 5-minute window is not reset on each wrong code.
+        state
+            .pending_totp_store
+            .insert(
+                request.token.clone(),
+                PendingTotp {
+                    user_id: pending.user_id.clone(),
+                    username: pending.username.clone(),
+                    is_owner: pending.is_owner,
+                    created_at: pending.created_at,
+                    attempt_count: pending.attempt_count,
+                },
+            )
+            .await;
+        return Err(AppError::Unauthorized("Invalid 2FA code".to_string()));
+    }
+
+    // Code valid — create session.
+    let session_id = crate::routes::sso::create_session(pool, user_id).await
+        .map_err(AppError::internal)?;
+
+    let body = serde_json::json!({
+        "user_id": pending.user_id,
+        "username": pending.username,
+        "is_owner": pending.is_owner,
+        "session_id": session_id,
+    });
+
+    let cookie = build_session_cookie(&session_id, &state, &request_headers);
+
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(body),
+    )
+        .into_response())
 }
 
 /// POST /api/v1/auth/logout
@@ -292,18 +468,30 @@ pub async fn me(
     State(state): State<AppState>,
     axum::Extension(user): axum::Extension<AuthUser>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let pool = state.ironshelf_db.pool();
+
     let permissions = state
         .ironshelf_db
         .get_permissions(&user.user_id)
         .await
         .unwrap_or_default();
 
+    let two_factor_enabled: bool = sqlx::query_scalar::<_, i32>(
+        "SELECT enabled FROM user_totp WHERE user_id = ?",
+    )
+    .bind(&user.user_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+    .map(|enabled| enabled != 0)
+    .unwrap_or(false);
+
     // Whether this local user is linked to an Ironshelf Cloud account.
     let cloud_linked = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE id = ? AND oidc_issuer = 'ironshelf-cloud'",
     )
     .bind(&user.user_id)
-    .fetch_one(state.ironshelf_db.pool())
+    .fetch_one(pool)
     .await
     .unwrap_or(0)
         > 0;
@@ -313,6 +501,7 @@ pub async fn me(
         "username": user.username,
         "is_owner": user.is_owner,
         "permissions": permissions,
+        "two_factor_enabled": two_factor_enabled,
         "cloud_linked": cloud_linked,
     })))
 }
@@ -427,20 +616,24 @@ pub async fn delete_api_key(
 
 // --- helpers ---
 
-async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String, sqlx::Error> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let expires_at = (chrono::Utc::now() + chrono::Duration::days(7))
-        .to_rfc3339();
+fn build_session_cookie(
+    session_id: &str,
+    state: &AppState,
+    request_headers: &axum::http::HeaderMap,
+) -> String {
+    let is_tls = state.config.tls_enabled
+        || request_headers
+            .get("x-forwarded-proto")
+            .and_then(|value| value.to_str().ok())
+            .map(|proto| proto.eq_ignore_ascii_case("https"))
+            .unwrap_or(false);
 
-    // Store only the hash of the session id; the raw id is returned to the client.
-    sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
-        .bind(crate::auth::hash_session_id(&session_id))
-        .bind(user_id)
-        .bind(&expires_at)
-        .execute(pool)
-        .await?;
+    let secure_suffix = if is_tls { "; Secure" } else { "" };
 
-    Ok(session_id)
+    format!(
+        "ironshelf_session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800{}",
+        session_id, secure_suffix
+    )
 }
 
 fn generate_random_string(len: usize) -> String {
@@ -457,4 +650,3 @@ fn generate_random_string(len: usize) -> String {
         .take(len)
         .collect()
 }
-
