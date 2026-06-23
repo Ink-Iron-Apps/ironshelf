@@ -1,9 +1,15 @@
 //! Folder scanner + embedded EPUB OPF parser for non-Calibre libraries.
 //! Walks directories, reads epub metadata (dc:creator, calibre:series, etc).
+//!
+//! Book IDs in FolderSource are vector indices. scan() uses a merge-update
+//! strategy so existing indices remain stable across rescans: existing entries
+//! are updated in-place, new entries appended, missing files marked is_missing.
+//! This keeps DB references (progress, highlights, collections) valid.
 
 use crate::model::{Author, Book, Format, Series};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 use thiserror::Error;
 use tokio::fs;
 
@@ -15,7 +21,7 @@ pub enum ScanError {
     PathNotFound(String),
 }
 
-/// Scanned book metadata from an epub OPF.
+/// Scanned book metadata from an epub OPF or file path.
 #[derive(Debug, Clone)]
 struct ScannedBook {
     rel_path: String,
@@ -28,13 +34,20 @@ struct ScannedBook {
     description: Option<String>,
     file_size: u64,
     format: String,
+    /// File modification time (seconds since UNIX epoch). Used to detect
+    /// changed files on rescan so metadata is re-parsed only when needed.
+    mtime: u64,
+    /// File is no longer present on disk. The slot is kept so vector indices
+    /// remain stable. Missing entries are invisible to callers.
+    is_missing: bool,
 }
 
 /// A non-Calibre library source that scans directories for ebook files.
 #[derive(Clone)]
 pub struct FolderSource {
     library_path: PathBuf,
-    /// Cached scan results. Re-populated on scan().
+    /// Stable-indexed scan results. Entries are never removed; missing files
+    /// are flagged with is_missing instead of deleted.
     books: Vec<ScannedBook>,
 }
 
@@ -54,28 +67,61 @@ impl FolderSource {
         Ok(source)
     }
 
-    /// Rescan the directory tree.
+    /// The root path this library watches.
+    pub fn library_path(&self) -> &Path {
+        &self.library_path
+    }
+
+    /// Merge-scan the directory tree, preserving stable vector indices.
+    ///
+    /// - Existing entries whose file is still present: update metadata if
+    ///   mtime changed; clear is_missing flag otherwise.
+    /// - Existing entries whose file is gone: set is_missing = true.
+    /// - New files not previously seen: appended to the end of the vector.
     pub async fn scan(&mut self) -> Result<(), ScanError> {
-        let mut books = Vec::new();
-        self.walk_directory(&self.library_path.clone(), &mut books).await?;
-        tracing::info!("folder scan complete: {} books found", books.len());
-        self.books = books;
+        let mut fresh: HashMap<String, ScannedBook> = HashMap::new();
+        self.walk_into_map(&self.library_path.clone(), &mut fresh).await?;
+
+        // Update / mark-missing existing entries.
+        for book in &mut self.books {
+            if let Some(fresh_book) = fresh.remove(&book.rel_path) {
+                if fresh_book.mtime != book.mtime {
+                    *book = fresh_book;
+                } else {
+                    book.is_missing = false;
+                }
+            } else {
+                book.is_missing = true;
+            }
+        }
+
+        // Append newly discovered books.
+        for (_, new_book) in fresh {
+            self.books.push(new_book);
+        }
+
+        let total = self.books.iter().filter(|b| !b.is_missing).count();
+        let missing = self.books.iter().filter(|b| b.is_missing).count();
+        if missing > 0 {
+            tracing::info!("folder scan complete: {total} books ({missing} missing/removed)");
+        } else {
+            tracing::info!("folder scan complete: {total} books");
+        }
         Ok(())
     }
 
-    /// Walk directory recursively, collecting ebook files.
-    #[allow(clippy::ptr_arg)]
-    fn walk_directory<'a>(
+    /// Walk directory recursively, inserting ebook files into `out` keyed by rel_path.
+    fn walk_into_map<'a>(
         &'a self,
         dir: &'a Path,
-        books: &'a mut Vec<ScannedBook>,
+        out: &'a mut HashMap<String, ScannedBook>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ScanError>> + Send + 'a>> {
         Box::pin(async move {
             let mut entries = fs::read_dir(dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
                 if path.is_dir() {
-                    self.walk_directory(&path, books).await?;
+                    self.walk_into_map(&path, out).await?;
                 } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let format = ext.to_uppercase();
                     match format.as_str() {
@@ -86,15 +132,27 @@ impl FolderSource {
                                 .unwrap_or(&path)
                                 .to_string_lossy()
                                 .to_string();
+                            let mtime = metadata
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
 
                             let scanned = if format == "EPUB" {
-                                self.parse_epub_metadata(&path, &rel_path, metadata.len()).await
+                                self.parse_epub_metadata(&path, &rel_path, metadata.len(), mtime)
+                                    .await
                             } else {
-                                // Non-epub: derive from filename/path
-                                self.metadata_from_path(&path, &rel_path, &format, metadata.len())
+                                self.metadata_from_path(
+                                    &path,
+                                    &rel_path,
+                                    &format,
+                                    metadata.len(),
+                                    mtime,
+                                )
                             };
 
-                            books.push(scanned);
+                            out.insert(rel_path, scanned);
                         }
                         _ => {}
                     }
@@ -110,14 +168,11 @@ impl FolderSource {
         path: &Path,
         rel_path: &str,
         file_size: u64,
+        mtime: u64,
     ) -> ScannedBook {
-        // Read epub as zip, extract container.xml → find OPF → parse DC metadata
         match Self::read_epub_opf(path).await {
-            Ok(opf) => opf_to_scanned_book(opf, rel_path, file_size),
-            Err(_) => {
-                // Fallback to path-based metadata
-                self.metadata_from_path(path, rel_path, "EPUB", file_size)
-            }
+            Ok(opf) => opf_to_scanned_book(opf, rel_path, file_size, mtime),
+            Err(_) => self.metadata_from_path(path, rel_path, "EPUB", file_size, mtime),
         }
     }
 
@@ -160,14 +215,13 @@ impl FolderSource {
         rel_path: &str,
         format: &str,
         file_size: u64,
+        mtime: u64,
     ) -> ScannedBook {
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
 
-        // Try "Author - Title" or "Title" pattern
         let (authors, title) = if let Some((author, title)) = stem.split_once(" - ") {
             (vec![author.trim().to_string()], title.trim().to_string())
         } else {
-            // Try parent dir as author
             let author = path
                 .parent()
                 .and_then(|p| p.file_name())
@@ -187,6 +241,8 @@ impl FolderSource {
             description: None,
             file_size,
             format: format.to_string(),
+            mtime,
+            is_missing: false,
         }
     }
 
@@ -197,6 +253,9 @@ impl FolderSource {
         let mut author_id_counter: i64 = 1;
 
         for (book_idx, book) in self.books.iter().enumerate() {
+            if book.is_missing {
+                continue;
+            }
             for author_name in &book.authors {
                 let entry = author_map
                     .entry(author_name.clone())
@@ -243,6 +302,9 @@ impl FolderSource {
         let mut series_id_counter: i64 = 1;
 
         for book in &self.books {
+            if book.is_missing {
+                continue;
+            }
             if !book.authors.contains(&author.name) {
                 continue;
             }
@@ -277,7 +339,7 @@ impl FolderSource {
             .books
             .iter()
             .enumerate()
-            .filter(|(_, b)| b.series_name.as_deref() == Some(series_name))
+            .filter(|(_, b)| !b.is_missing && b.series_name.as_deref() == Some(series_name))
             .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect();
 
@@ -293,7 +355,11 @@ impl FolderSource {
         self.books
             .iter()
             .enumerate()
-            .filter(|(_, b)| b.authors.contains(&author_name.to_string()) && b.series_name.is_none())
+            .filter(|(_, b)| {
+                !b.is_missing
+                    && b.authors.contains(&author_name.to_string())
+                    && b.series_name.is_none()
+            })
             .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect()
     }
@@ -302,6 +368,9 @@ impl FolderSource {
     pub fn genres(&self) -> Vec<(String, i64)> {
         let mut genre_counts: HashMap<String, i64> = HashMap::new();
         for book in &self.books {
+            if book.is_missing {
+                continue;
+            }
             for tag in &book.tags {
                 *genre_counts.entry(tag.clone()).or_insert(0) += 1;
             }
@@ -317,7 +386,9 @@ impl FolderSource {
         self.books
             .iter()
             .enumerate()
-            .filter(|(_, b)| b.tags.iter().any(|tag| tag.to_lowercase() == genre_lower))
+            .filter(|(_, b)| {
+                !b.is_missing && b.tags.iter().any(|tag| tag.to_lowercase() == genre_lower)
+            })
             .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect()
     }
@@ -326,38 +397,38 @@ impl FolderSource {
         self.books
             .iter()
             .enumerate()
+            .filter(|(_, b)| !b.is_missing)
             .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect()
     }
 
-    /// Total number of books in the library (cheap count, no allocation).
+    /// Total number of present (non-missing) books.
     pub fn book_count(&self) -> i64 {
-        self.books.len() as i64
+        self.books.iter().filter(|b| !b.is_missing).count() as i64
     }
 
-    /// Paginated books from the library by slicing the internal vec.
+    /// Paginated books, skipping missing entries while preserving original indices as IDs.
     pub fn books_paginated(&self, offset: i64, limit: i64) -> Vec<Book> {
-        let start = (offset as usize).min(self.books.len());
-        let end = (start + limit as usize).min(self.books.len());
-        self.books[start..end]
+        self.books
             .iter()
             .enumerate()
-            .map(|(relative_index, scanned_book)| {
-                self.scanned_to_book(scanned_book, (start + relative_index) as i64)
-            })
+            .filter(|(_, b)| !b.is_missing)
+            .skip(offset as usize)
+            .take(limit as usize)
+            .map(|(idx, b)| self.scanned_to_book(b, idx as i64))
             .collect()
     }
 
     pub fn book(&self, book_id: i64) -> Option<Book> {
-        // SAFETY: Reject negative IDs — `as usize` on a negative i64 wraps to a huge value.
         let index: usize = book_id.try_into().ok()?;
-        self.books
-            .get(index)
-            .map(|b| self.scanned_to_book(b, book_id))
+        let scanned = self.books.get(index)?;
+        if scanned.is_missing {
+            return None;
+        }
+        Some(self.scanned_to_book(scanned, book_id))
     }
 
     pub fn cover_path(&self, _book_path: &str) -> Option<PathBuf> {
-        // Folder source: cover is embedded in epub (not a separate file)
         None
     }
 
@@ -366,7 +437,6 @@ impl FolderSource {
     }
 
     /// Check whether a resolved path is contained within the library root.
-    /// Call this before serving any file to prevent path traversal attacks.
     pub fn is_path_within_library(&self, path: &Path) -> bool {
         match (self.library_path.canonicalize(), path.canonicalize()) {
             (Ok(library_root), Ok(resolved)) => resolved.starts_with(&library_root),
@@ -379,9 +449,9 @@ impl FolderSource {
             id: index,
             title: scanned.title.clone(),
             sort_title: scanned.title.clone(),
-            author_ids: vec![], // Resolved by caller if needed
+            author_ids: vec![],
             author_names: scanned.authors.clone(),
-            series_id: None,    // FolderSource uses name-based series
+            series_id: None,
             series_index: scanned.series_index,
             formats: vec![Format {
                 kind: scanned.format.clone(),
@@ -408,9 +478,7 @@ impl FolderSource {
 
 // --- OPF parsing helpers ---
 
-/// Extract rootfile path from container.xml.
 fn extract_opf_path(container_xml: &str) -> Option<String> {
-    // Simple XML extraction: find full-path attribute in rootfile element
     container_xml
         .find("full-path=\"")
         .map(|start| {
@@ -420,15 +488,13 @@ fn extract_opf_path(container_xml: &str) -> Option<String> {
         })
 }
 
-/// Parse OPF XML into a ScannedBook.
-fn opf_to_scanned_book(opf: String, rel_path: &str, file_size: u64) -> ScannedBook {
+fn opf_to_scanned_book(opf: String, rel_path: &str, file_size: u64, mtime: u64) -> ScannedBook {
     let title = extract_dc_element(&opf, "title").unwrap_or_else(|| "Unknown".to_string());
     let authors = extract_dc_elements(&opf, "creator");
     let description = extract_dc_element(&opf, "description");
     let language = extract_dc_element(&opf, "language");
     let tags = extract_dc_elements(&opf, "subject");
 
-    // Calibre series metadata (stored as <meta name="calibre:series" content="...">)
     let series_name = extract_meta(&opf, "calibre:series");
     let series_index = extract_meta(&opf, "calibre:series_index")
         .and_then(|s| s.parse::<f64>().ok());
@@ -448,10 +514,11 @@ fn opf_to_scanned_book(opf: String, rel_path: &str, file_size: u64) -> ScannedBo
         description,
         file_size,
         format: "EPUB".to_string(),
+        mtime,
+        is_missing: false,
     }
 }
 
-/// Extract a single dc: element value.
 fn extract_dc_element(opf: &str, element: &str) -> Option<String> {
     let patterns = [
         format!("<dc:{element}>"),
@@ -473,7 +540,6 @@ fn extract_dc_element(opf: &str, element: &str) -> Option<String> {
     None
 }
 
-/// Extract all dc: elements with same name.
 fn extract_dc_elements(opf: &str, element: &str) -> Vec<String> {
     let mut results = Vec::new();
     let mut search_from = 0;
@@ -513,12 +579,10 @@ fn extract_dc_elements(opf: &str, element: &str) -> Vec<String> {
     results
 }
 
-/// Extract <meta name="..." content="..."> value.
 fn extract_meta(opf: &str, name: &str) -> Option<String> {
     let pattern = format!("name=\"{name}\"");
     let pos = opf.find(&pattern)?;
 
-    // Find content attribute near this meta element
     let region_start = opf[..pos].rfind('<').unwrap_or(0);
     let region_end = opf[pos..].find("/>").or_else(|| opf[pos..].find('>'))
         .map(|i| pos + i + 2)?;
@@ -535,7 +599,6 @@ fn extract_meta(opf: &str, name: &str) -> Option<String> {
     }
 }
 
-/// Basic HTML entity decode.
 fn html_decode(s: &str) -> String {
     s.replace("&amp;", "&")
         .replace("&lt;", "<")
@@ -545,7 +608,6 @@ fn html_decode(s: &str) -> String {
         .replace("&apos;", "'")
 }
 
-/// Generate sort name (last name first for "First Last" patterns).
 fn sort_name(name: &str) -> String {
     let parts: Vec<&str> = name.split_whitespace().collect();
     if parts.len() >= 2 {

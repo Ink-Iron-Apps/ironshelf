@@ -1748,7 +1748,7 @@
       let bodyContent = '';
 
       const addBtnHtml = hasPermission('manage_library')
-        ? `<div class="actions"><button class="btn btn-primary" id="add-library-btn">${icon('plus', 16)} Add Library</button></div>`
+        ? `<div class="actions"><button class="btn btn-secondary" id="scan-all-libraries-btn">${icon('scan', 16)} Scan All</button><button class="btn btn-primary" id="add-library-btn">${icon('plus', 16)} Add Library</button></div>`
         : '';
 
       bodyContent += `<div class="page-header"><h1>Libraries</h1>${addBtnHtml}</div>`;
@@ -1815,6 +1815,20 @@
 
       document.getElementById('add-library-btn')?.addEventListener('click', showAddLibraryModal);
       document.getElementById('add-library-empty-btn')?.addEventListener('click', showAddLibraryModal);
+      document.getElementById('scan-all-libraries-btn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = `${icon('scan', 16)} Scanning...`;
+        try {
+          await api('/libraries/scan', { method: 'POST' });
+          toast('Library scan started', 'success');
+        } catch (err) {
+          toast(err.message || 'Scan failed', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = `${icon('scan', 16)} Scan All`;
+        }
+      });
     } catch (err) {
       renderShell(renderError('Failed to load libraries', err.message, () => renderLibraries()), 'settings');
     }
