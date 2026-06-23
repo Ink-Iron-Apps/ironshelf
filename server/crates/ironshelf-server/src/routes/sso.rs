@@ -103,6 +103,23 @@ struct Identity {
     username: Option<String>,
 }
 
+/// Built-in, first-class providers. These ALWAYS appear in the admin UI; the
+/// owner supplies only the per-instance OAuth credentials (client id/secret)
+/// and enables them. Their kind/display-name/endpoints are baked in here and
+/// in `apply_preset` — never user-editable. (Credentials can't be baked in:
+/// each self-hosted instance must register its own OAuth app, because the
+/// redirect URI is domain-specific and secrets can't ship in open source.)
+pub(crate) const BUILTIN_PROVIDER_IDS: &[&str] = &["google", "github"];
+
+/// Baked-in display name + kind for a built-in provider id.
+pub(crate) fn builtin_meta(id: &str) -> Option<(&'static str, &'static str)> {
+    match id {
+        "google" => Some(("Google", "oidc")),
+        "github" => Some(("GitHub", "oauth2")),
+        _ => None,
+    }
+}
+
 /// Fill in endpoint/scope defaults for known provider slugs so the owner only
 /// has to supply client id/secret. Custom providers (unknown slug) get nothing.
 fn apply_preset(provider: &mut Provider) {

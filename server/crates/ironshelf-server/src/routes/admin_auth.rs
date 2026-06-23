@@ -8,11 +8,12 @@ use sqlx::Row;
 
 use crate::auth::{require_owner, AuthUser};
 use crate::error::AppError;
+use crate::routes::sso::{builtin_meta, BUILTIN_PROVIDER_IDS};
 use crate::state::AppState;
 
 /// Provider config as returned to the admin UI. The client secret is never
 /// echoed back — only whether one is set.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct AdminProvider {
     pub id: String,
     pub kind: String,
@@ -26,6 +27,9 @@ pub struct AdminProvider {
     pub scopes: Option<String>,
     pub enabled: bool,
     pub auto_register: bool,
+    /// True for baked-in providers (Google/GitHub): kind/name/endpoints are
+    /// fixed, the owner only edits credentials + enabled/auto-register.
+    pub is_builtin: bool,
 }
 
 /// GET /api/v1/admin/auth-providers — list all configured providers (owner only).
@@ -44,7 +48,7 @@ pub async fn list_auth_providers(
     .await
     .map_err(AppError::internal)?;
 
-    let providers = rows
+    let configured: Vec<AdminProvider> = rows
         .into_iter()
         .map(|row| {
             let secret: Option<String> = row.get("client_secret");
@@ -61,11 +65,50 @@ pub async fn list_auth_providers(
                 scopes: row.get("scopes"),
                 enabled: row.get::<i64, _>("enabled") != 0,
                 auto_register: row.get::<i64, _>("auto_register") != 0,
+                is_builtin: false,
             }
         })
         .collect();
 
-    Ok(Json(providers))
+    // Built-in providers (Google/GitHub) always appear first, whether or not
+    // they've been configured yet, so the owner just fills in credentials.
+    let mut result = Vec::new();
+    for &builtin_id in BUILTIN_PROVIDER_IDS {
+        let (display_name, kind) = builtin_meta(builtin_id).unwrap();
+        match configured.iter().find(|provider| provider.id == builtin_id) {
+            Some(existing) => {
+                let mut provider = existing.clone();
+                // Lock the baked-in identity regardless of what's in the row.
+                provider.display_name = display_name.to_string();
+                provider.kind = kind.to_string();
+                provider.is_builtin = true;
+                result.push(provider);
+            }
+            None => result.push(AdminProvider {
+                id: builtin_id.to_string(),
+                kind: kind.to_string(),
+                display_name: display_name.to_string(),
+                client_id: String::new(),
+                has_client_secret: false,
+                issuer_url: None,
+                authorize_url: None,
+                token_url: None,
+                userinfo_url: None,
+                scopes: None,
+                enabled: false,
+                auto_register: true,
+                is_builtin: true,
+            }),
+        }
+    }
+    // Then any custom (non-built-in) providers, preserving display-name order.
+    for provider in configured {
+        if builtin_meta(&provider.id).is_none() {
+            result.push(provider);
+        }
+    }
+
+    Ok(Json(result))
 }
 
 fn default_true() -> bool {
@@ -106,11 +149,37 @@ pub async fn upsert_auth_provider(
 ) -> Result<Json<AdminProvider>, AppError> {
     require_owner(&auth_user)?;
 
-    if body.kind != "oidc" && body.kind != "oauth2" {
-        return Err(AppError::BadRequest(
-            "kind must be 'oidc' or 'oauth2'".to_string(),
-        ));
-    }
+    // Built-in providers have a fixed identity + endpoints; the owner only
+    // supplies credentials + toggles. Custom providers use the request body.
+    let is_builtin = builtin_meta(&provider_id).is_some();
+    let (kind, display_name, issuer_url, authorize_url, token_url, userinfo_url, scopes) =
+        if let Some((builtin_name, builtin_kind)) = builtin_meta(&provider_id) {
+            // Endpoints/scopes stay NULL → filled from preset at login time.
+            (
+                builtin_kind.to_string(),
+                builtin_name.to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        } else {
+            if body.kind != "oidc" && body.kind != "oauth2" {
+                return Err(AppError::BadRequest(
+                    "kind must be 'oidc' or 'oauth2'".to_string(),
+                ));
+            }
+            (
+                body.kind.clone(),
+                body.display_name.clone(),
+                body.issuer_url.clone(),
+                body.authorize_url.clone(),
+                body.token_url.clone(),
+                body.userinfo_url.clone(),
+                body.scopes.clone(),
+            )
+        };
 
     let pool = state.ironshelf_db.pool();
 
@@ -146,15 +215,15 @@ pub async fn upsert_auth_provider(
           auto_register = excluded.auto_register",
     )
     .bind(&provider_id)
-    .bind(&body.kind)
-    .bind(&body.display_name)
+    .bind(&kind)
+    .bind(&display_name)
     .bind(&body.client_id)
     .bind(&effective_secret)
-    .bind(&body.issuer_url)
-    .bind(&body.authorize_url)
-    .bind(&body.token_url)
-    .bind(&body.userinfo_url)
-    .bind(&body.scopes)
+    .bind(&issuer_url)
+    .bind(&authorize_url)
+    .bind(&token_url)
+    .bind(&userinfo_url)
+    .bind(&scopes)
     .bind(if body.enabled { 1 } else { 0 })
     .bind(if body.auto_register { 1 } else { 0 })
     .execute(pool)
@@ -163,17 +232,18 @@ pub async fn upsert_auth_provider(
 
     Ok(Json(AdminProvider {
         id: provider_id,
-        kind: body.kind,
-        display_name: body.display_name,
+        kind,
+        display_name,
         client_id: body.client_id,
         has_client_secret: effective_secret.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
-        issuer_url: body.issuer_url,
-        authorize_url: body.authorize_url,
-        token_url: body.token_url,
-        userinfo_url: body.userinfo_url,
-        scopes: body.scopes,
+        issuer_url,
+        authorize_url,
+        token_url,
+        userinfo_url,
+        scopes,
         enabled: body.enabled,
         auto_register: body.auto_register,
+        is_builtin,
     }))
 }
 
