@@ -12,8 +12,9 @@ Credible public **v1.0 ≈ Phase 1 + Phase 2 + #12**. Phase 3 = what makes it *b
   per-account lockout + HSTS. (Being built now.)
 
 ## Phase 1 — finish foundations / clean surface
-- [ ] **1. Verify Flutter app builds** — run `flutter analyze` + debug build on a Flutter machine;
-  fix anything the cloud-removal + 2FA edits broke. (Couldn't run in prior sessions.)
+- [x] **1. Verify Flutter app builds** — `flutter analyze` clean (0 issues, Flutter 3.44 via snap).
+  Fixed: EpubTheme.custom backgroundColor→backgroundDecoration; RadioListTile groupValue/onChanged
+  deprecated → RadioGroup ancestor. Debug build = CI (no local builds per policy).
 - [ ] **2. Relicense** MIT → AGPL-3.0 (server) + GPL-3.0 (apps): LICENSE files, headers, READMEs.
   Do early so later commits land under the right license.
 - [ ] **3. Strip the acquisition engine** — remove indexers/download-clients/wanted-items/
