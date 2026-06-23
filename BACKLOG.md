@@ -16,10 +16,8 @@ Credible public **v1.0 ≈ Phase 1 + Phase 2 + #12**. Phase 3 = what makes it *b
   Fixed: EpubTheme.custom backgroundColor→backgroundDecoration; RadioListTile groupValue/onChanged
   deprecated → RadioGroup ancestor. Debug build = CI (no local builds per policy).
 - [x] **2. Relicense** MIT → AGPL-3.0 (server) + GPL-3.0 (apps): LICENSE files, Cargo.toml, README.
-- [ ] **3. Strip the acquisition engine** — remove indexers/download-clients/wanted-items/
-  auto-fulfillment (`ironshelf-core/src/acquisition/*`, `routes/acquisition.rs`, scheduler
-  acquisition tasks, DB tables). KEEP the folder→library import/scan half. Plex/Sonarr split.
-  (Destructive like the cloud strip — confirm scope before ripping.)
+- [x] **3. Strip the acquisition engine** — removed indexers/download-clients/wanted-items/
+  auto-fulfillment. Migration 023 drops acquisition tables on upgrade. Folder scan kept intact.
 - [ ] **4. Scan-now webhook + filesystem watch + hash-upgrade detection** — `POST
   /api/v1/libraries/{id}/scan` (+ global), `notify`-crate watcher, content-hash/mtime
   "update-in-place not duplicate". The acquisition-interop story.

@@ -1,6 +1,5 @@
 //! API route handlers.
 
-pub mod acquisition;
 pub mod admin_auth;
 pub mod auth;
 pub mod login_state;

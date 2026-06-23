@@ -1,6 +1,5 @@
 //! ironshelf-core — domain models + IO (Calibre reader, own DB).
 
-pub mod acquisition;
 pub mod calibre;
 pub mod db;
 pub mod model;
