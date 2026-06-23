@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
-import '../providers/cloud_provider.dart';
 import '../providers/server_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/update_service.dart';
@@ -97,13 +96,6 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right, size: 20),
             onTap: () => context.push('/stats'),
           ),
-          ListTile(
-            leading: const Icon(Icons.swap_horiz_rounded),
-            title: const Text('Switch server'),
-            subtitle: const Text('Connect to another of your servers'),
-            trailing: const Icon(Icons.chevron_right, size: 20),
-            onTap: () => context.go('/cloud-servers'),
-          ),
 
           const Divider(),
 
@@ -149,15 +141,15 @@ class SettingsScreen extends ConsumerWidget {
             leading: Icon(Icons.logout, color: theme.colorScheme.error),
             title: Text('Sign out',
                 style: TextStyle(color: theme.colorScheme.error)),
-            subtitle: const Text('Sign out of your cloud account'),
+            subtitle: const Text('Disconnect from this server'),
             onTap: () async {
               final shouldLogout = await showDialog<bool>(
                 context: context,
                 builder: (dialogContext) => AlertDialog(
                   title: const Text('Sign out?'),
                   content: const Text(
-                      'You will be signed out of your Ironshelf cloud account '
-                      'and disconnected from this server.'),
+                      'You will be signed out and disconnected from this '
+                      'server.'),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(dialogContext, false),
@@ -175,7 +167,6 @@ class SettingsScreen extends ConsumerWidget {
               if (shouldLogout == true) {
                 await ref.read(authProvider.notifier).logout();
                 await ref.read(serverConfigProvider.notifier).disconnect();
-                await ref.read(cloudAuthProvider.notifier).logout();
               }
             },
           ),

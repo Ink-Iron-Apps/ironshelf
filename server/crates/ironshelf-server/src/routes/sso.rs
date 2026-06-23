@@ -18,10 +18,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 use crate::error::AppError;
-use crate::routes::oidc::{
-    compute_pkce_challenge, create_session, decode_id_token_claims, ensure_unique_username,
-    fetch_discovery, generate_random_string,
-};
 use crate::state::AppState;
 
 const STATE_TTL: Duration = Duration::from_secs(300); // 5 minutes
@@ -683,4 +679,195 @@ async fn find_or_create_identity(
     );
 
     Ok((user_id, final_username))
+}
+
+// --- Shared OIDC/session helpers (relocated from the removed legacy oidc.rs) ---
+
+/// Cached OIDC discovery document endpoints.
+#[derive(Debug, Clone, Deserialize)]
+struct OidcDiscovery {
+    authorization_endpoint: String,
+    token_endpoint: String,
+    #[serde(default, rename = "userinfo_endpoint")]
+    _userinfo_endpoint: Option<String>,
+}
+
+/// Claims extracted from the ID token JWT payload.
+#[derive(Debug, Deserialize)]
+struct IdTokenClaims {
+    sub: String,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    preferred_username: Option<String>,
+    #[serde(default)]
+    _name: Option<String>,
+}
+
+async fn fetch_discovery(
+    http_client: &reqwest::Client,
+    issuer_url: &str,
+) -> Result<OidcDiscovery, AppError> {
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        issuer_url.trim_end_matches('/')
+    );
+
+    let response = http_client
+        .get(&discovery_url)
+        .send()
+        .await
+        .map_err(|error| AppError::Internal(format!("Failed to fetch OIDC discovery: {error}")))?;
+
+    if !response.status().is_success() {
+        return Err(AppError::Internal(format!(
+            "OIDC discovery returned status {}",
+            response.status()
+        )));
+    }
+
+    response
+        .json::<OidcDiscovery>()
+        .await
+        .map_err(|error| AppError::Internal(format!("Failed to parse OIDC discovery: {error}")))
+}
+
+/// Decode the JWT ID token payload without full signature verification.
+/// For the self-hosted trust model this is acceptable — the token came directly
+/// from the provider over HTTPS.
+fn decode_id_token_claims(id_token: &str) -> Result<IdTokenClaims, AppError> {
+    let parts: Vec<&str> = id_token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(AppError::Internal("Invalid JWT format in id_token".to_string()));
+    }
+    let payload_bytes = base64_url_decode(parts[1])
+        .map_err(|error| AppError::Internal(format!("Failed to decode JWT payload: {error}")))?;
+    serde_json::from_slice::<IdTokenClaims>(&payload_bytes)
+        .map_err(|error| AppError::Internal(format!("Failed to parse ID token claims: {error}")))
+}
+
+fn base64_url_decode(input: &str) -> Result<Vec<u8>, String> {
+    let mut encoded = input.replace('-', "+").replace('_', "/");
+    let padding = (4 - encoded.len() % 4) % 4;
+    for _ in 0..padding {
+        encoded.push('=');
+    }
+    base64_decode_standard(&encoded)
+}
+
+fn base64_decode_standard(input: &str) -> Result<Vec<u8>, String> {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = Vec::new();
+    let bytes: Vec<u8> = input.bytes().filter(|&byte| byte != b'=').collect();
+    let mut buffer: u32 = 0;
+    let mut bits_collected = 0;
+    for byte in bytes {
+        let value = ALPHABET
+            .iter()
+            .position(|&alphabet_byte| alphabet_byte == byte)
+            .ok_or_else(|| format!("Invalid base64 character: {}", byte as char))?
+            as u32;
+        buffer = (buffer << 6) | value;
+        bits_collected += 6;
+        if bits_collected >= 8 {
+            bits_collected -= 8;
+            output.push((buffer >> bits_collected) as u8);
+            buffer &= (1 << bits_collected) - 1;
+        }
+    }
+    Ok(output)
+}
+
+/// Create a session row and return the raw (unhashed) session id for the cookie.
+pub(crate) async fn create_session(
+    pool: &sqlx::SqlitePool,
+    user_id: &str,
+) -> Result<String, sqlx::Error> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let expires_at = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)")
+        .bind(crate::auth::hash_session_id(&session_id))
+        .bind(user_id)
+        .bind(&expires_at)
+        .execute(pool)
+        .await?;
+    Ok(session_id)
+}
+
+async fn ensure_unique_username(
+    pool: &sqlx::SqlitePool,
+    base_username: &str,
+) -> Result<String, AppError> {
+    let existing: Option<sqlx::sqlite::SqliteRow> =
+        sqlx::query("SELECT id FROM users WHERE username = ?")
+            .bind(base_username)
+            .fetch_optional(pool)
+            .await
+            .map_err(AppError::internal)?;
+    if existing.is_none() {
+        return Ok(base_username.to_string());
+    }
+    for suffix in 2..100 {
+        let candidate = format!("{base_username}{suffix}");
+        let exists: Option<sqlx::sqlite::SqliteRow> =
+            sqlx::query("SELECT id FROM users WHERE username = ?")
+                .bind(&candidate)
+                .fetch_optional(pool)
+                .await
+                .map_err(AppError::internal)?;
+        if exists.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Internal(
+        "Could not generate unique username".to_string(),
+    ))
+}
+
+fn generate_random_string(length: usize) -> String {
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::rand_core::RngCore;
+    let mut bytes = vec![0u8; length];
+    OsRng.fill_bytes(&mut bytes);
+    bytes
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>()
+        .chars()
+        .take(length)
+        .collect()
+}
+
+fn compute_pkce_challenge(verifier: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(verifier.as_bytes());
+    base64_url_encode(&hash)
+}
+
+fn base64_url_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::new();
+    let mut buffer: u32 = 0;
+    let mut bits_in_buffer = 0;
+    for &byte in input {
+        buffer = (buffer << 8) | byte as u32;
+        bits_in_buffer += 8;
+        while bits_in_buffer >= 6 {
+            bits_in_buffer -= 6;
+            let index = ((buffer >> bits_in_buffer) & 0x3F) as usize;
+            output.push(ALPHABET[index] as char);
+        }
+    }
+    if bits_in_buffer > 0 {
+        buffer <<= 6 - bits_in_buffer;
+        let index = (buffer & 0x3F) as usize;
+        output.push(ALPHABET[index] as char);
+    }
+    output
+        .replace('+', "-")
+        .replace('/', "_")
+        .trim_end_matches('=')
+        .to_string()
 }

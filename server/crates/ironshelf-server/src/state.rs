@@ -10,11 +10,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::Config;
-use crate::routes::oidc::OidcStateStore;
 use crate::routes::sso::SsoStateStore;
 use crate::routes::update::SharedUpdateStatus;
-use crate::tunnel::TunnelManager;
-use crate::upnp::UpnpManager;
 
 /// Polymorphic library source.
 #[derive(Clone)]
@@ -188,8 +185,6 @@ pub struct AppState {
     pub thumbnail_cache_path: PathBuf,
     /// Server configuration (needed for OIDC config access in route handlers).
     pub config: Config,
-    /// In-memory OIDC state/PKCE verifier store for the authorization code flow.
-    pub oidc_state_store: OidcStateStore,
     /// In-memory SSO state store for DB-driven multi-provider login (Google/GitHub/custom).
     pub sso_state_store: SsoStateStore,
     /// Shared HTTP client for outbound requests (metadata providers, webhooks).
@@ -197,10 +192,6 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Shared update status for the self-update feature (tracks download/restart progress).
     pub update_status: SharedUpdateStatus,
-    /// UPnP port forwarding manager for automatic remote access.
-    pub upnp_manager: Arc<RwLock<UpnpManager>>,
-    /// Cloudflare Quick Tunnel manager for zero-config remote access.
-    pub tunnel_manager: Arc<RwLock<TunnelManager>>,
     /// In-memory registry of background tasks for UI progress monitoring.
     pub tasks: Arc<crate::tasks::TaskRegistry>,
 }

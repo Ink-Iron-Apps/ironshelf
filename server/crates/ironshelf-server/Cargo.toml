@@ -35,7 +35,7 @@ urlencoding = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
 futures-util = { workspace = true }
-igd-next = { workspace = true }
+totp-rs = { version = "5.6", features = ["qr", "gen_secret"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

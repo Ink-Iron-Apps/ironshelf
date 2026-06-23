@@ -1,14 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
-import 'providers/cloud_provider.dart';
 import 'providers/server_provider.dart';
 import 'screens/annotations_screen.dart';
 import 'screens/author_detail_screen.dart';
 import 'screens/authors_screen.dart';
 import 'screens/book_detail_screen.dart';
-import 'screens/cloud_login_screen.dart';
-import 'screens/cloud_servers_screen.dart';
 import 'screens/collection_detail_screen.dart';
 import 'screens/collections_screen.dart';
 import 'screens/genre_detail_screen.dart';
@@ -20,44 +17,34 @@ import 'screens/reader/reader_screen.dart';
 import 'screens/reading_queue_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/series_detail_screen.dart';
+import 'screens/server_login_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shell_screen.dart';
 import 'screens/stats_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final hasCloud = ref.watch(cloudConfiguredProvider);
-  final hasServer = ref.watch(isServerConfiguredProvider) &&
+  final isConnected = ref.watch(isServerConfiguredProvider) &&
       ref.watch(isAuthenticatedProvider);
 
   return GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
       final path = state.matchedLocation;
-      const loginPath = '/cloud-login';
-      const pickerPath = '/cloud-servers';
+      const loginPath = '/login';
 
-      // The app is cloud-only: sign in to the cloud first.
-      if (!hasCloud) {
+      // Not connected to a server → send to the direct server-URL login.
+      if (!isConnected) {
         return path == loginPath ? null : loginPath;
       }
-      // Signed in to the cloud but no server connected → pick one.
-      if (!hasServer) {
-        return path == pickerPath ? null : pickerPath;
-      }
-      // Fully connected. Keep users off the login page; the picker stays
-      // reachable so they can switch servers.
+      // Connected. Keep users off the login page.
       if (path == loginPath) return '/';
       return null;
     },
     routes: [
-      // Cloud onboarding (no shell)
+      // Server connection (no shell)
       GoRoute(
-        path: '/cloud-login',
-        builder: (context, state) => const CloudLoginScreen(),
-      ),
-      GoRoute(
-        path: '/cloud-servers',
-        builder: (context, state) => const CloudServersScreen(),
+        path: '/login',
+        builder: (context, state) => const ServerLoginScreen(),
       ),
 
       // Main app with bottom navigation shell

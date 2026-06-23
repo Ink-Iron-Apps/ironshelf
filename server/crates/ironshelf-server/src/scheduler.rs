@@ -19,9 +19,7 @@ pub fn start(application_state: AppState) {
     tokio::spawn(metadata_auto_enrich_task(application_state.clone()));
     tokio::spawn(acquisition_wanted_search_task(application_state.clone()));
     tokio::spawn(acquisition_download_monitor_task(application_state.clone()));
-    tokio::spawn(acquisition_stale_cleanup_task(application_state.clone()));
-    tokio::spawn(upnp_refresh_task(application_state.clone()));
-    tokio::spawn(tunnel_health_check_task(application_state));
+    tokio::spawn(acquisition_stale_cleanup_task(application_state));
 }
 
 /// Every 30 minutes: rescan FolderSource libraries for new files.
@@ -346,97 +344,6 @@ async fn metadata_auto_enrich_task(application_state: AppState) {
             "scheduler: metadata auto-enrich identified {} book(s) needing metadata",
             candidates.len()
         );
-    }
-}
-
-/// Every 30 minutes: renew the UPnP port mapping lease.
-/// If the mapping was lost (router reboot, DHCP change), attempts a full
-/// re-discovery and re-establishment.
-async fn upnp_refresh_task(application_state: AppState) {
-    let mut interval = tokio::time::interval(Duration::from_secs(30 * 60));
-    // Skip the immediate first tick.
-    interval.tick().await;
-
-    loop {
-        interval.tick().await;
-
-        let is_enabled = {
-            let upnp_manager = application_state.upnp_manager.read().await;
-            upnp_manager.get_status().is_enabled
-        };
-
-        if !is_enabled {
-            continue;
-        }
-
-        tracing::debug!("scheduler: refreshing UPnP port mapping");
-
-        let mut upnp_manager = application_state.upnp_manager.write().await;
-        upnp_manager.refresh().await;
-
-        let status = upnp_manager.get_status();
-        if status.is_active {
-            tracing::debug!(
-                "scheduler: UPnP mapping active — {}",
-                status.public_url.as_deref().unwrap_or("unknown")
-            );
-        } else {
-            tracing::warn!(
-                "scheduler: UPnP mapping inactive — {}",
-                status.last_error.as_deref().unwrap_or("unknown error")
-            );
-        }
-    }
-}
-
-/// Every 5 minutes: verify the Cloudflare tunnel child process is still alive.
-/// If it died, attempt to respawn it. If the URL changed after respawn,
-/// update the cloud config so routing stays current.
-async fn tunnel_health_check_task(application_state: AppState) {
-    let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
-    // Skip the immediate first tick.
-    interval.tick().await;
-
-    loop {
-        interval.tick().await;
-
-        let (was_active, is_healthy) = {
-            let mut tunnel_manager = application_state.tunnel_manager.write().await;
-            let was_active = tunnel_manager.get_status().is_active;
-            let is_healthy = tunnel_manager.check_health();
-            (was_active, is_healthy)
-        };
-
-        if !was_active {
-            // Tunnel was never started or was explicitly stopped — skip.
-            continue;
-        }
-
-        if is_healthy {
-            tracing::debug!("scheduler: Cloudflare tunnel health check passed");
-            continue;
-        }
-
-        // Tunnel was active but child process died — respawn.
-        tracing::warn!("scheduler: Cloudflare tunnel died, attempting respawn");
-
-        let mut tunnel_manager = application_state.tunnel_manager.write().await;
-        match tunnel_manager.start().await {
-            Ok(new_public_url) => {
-                tracing::info!(
-                    "scheduler: Cloudflare tunnel respawned: {new_public_url}"
-                );
-                drop(tunnel_manager);
-
-                // Update cloud config with the new URL.
-                crate::update_cloud_server_url(&application_state, &new_public_url).await;
-            }
-            Err(respawn_error) => {
-                tracing::error!(
-                    "scheduler: failed to respawn Cloudflare tunnel: {respawn_error}"
-                );
-            }
-        }
     }
 }
 
