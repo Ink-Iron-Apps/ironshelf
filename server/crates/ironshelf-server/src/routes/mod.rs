@@ -1,6 +1,7 @@
 //! API route handlers.
 
 pub mod acquisition;
+pub mod admin_auth;
 pub mod auth;
 pub mod calibre_writeback;
 pub mod cloud_auth;
@@ -35,6 +36,7 @@ pub mod remote_access;
 pub mod search;
 pub mod series;
 pub mod server_info;
+pub mod sso;
 pub mod stats;
 pub mod update;
 pub mod users;

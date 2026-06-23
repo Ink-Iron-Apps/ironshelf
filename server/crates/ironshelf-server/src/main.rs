@@ -75,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let oidc_state_store = routes::oidc::OidcStateStore::new();
+    let sso_state_store = routes::sso::SsoStateStore::new();
 
     // Shared HTTP client for all outbound requests (metadata providers, webhooks).
     // Created once to reuse connection pools and TLS sessions across the server lifetime.
@@ -101,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
         thumbnail_cache_path: config.thumbnail_cache_path.clone(),
         config: config.clone(),
         oidc_state_store,
+        sso_state_store,
         http_client,
         update_status,
         upnp_manager: Arc::new(RwLock::new(upnp_manager)),
@@ -219,6 +221,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
         .route("/api/v1/auth/oidc/login", get(routes::oidc::oidc_login))
         .route("/api/v1/auth/oidc/callback", get(routes::oidc::oidc_callback))
+        .route("/api/v1/auth/sso/{provider}/login", get(routes::sso::sso_login))
+        .route(
+            "/api/v1/auth/sso/{provider}/callback",
+            get(routes::sso::sso_callback),
+        )
         .with_state(app_state.clone())
         .layer(axum::middleware::from_fn_with_state(
             auth_rate_limiter,
@@ -231,6 +238,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/ready", get(readiness))
         .route("/alive", get(liveness))
         .route("/api/v1/server/info", get(routes::server_info::server_info))
+        .route(
+            "/api/v1/auth/providers",
+            get(routes::sso::list_providers),
+        )
         .route(
             "/api/v1/auth/cloud-login",
             axum::routing::post(routes::cloud_auth::cloud_login),
@@ -275,6 +286,15 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/auth/claim",
             axum::routing::post(routes::cloud_auth::claim_server),
+        )
+        .route(
+            "/api/v1/admin/auth-providers",
+            get(routes::admin_auth::list_auth_providers),
+        )
+        .route(
+            "/api/v1/admin/auth-providers/{id}",
+            axum::routing::put(routes::admin_auth::upsert_auth_provider)
+                .delete(routes::admin_auth::delete_auth_provider),
         )
         .route("/api/v1/users", get(routes::users::list_users))
         .route(

@@ -1548,11 +1548,27 @@
       registerLinkHtml = `<div class="login-footer" style="color:var(--color-muted)">Registration is closed on this server.</div>`;
     }
 
+    // Legacy file-config OIDC button (kept for back-compat).
     const isOidcEnabled = serverInfo?.oidc_enabled === true;
-    const oidcButtonHtml = isOidcEnabled ? `
-      <div class="login-divider">or</div>
-      <a href="${API}/auth/oidc/login" class="btn btn-sso">${icon('shield', 18)} Sign in with SSO</a>
-    ` : '';
+    let ssoButtonsHtml = isOidcEnabled
+      ? `<a href="${API}/auth/oidc/login" class="btn btn-sso">${icon('shield', 18)} Sign in with SSO</a>`
+      : '';
+
+    // DB-driven login providers (Google, GitHub, custom) configured by the owner.
+    try {
+      const providers = await fetch(`${API}/auth/providers`)
+        .then(r => (r.ok ? r.json() : []))
+        .catch(() => []);
+      for (const provider of providers || []) {
+        ssoButtonsHtml += `
+          <a href="${API}/auth/sso/${encodeURIComponent(provider.id)}/login" class="btn btn-sso">${icon('shield', 18)} Sign in with ${escapeHtml(provider.display_name)}</a>
+        `;
+      }
+    } catch { /* providers endpoint optional */ }
+
+    const oidcButtonHtml = ssoButtonsHtml
+      ? `<div class="login-divider">or</div>${ssoButtonsHtml}`
+      : '';
 
     // Check if server is claimed (cloud login available)
     let cloudLoginHtml = '';
@@ -3361,6 +3377,63 @@
         </div>
         ` : ''}
 
+        ${currentUser?.is_owner ? `
+        <div class="settings-section" data-cat="users" id="auth-providers-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('shield', 20)} Login Providers</h3>
+          <p class="description">Let users sign in with Google, GitHub, or any OIDC/OAuth2 provider. In the provider's console, register the callback URL <code id="sso-callback-base">${escapeHtml(location.origin)}</code><code>/api/v1/auth/sso/&lt;id&gt;/callback</code>.</p>
+          <div class="list-group" id="auth-providers-list">
+            <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading providers...</div>
+          </div>
+          <div class="card mt-4">
+            <h4 style="margin-bottom:var(--space-3)" id="sso-form-title">Add provider</h4>
+            <div class="form-group">
+              <label class="form-label" for="sso-preset">Preset</label>
+              <select class="form-input" id="sso-preset">
+                <option value="google">Google (OIDC)</option>
+                <option value="github">GitHub (OAuth2)</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sso-id">Provider ID (slug)</label>
+              <input class="form-input" id="sso-id" placeholder="google" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sso-name">Display name</label>
+              <input class="form-input" id="sso-name" placeholder="Google" autocomplete="off">
+            </div>
+            <div class="form-group" id="sso-kind-group" style="display:none">
+              <label class="form-label" for="sso-kind">Kind</label>
+              <select class="form-input" id="sso-kind">
+                <option value="oidc">oidc</option>
+                <option value="oauth2">oauth2</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sso-client-id">Client ID</label>
+              <input class="form-input" id="sso-client-id" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sso-client-secret">Client Secret</label>
+              <input class="form-input" id="sso-client-secret" type="password" placeholder="(leave blank to keep existing)" autocomplete="off">
+            </div>
+            <div id="sso-custom-fields" style="display:none">
+              <div class="form-group"><label class="form-label" for="sso-issuer">Issuer URL (OIDC)</label><input class="form-input" id="sso-issuer" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-authorize">Authorize URL (OAuth2)</label><input class="form-input" id="sso-authorize" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-token">Token URL (OAuth2)</label><input class="form-input" id="sso-token" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-userinfo">Userinfo URL (OAuth2)</label><input class="form-input" id="sso-userinfo" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-scopes">Scopes (space-separated)</label><input class="form-input" id="sso-scopes" autocomplete="off"></div>
+            </div>
+            <label style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)"><input type="checkbox" id="sso-enabled" checked> Enabled</label>
+            <label style="display:flex;gap:var(--space-2);align-items:center"><input type="checkbox" id="sso-auto-register" checked> Auto-register new users on first login</label>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+              <button class="btn btn-primary" id="sso-save-btn">${icon('plus', 16)} Save Provider</button>
+              <button class="btn btn-secondary" id="sso-reset-btn" style="display:none">Cancel edit</button>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
         <div class="settings-section" data-cat="data">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('download', 20)} Export / Import</h3>
           <p class="description">Export your reading progress, collections, and preferences as JSON. Import a previously exported file to restore data.</p>
@@ -3876,6 +3949,11 @@
         }
       });
 
+      // Login providers (owner only)
+      if (currentUser?.is_owner) {
+        setupAuthProvidersSection();
+      }
+
       // Invite management (owner only)
       if (currentUser?.is_owner) {
         loadInvitesList();
@@ -3912,6 +3990,151 @@
     } catch (err) {
       renderShell(renderError('Failed to load settings', err.message, () => renderSettings()), 'settings');
     }
+  }
+
+  // ---- Login Providers (SSO) ----
+
+  const SSO_PRESETS = {
+    google: { id: 'google', name: 'Google', kind: 'oidc' },
+    github: { id: 'github', name: 'GitHub', kind: 'oauth2' },
+  };
+
+  function ssoApplyPresetUi() {
+    const preset = document.getElementById('sso-preset')?.value;
+    if (!preset) return;
+    const idInput = document.getElementById('sso-id');
+    const nameInput = document.getElementById('sso-name');
+    const kindGroup = document.getElementById('sso-kind-group');
+    const customFields = document.getElementById('sso-custom-fields');
+    if (preset === 'custom') {
+      idInput.readOnly = false;
+      kindGroup.style.display = '';
+      customFields.style.display = '';
+    } else {
+      const presetConfig = SSO_PRESETS[preset];
+      idInput.value = presetConfig.id;
+      idInput.readOnly = true;
+      if (!nameInput.value) nameInput.value = presetConfig.name;
+      document.getElementById('sso-kind').value = presetConfig.kind;
+      kindGroup.style.display = 'none';
+      customFields.style.display = 'none';
+    }
+  }
+
+  function ssoResetForm() {
+    document.getElementById('sso-form-title').textContent = 'Add provider';
+    document.getElementById('sso-preset').value = 'google';
+    ['sso-id', 'sso-name', 'sso-client-id', 'sso-client-secret', 'sso-issuer',
+     'sso-authorize', 'sso-token', 'sso-userinfo', 'sso-scopes'].forEach(fieldId => {
+      const field = document.getElementById(fieldId);
+      if (field) field.value = '';
+    });
+    document.getElementById('sso-id').readOnly = false;
+    document.getElementById('sso-enabled').checked = true;
+    document.getElementById('sso-auto-register').checked = true;
+    document.getElementById('sso-reset-btn').style.display = 'none';
+    ssoApplyPresetUi();
+  }
+
+  function ssoFillForm(provider) {
+    document.getElementById('sso-form-title').textContent = `Edit "${provider.display_name}"`;
+    const isPreset = provider.id === 'google' || provider.id === 'github';
+    document.getElementById('sso-preset').value = isPreset ? provider.id : 'custom';
+    ssoApplyPresetUi();
+    document.getElementById('sso-id').value = provider.id;
+    document.getElementById('sso-id').readOnly = true; // id is the key
+    document.getElementById('sso-name').value = provider.display_name;
+    document.getElementById('sso-kind').value = provider.kind;
+    document.getElementById('sso-client-id').value = provider.client_id || '';
+    document.getElementById('sso-client-secret').value = '';
+    document.getElementById('sso-issuer').value = provider.issuer_url || '';
+    document.getElementById('sso-authorize').value = provider.authorize_url || '';
+    document.getElementById('sso-token').value = provider.token_url || '';
+    document.getElementById('sso-userinfo').value = provider.userinfo_url || '';
+    document.getElementById('sso-scopes').value = provider.scopes || '';
+    document.getElementById('sso-enabled').checked = !!provider.enabled;
+    document.getElementById('sso-auto-register').checked = !!provider.auto_register;
+    document.getElementById('sso-reset-btn').style.display = '';
+    document.getElementById('auth-providers-section')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function loadAuthProvidersList() {
+    const listElement = document.getElementById('auth-providers-list');
+    if (!listElement) return;
+    try {
+      const providers = (await apiGet('/admin/auth-providers')) || [];
+      if (!providers.length) {
+        listElement.innerHTML = `<div style="padding:var(--space-4);color:var(--color-muted);font-size:var(--text-sm)">No providers configured yet.</div>`;
+        return;
+      }
+      listElement.innerHTML = providers.map(provider => `
+        <div class="list-group-item" style="display:flex;align-items:center;gap:var(--space-3)">
+          <div style="flex:1">
+            <strong>${escapeHtml(provider.display_name)}</strong>
+            <span class="badge ${provider.enabled ? 'badge-teal' : 'badge-muted'}">${provider.enabled ? 'enabled' : 'disabled'}</span>
+            <div class="text-caption">${escapeHtml(provider.id)} · ${escapeHtml(provider.kind)}${provider.has_client_secret ? ' · secret set' : ' · no secret'}</div>
+          </div>
+          <button class="btn btn-secondary" data-edit="${escapeHtml(provider.id)}">${icon('settings', 14)} Edit</button>
+          <button class="btn btn-secondary" data-delete="${escapeHtml(provider.id)}">${icon('trash', 14)} Delete</button>
+        </div>
+      `).join('');
+      listElement.querySelectorAll('[data-edit]').forEach(button => {
+        button.addEventListener('click', () => {
+          const provider = providers.find(candidate => candidate.id === button.dataset.edit);
+          if (provider) ssoFillForm(provider);
+        });
+      });
+      listElement.querySelectorAll('[data-delete]').forEach(button => {
+        button.addEventListener('click', async () => {
+          if (!confirm(`Delete login provider "${button.dataset.delete}"?`)) return;
+          try {
+            await apiDelete(`/admin/auth-providers/${encodeURIComponent(button.dataset.delete)}`);
+            toast('Provider deleted', 'success');
+            loadAuthProvidersList();
+          } catch (deleteError) {
+            toast(deleteError.message, 'error');
+          }
+        });
+      });
+    } catch (loadError) {
+      listElement.innerHTML = `<div style="padding:var(--space-4);color:var(--color-danger);font-size:var(--text-sm)">${escapeHtml(loadError.message)}</div>`;
+    }
+  }
+
+  function setupAuthProvidersSection() {
+    if (!document.getElementById('auth-providers-section')) return;
+    document.getElementById('sso-preset').addEventListener('change', ssoApplyPresetUi);
+    document.getElementById('sso-reset-btn').addEventListener('click', ssoResetForm);
+    document.getElementById('sso-save-btn').addEventListener('click', async () => {
+      const providerId = document.getElementById('sso-id').value.trim();
+      if (!providerId) {
+        toast('Provider ID is required', 'error');
+        return;
+      }
+      const body = {
+        kind: document.getElementById('sso-kind').value,
+        display_name: document.getElementById('sso-name').value.trim() || providerId,
+        client_id: document.getElementById('sso-client-id').value.trim(),
+        client_secret: document.getElementById('sso-client-secret').value || undefined,
+        issuer_url: document.getElementById('sso-issuer').value.trim() || undefined,
+        authorize_url: document.getElementById('sso-authorize').value.trim() || undefined,
+        token_url: document.getElementById('sso-token').value.trim() || undefined,
+        userinfo_url: document.getElementById('sso-userinfo').value.trim() || undefined,
+        scopes: document.getElementById('sso-scopes').value.trim() || undefined,
+        enabled: document.getElementById('sso-enabled').checked,
+        auto_register: document.getElementById('sso-auto-register').checked,
+      };
+      try {
+        await apiPut(`/admin/auth-providers/${encodeURIComponent(providerId)}`, body);
+        toast('Provider saved', 'success');
+        ssoResetForm();
+        loadAuthProvidersList();
+      } catch (saveError) {
+        toast(saveError.message, 'error');
+      }
+    });
+    ssoApplyPresetUi();
+    loadAuthProvidersList();
   }
 
   // ---- Remote Access Card ----

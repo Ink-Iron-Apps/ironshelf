@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 
 use crate::config::Config;
 use crate::routes::oidc::OidcStateStore;
+use crate::routes::sso::SsoStateStore;
 use crate::routes::update::SharedUpdateStatus;
 use crate::tunnel::TunnelManager;
 use crate::upnp::UpnpManager;
@@ -189,6 +190,8 @@ pub struct AppState {
     pub config: Config,
     /// In-memory OIDC state/PKCE verifier store for the authorization code flow.
     pub oidc_state_store: OidcStateStore,
+    /// In-memory SSO state store for DB-driven multi-provider login (Google/GitHub/custom).
+    pub sso_state_store: SsoStateStore,
     /// Shared HTTP client for outbound requests (metadata providers, webhooks).
     /// Created once at startup to reuse connection pools and TLS sessions.
     pub http_client: reqwest::Client,
