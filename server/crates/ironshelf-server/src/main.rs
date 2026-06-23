@@ -218,6 +218,7 @@ async fn main() -> anyhow::Result<()> {
                 .patch(routes::libraries::update_library)
                 .delete(routes::libraries::delete_library),
         )
+        .route("/api/v1/libraries/scan", axum::routing::post(routes::libraries::scan_all_libraries))
         .route("/api/v1/libraries/{id}/scan", axum::routing::post(routes::libraries::scan_library))
         .route("/api/v1/libraries/{id}/metadata/scan", axum::routing::post(routes::metadata::bulk_metadata_scan))
         .route("/api/v1/libraries/{id}/authors", get(routes::authors::list_authors))

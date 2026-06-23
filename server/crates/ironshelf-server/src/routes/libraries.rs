@@ -244,6 +244,34 @@ pub async fn delete_library(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// POST /api/v1/libraries/scan — rescan all folder libraries
+pub async fn scan_all_libraries(
+    State(state): State<AppState>,
+) -> Result<StatusCode, AppError> {
+    let folder_sources: Vec<Arc<tokio::sync::RwLock<FolderSource>>> = {
+        let libraries = state.libraries.read().await;
+        libraries
+            .iter()
+            .filter_map(|library| {
+                if let LibrarySource::Folder(ref folder) = library.source {
+                    Some(Arc::clone(folder))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
+    for folder in folder_sources {
+        let mut source = folder.write().await;
+        if let Err(error) = source.scan().await {
+            tracing::error!("scan_all: scan failed: {error}");
+        }
+    }
+
+    Ok(StatusCode::ACCEPTED)
+}
+
 /// POST /api/v1/libraries/:id/scan — rescan/reindex a library
 pub async fn scan_library(
     State(state): State<AppState>,

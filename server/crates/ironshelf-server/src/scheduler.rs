@@ -14,6 +14,7 @@ use ironshelf_core::search_index::BookIndexEntry;
 pub fn start(application_state: AppState) {
     tracing::info!("starting background scheduler");
 
+    tokio::spawn(library_watch_task(application_state.clone()));
     tokio::spawn(library_rescan_task(application_state.clone()));
     tokio::spawn(session_cleanup_task(application_state.clone()));
     tokio::spawn(metadata_auto_enrich_task(application_state));
@@ -190,6 +191,109 @@ async fn library_rescan_task(application_state: AppState) {
             }
         } else {
             tracing::info!("scheduler: library rescan complete, no new books found");
+        }
+    }
+}
+
+/// Filesystem watcher: rescans a folder library when its directory tree changes.
+/// Uses a 3-second debounce window so burst file operations trigger one rescan.
+/// Watches paths captured at startup; new libraries added after start require a
+/// server restart (or the 30-min periodic rescan) to be watched.
+async fn library_watch_task(application_state: AppState) {
+    use notify::{RecursiveMode, Watcher};
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    // Collect folder library paths at startup.
+    let mut path_to_source: HashMap<
+        PathBuf,
+        std::sync::Arc<tokio::sync::RwLock<ironshelf_core::scan::FolderSource>>,
+    > = HashMap::new();
+
+    {
+        let libraries = application_state.libraries.read().await;
+        for library in libraries.iter() {
+            if let LibrarySource::Folder(ref folder_source) = library.source {
+                let path = folder_source.read().await.library_path().to_path_buf();
+                path_to_source.insert(path, std::sync::Arc::clone(folder_source));
+            }
+        }
+    }
+
+    if path_to_source.is_empty() {
+        tracing::info!("scheduler: no folder libraries to watch");
+        return;
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<PathBuf>(64);
+
+    let tx_clone = tx.clone();
+    let mut watcher = match notify::recommended_watcher(
+        move |result: notify::Result<notify::Event>| {
+            if let Ok(event) = result {
+                for path in event.paths {
+                    let _ = tx_clone.try_send(path);
+                }
+            }
+        },
+    ) {
+        Ok(w) => w,
+        Err(error) => {
+            tracing::error!("scheduler: failed to create filesystem watcher: {error}");
+            return;
+        }
+    };
+
+    for watched_path in path_to_source.keys() {
+        match watcher.watch(watched_path, RecursiveMode::Recursive) {
+            Ok(_) => tracing::info!("scheduler: watching {}", watched_path.display()),
+            Err(error) => tracing::error!(
+                "scheduler: failed to watch {}: {error}",
+                watched_path.display()
+            ),
+        }
+    }
+
+    let debounce = Duration::from_secs(3);
+    let mut pending: HashSet<PathBuf> = HashSet::new();
+
+    loop {
+        // Wait for the next event.
+        let Some(changed_path) = rx.recv().await else {
+            break;
+        };
+
+        // Map the changed path back to the watched library root.
+        if let Some(root) = path_to_source.keys().find(|r| changed_path.starts_with(*r)).cloned() {
+            pending.insert(root);
+        }
+
+        // Drain remaining events within the debounce window.
+        let deadline = tokio::time::Instant::now() + debounce;
+        loop {
+            match tokio::time::timeout_at(deadline, rx.recv()).await {
+                Ok(Some(path)) => {
+                    if let Some(root) = path_to_source.keys().find(|r| path.starts_with(*r)).cloned() {
+                        pending.insert(root);
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Rescan all libraries that received events.
+        for root_path in pending.drain() {
+            if let Some(folder_source) = path_to_source.get(&root_path) {
+                tracing::info!(
+                    "scheduler: filesystem change in {}, rescanning",
+                    root_path.display()
+                );
+                let mut source = folder_source.write().await;
+                if let Err(scan_error) = source.scan().await {
+                    tracing::error!("scheduler: watch-triggered rescan failed: {scan_error}");
+                }
+            }
         }
     }
 }
