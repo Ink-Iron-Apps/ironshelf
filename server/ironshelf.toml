@@ -18,12 +18,6 @@ database_path = "ironshelf.db"
 # Set to true ONLY when behind a trusted reverse proxy.
 # When true, the rate limiter reads X-Forwarded-For / X-Real-Ip for client IP.
 # trust_proxy_headers = false
-
-# Optional: OIDC/SSO login (Authelia, Authentik, Keycloak, Google, etc.)
-# [oidc]
-# issuer_url = "https://auth.example.com"
-# client_id = "ironshelf"
-# client_secret = "your-secret"
-# redirect_uri = "https://books.example.com/api/v1/auth/oidc/callback"
-# scopes = ["openid", "profile", "email"]
-# auto_register = true
+#
+# SSO login providers (Google, GitHub, custom OIDC/OAuth2) are configured at
+# runtime in Settings → Login Providers, not in this file.

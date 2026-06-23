@@ -11,8 +11,6 @@ mod scheduler;
 mod state;
 mod tasks;
 pub mod thumbnail;
-pub mod tunnel;
-pub mod upnp;
 mod web;
 mod webhook_dispatcher;
 
@@ -74,7 +72,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let oidc_state_store = routes::oidc::OidcStateStore::new();
     let sso_state_store = routes::sso::SsoStateStore::new();
 
     // Shared HTTP client for all outbound requests (metadata providers, webhooks).
@@ -86,14 +83,6 @@ async fn main() -> anyhow::Result<()> {
 
     let update_status = routes::update::new_update_status();
 
-    // UPnP port forwarding manager. The external port defaults to the server
-    // port if not explicitly configured.
-    let effective_external_port = config.external_port.unwrap_or(config.port);
-    let upnp_manager = upnp::UpnpManager::new(config.port, effective_external_port);
-
-    // Cloudflare Quick Tunnel manager for zero-config remote access.
-    let tunnel_manager = tunnel::TunnelManager::new(config.port);
-
     let app_state = AppState {
         libraries: Arc::new(RwLock::new(libraries)),
         ironshelf_db,
@@ -101,111 +90,14 @@ async fn main() -> anyhow::Result<()> {
         search_index,
         thumbnail_cache_path: config.thumbnail_cache_path.clone(),
         config: config.clone(),
-        oidc_state_store,
         sso_state_store,
         http_client,
         update_status,
-        upnp_manager: Arc::new(RwLock::new(upnp_manager)),
-        tunnel_manager: Arc::new(RwLock::new(tunnel_manager)),
         tasks: Arc::new(tasks::TaskRegistry::new()),
     };
 
-    // Determine which remote access method to use, in priority order:
-    //   1. a method persisted in the DB by the UI (start tunnel / select method),
-    //   2. "tunnel" if the server is claimed to the cloud (so remote access and
-    //      the cloud URL survive restarts),
-    //   3. the legacy config-file setting (remote_access_enabled → upnp).
-    let persisted_remote_method = app_state
-        .ironshelf_db
-        .get_cloud_config("remote_access_method")
-        .await
-        .ok()
-        .flatten();
-    let is_claimed = app_state
-        .ironshelf_db
-        .get_cloud_config("claim_token")
-        .await
-        .ok()
-        .flatten()
-        .is_some();
-
-    let effective_remote_access_method: String = match persisted_remote_method {
-        Some(method) if method != "none" => method,
-        _ if is_claimed => "tunnel".to_string(),
-        _ if config.remote_access_enabled && config.remote_access_method == "none" => {
-            "upnp".to_string()
-        }
-        _ => config.remote_access_method.clone(),
-    };
-
-    match effective_remote_access_method.as_str() {
-        "upnp" => {
-            let mut upnp_guard = app_state.upnp_manager.write().await;
-            match upnp_guard.enable().await {
-                Ok(public_url) => {
-                    tracing::info!("remote access (UPnP): {public_url}");
-                }
-                Err(upnp_error) => {
-                    tracing::warn!(
-                        "UPnP failed: {upnp_error} — you can manually forward port {} on your router",
-                        effective_external_port,
-                    );
-                }
-            }
-            drop(upnp_guard);
-        }
-        "tunnel" => {
-            // Named tunnel (stable hostname) if configured, else a quick tunnel.
-            let named_tunnel = {
-                let db = &app_state.ironshelf_db;
-                let mode = db.get_cloud_config("tunnel_mode").await.ok().flatten();
-                let token = db.get_cloud_config("cf_tunnel_token").await.ok().flatten();
-                let hostname = db.get_cloud_config("cf_tunnel_hostname").await.ok().flatten();
-                match (mode.as_deref(), token, hostname) {
-                    (Some("named"), Some(token), Some(hostname))
-                        if !token.is_empty() && !hostname.is_empty() =>
-                    {
-                        Some((token, hostname))
-                    }
-                    _ => None,
-                }
-            };
-
-            let mut tunnel_guard = app_state.tunnel_manager.write().await;
-            let tunnel_result = match &named_tunnel {
-                Some((token, hostname)) => tunnel_guard.start_named(token, hostname).await,
-                None => tunnel_guard.start().await,
-            };
-            match tunnel_result {
-                Ok(public_url) => {
-                    tracing::info!("remote access (Cloudflare Tunnel): {public_url}");
-
-                    // If the server is claimed, update Ironshelf Cloud with the tunnel URL.
-                    let cloud_state = app_state.clone();
-                    let tunnel_url_for_cloud = public_url.clone();
-                    tokio::spawn(async move {
-                        update_cloud_server_url(&cloud_state, &tunnel_url_for_cloud).await;
-                    });
-                }
-                Err(tunnel_error) => {
-                    tracing::warn!("Cloudflare tunnel failed: {tunnel_error}");
-                }
-            }
-            drop(tunnel_guard);
-        }
-        "manual" => {
-            tracing::info!("remote access: manual mode — user manages port forwarding externally");
-        }
-        _ => {
-            tracing::info!("remote access: disabled");
-        }
-    }
-
     // Start background scheduled tasks (rescan, session cleanup, metadata enrich).
     scheduler::start(app_state.clone());
-
-    // Heartbeat to the cloud so it can report this server as online.
-    spawn_cloud_heartbeat(app_state.clone());
 
     // Initialize rate limiters and spawn background cleanup tasks.
     let api_rate_limiter = middleware::rate_limit::RateLimiter::api_tier()
@@ -219,8 +111,6 @@ async fn main() -> anyhow::Result<()> {
     let auth_routes = Router::new()
         .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
-        .route("/api/v1/auth/oidc/login", get(routes::oidc::oidc_login))
-        .route("/api/v1/auth/oidc/callback", get(routes::oidc::oidc_callback))
         .route("/api/v1/auth/sso/{provider}/login", get(routes::sso::sso_login))
         .route(
             "/api/v1/auth/sso/{provider}/callback",
@@ -242,14 +132,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/auth/providers",
             get(routes::sso::list_providers),
         )
-        .route(
-            "/api/v1/auth/cloud-login",
-            axum::routing::post(routes::cloud_auth::cloud_login),
-        )
-        .route(
-            "/api/v1/auth/claim-status",
-            get(routes::cloud_auth::claim_status),
-        )
         .with_state(app_state.clone());
 
     // Protected routes (auth required).
@@ -264,28 +146,12 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::put(routes::password::change_password),
         )
         .route(
-            "/api/v1/auth/link-cloud",
-            axum::routing::post(routes::cloud_auth::link_cloud),
-        )
-        .route(
-            "/api/v1/auth/unlink-cloud",
-            axum::routing::post(routes::cloud_auth::unlink_cloud),
-        )
-        .route(
             "/api/v1/auth/api-keys",
             get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
         )
         .route(
             "/api/v1/auth/api-keys/{id}",
             axum::routing::delete(routes::auth::delete_api_key),
-        )
-        .route(
-            "/api/v1/auth/unclaim",
-            axum::routing::delete(routes::cloud_auth::unclaim_server),
-        )
-        .route(
-            "/api/v1/auth/claim",
-            axum::routing::post(routes::cloud_auth::claim_server),
         )
         .route(
             "/api/v1/admin/auth-providers",
@@ -648,38 +514,6 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/server/converters",
             get(routes::converters::server_converters),
-        )
-        .route(
-            "/api/v1/server/remote-access",
-            get(routes::remote_access::get_remote_access_status),
-        )
-        .route(
-            "/api/v1/server/remote-access/enable",
-            axum::routing::post(routes::remote_access::enable_remote_access),
-        )
-        .route(
-            "/api/v1/server/remote-access/disable",
-            axum::routing::post(routes::remote_access::disable_remote_access),
-        )
-        .route(
-            "/api/v1/server/remote-access/test",
-            axum::routing::post(routes::remote_access::test_remote_access),
-        )
-        .route(
-            "/api/v1/server/remote-access/tunnel/start",
-            axum::routing::post(routes::remote_access::start_tunnel),
-        )
-        .route(
-            "/api/v1/server/remote-access/tunnel/stop",
-            axum::routing::post(routes::remote_access::stop_tunnel),
-        )
-        .route(
-            "/api/v1/server/remote-access/manual-url",
-            axum::routing::post(routes::remote_access::set_manual_url),
-        )
-        .route(
-            "/api/v1/server/remote-access/local-bypass",
-            axum::routing::post(routes::remote_access::set_local_bypass),
         );
 
     let protected_routes = Router::new()
@@ -787,123 +621,6 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("server shut down gracefully");
     Ok(())
-}
-
-/// If the server is claimed to Ironshelf Cloud, update the stored server URL
-/// so cloud routing points to the current tunnel/public address.
-/// Periodically ping the cloud so it can report this server as online. A no-op
-/// until the server is claimed (cloud config present); re-checks each tick so
-/// claiming at runtime starts heartbeats without a restart.
-pub(crate) fn spawn_cloud_heartbeat(application_state: AppState) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            ticker.tick().await;
-            let db = &application_state.ironshelf_db;
-            let server_id = match db.get_cloud_config("server_id").await {
-                Ok(Some(value)) => value,
-                _ => continue,
-            };
-            let cloud_service_url = match db.get_cloud_config("cloud_service_url").await {
-                Ok(Some(value)) => value,
-                _ => continue,
-            };
-            let claim_token = match db.get_cloud_config("claim_token").await {
-                Ok(Some(value)) => value,
-                _ => continue,
-            };
-
-            let heartbeat_url = format!(
-                "{}/servers/{}/heartbeat",
-                cloud_service_url.trim_end_matches('/'),
-                server_id
-            );
-
-            // Include the current public URL (if known) so the cloud copy stays
-            // correct even when the tunnel URL rotates.
-            let mut body = serde_json::json!({ "version": env!("CARGO_PKG_VERSION") });
-            if let Ok(Some(public_url)) = db.get_cloud_config("public_url").await {
-                body["url"] = serde_json::Value::String(public_url);
-            }
-
-            let _ = application_state
-                .http_client
-                .post(&heartbeat_url)
-                .bearer_auth(&claim_token)
-                .json(&body)
-                .send()
-                .await;
-        }
-    });
-}
-
-pub(crate) async fn update_cloud_server_url(application_state: &AppState, new_public_url: &str) {
-    let server_id = match application_state
-        .ironshelf_db
-        .get_cloud_config("server_id")
-        .await
-    {
-        Ok(Some(id)) => id,
-        _ => return, // Not claimed — nothing to update.
-    };
-
-    let cloud_service_url = match application_state
-        .ironshelf_db
-        .get_cloud_config("cloud_service_url")
-        .await
-    {
-        Ok(Some(url)) => url,
-        _ => return,
-    };
-
-    let claim_token = match application_state
-        .ironshelf_db
-        .get_cloud_config("claim_token")
-        .await
-    {
-        Ok(Some(token)) => token,
-        _ => return,
-    };
-
-    // Remember the current public URL so the periodic heartbeat keeps the cloud
-    // copy fresh even if the tunnel URL rotates.
-    let _ = application_state
-        .ironshelf_db
-        .set_cloud_config("public_url", new_public_url)
-        .await;
-
-    // Push it now via the heartbeat endpoint (claim-token authed, no /api/v1
-    // prefix on the cloud worker, field name `url`).
-    let heartbeat_url = format!(
-        "{}/servers/{}/heartbeat",
-        cloud_service_url.trim_end_matches('/'),
-        server_id
-    );
-
-    match application_state
-        .http_client
-        .post(&heartbeat_url)
-        .bearer_auth(&claim_token)
-        .json(&serde_json::json!({
-            "url": new_public_url,
-            "version": env!("CARGO_PKG_VERSION"),
-        }))
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => {
-            tracing::info!("updated cloud server URL to {new_public_url}");
-        }
-        Ok(response) => {
-            tracing::warn!(
-                "failed to update cloud server URL: HTTP {}",
-                response.status()
-            );
-        }
-        Err(request_error) => {
-            tracing::warn!("failed to update cloud server URL: {request_error}");
-        }
-    }
 }
 
 /// Load all libraries from DB and open their sources.

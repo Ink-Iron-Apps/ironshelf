@@ -66,12 +66,6 @@ pub async fn auth_middleware(
     // be checked in the failure branch without borrowing the non-Sync request body
     // across await points (which would make this future non-Send).
     let request_path = request.uri().path().to_string();
-    // Capture the peer IP up front (Copy) so the bypass check doesn't borrow the
-    // non-Sync request body across await points.
-    let client_ip = request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|connect_info| connect_info.ip());
 
     match extract_auth_user(&state, request.headers(), query_token.as_deref()).await {
         Ok(auth_user) => {
@@ -96,13 +90,6 @@ pub async fn auth_middleware(
                     }
                 }
             }
-            // Local-only convenience bypass (opt-in). Only when enabled, NOT
-            // connected to cloud, NO remote access configured, and the request
-            // comes from a loopback/LAN address — then treat it as the owner.
-            if let Some(owner) = try_local_bypass(&state, client_ip).await {
-                request.extensions_mut().insert(owner);
-                return Ok(next.run(request).await);
-            }
             Err(status)
         }
     }
@@ -122,64 +109,6 @@ fn is_media_route(path: &str) -> bool {
         (segments[2], segments[4]),
         ("books", "cover") | ("books", "file") | ("authors", "photo")
     )
-}
-
-/// Whether an unauthenticated request may be served as the owner via the
-/// local-only auth bypass. Fails closed: every guard must pass.
-async fn try_local_bypass(state: &AppState, client_ip: Option<std::net::IpAddr>) -> Option<AuthUser> {
-    let db = &state.ironshelf_db;
-
-    // Must be explicitly enabled by the owner.
-    if db.get_cloud_config("local_auth_bypass").await.ok().flatten().as_deref()
-        != Some("true")
-    {
-        return None;
-    }
-    // Never when claimed to a cloud account — that would expose the server to
-    // anyone on the local network with a cloud-reachable instance.
-    if db.get_cloud_config("claim_token").await.ok().flatten().is_some() {
-        return None;
-    }
-    // Never when any remote access is configured (tunnel/UPnP/manual) — remote
-    // traffic can arrive looking like loopback (co-located tunnel).
-    match db.get_cloud_config("remote_access_method").await.ok().flatten().as_deref() {
-        None | Some("") | Some("none") => {}
-        _ => return None,
-    }
-
-    // Client must be on a loopback or private/LAN address. Uses the real peer
-    // socket (never the spoofable X-Forwarded-For).
-    if !is_local_ip(client_ip?) {
-        return None;
-    }
-
-    // Impersonate the instance owner.
-    let row = sqlx::query("SELECT id, username FROM users WHERE is_owner = 1 LIMIT 1")
-        .fetch_optional(db.pool())
-        .await
-        .ok()??;
-    Some(AuthUser {
-        user_id: row.get("id"),
-        username: row.get("username"),
-        is_owner: true,
-        session_id: None,
-    })
-}
-
-/// Loopback, RFC1918 private, or link-local addresses (i.e. same machine / LAN).
-fn is_local_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback() || v4.is_private() || v4.is_link_local()
-        }
-        std::net::IpAddr::V6(v6) => {
-            v6.is_loopback()
-                // fc00::/7 unique-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                // fe80::/10 link-local
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
-        }
-    }
 }
 
 /// Pull a named value out of a URL query string. Tokens (session ids, `irs_` API
