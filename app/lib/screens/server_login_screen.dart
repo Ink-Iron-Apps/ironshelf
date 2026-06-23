@@ -25,6 +25,7 @@ class _ServerLoginScreenState extends ConsumerState<ServerLoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   final _inviteCode = TextEditingController();
+  final _totpCode = TextEditingController();
 
   _Mode _mode = _Mode.login;
   bool _obscure = true;
@@ -37,6 +38,7 @@ class _ServerLoginScreenState extends ConsumerState<ServerLoginScreen> {
     _username.dispose();
     _password.dispose();
     _inviteCode.dispose();
+    _totpCode.dispose();
     super.dispose();
   }
 
@@ -82,6 +84,12 @@ class _ServerLoginScreenState extends ConsumerState<ServerLoginScreen> {
         return;
       }
 
+      // 2FA required — stay on screen; the build method switches to code prompt.
+      if (authState.awaitingTwoFactor) {
+        if (mounted) setState(() => _errorMessage = null);
+        return;
+      }
+
       // Login failed — clear the half-saved server so the next attempt starts
       // clean, and surface the server's error message.
       await serverConfigNotifier.disconnect();
@@ -102,9 +110,49 @@ class _ServerLoginScreenState extends ConsumerState<ServerLoginScreen> {
     }
   }
 
+  Future<void> _submitTwoFactor() async {
+    final code = _totpCode.text.trim();
+    if (code.isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+    try {
+      final authNotifier = ref.read(authProvider.notifier);
+      await authNotifier.loginTwoFactor(code);
+      final authState = ref.read(authProvider);
+      if (authState.isAuthenticated) {
+        if (mounted) context.go('/');
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _errorMessage = authState.errorMessage ?? 'Invalid code. Try again.';
+          _totpCode.clear();
+        });
+      }
+    } on ApiException catch (apiError) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = apiError.message;
+          _totpCode.clear();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final authState = ref.watch(authProvider);
+
+    // Show TOTP code prompt when the server responded with two_factor_required.
+    if (authState.awaitingTwoFactor) {
+      return _buildTwoFactorPrompt(theme);
+    }
+
     final isRegister = _mode == _Mode.register;
 
     return Scaffold(
@@ -232,6 +280,92 @@ class _ServerLoginScreenState extends ConsumerState<ServerLoginScreen> {
                     ),
                   ],
                 ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTwoFactorPrompt(ThemeData theme) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Icon(Icons.security, size: 56, color: IronshelfColors.tealBright),
+                  const SizedBox(height: 16),
+                  Text('Two-factor authentication',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter the 6-digit code from your authenticator app, or a recovery code.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  TextField(
+                    controller: _totpCode,
+                    keyboardType: TextInputType.number,
+                    autofillHints: const [AutofillHints.oneTimeCode],
+                    textAlign: TextAlign.center,
+                    maxLength: 32,
+                    decoration: const InputDecoration(
+                      labelText: 'Authentication code',
+                      hintText: '000000',
+                      prefixIcon: Icon(Icons.lock_clock_outlined),
+                      counterText: '',
+                    ),
+                    onSubmitted: (_) => _submitTwoFactor(),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: theme.colorScheme.error)),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: _submitting ? null : _submitTwoFactor,
+                    child: _submitting
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Verify'),
+                  ),
+                  TextButton(
+                    onPressed: _submitting
+                        ? null
+                        : () {
+                            ref.read(authProvider.notifier).resetToUnauthenticated();
+                            ref
+                                .read(serverConfigProvider.notifier)
+                                .disconnect()
+                                .then((_) {
+                              if (mounted) {
+                                setState(() {
+                                  _errorMessage = null;
+                                  _totpCode.clear();
+                                });
+                              }
+                            });
+                          },
+                    child: const Text('Back to sign in'),
+                  ),
+                ],
               ),
             ),
           ),

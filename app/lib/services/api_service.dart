@@ -210,12 +210,16 @@ class AuthResponse {
   final String username;
   final bool isOwner;
   final String sessionId;
+  final bool twoFactorRequired;
+  final String? twoFactorToken;
 
   const AuthResponse({
     required this.userId,
     required this.username,
     required this.isOwner,
     required this.sessionId,
+    this.twoFactorRequired = false,
+    this.twoFactorToken,
   });
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
@@ -224,6 +228,8 @@ class AuthResponse {
       username: json['username'] as String? ?? '',
       isOwner: json['is_owner'] as bool? ?? false,
       sessionId: json['session_id']?.toString() ?? '',
+      twoFactorRequired: json['two_factor_required'] as bool? ?? false,
+      twoFactorToken: json['two_factor_token'] as String?,
     );
   }
 }
@@ -711,6 +717,16 @@ class ApiService {
         'username': username,
         'password': password,
         if (inviteCode != null) 'invite_code': inviteCode,
+      }),
+    );
+    return AuthResponse.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<AuthResponse> loginTwoFactor(String token, String code) async {
+    final response = await _request(
+      () => _dio.post('/auth/login/2fa', data: {
+        'token': token,
+        'code': code,
       }),
     );
     return AuthResponse.fromJson(response as Map<String, dynamic>);
