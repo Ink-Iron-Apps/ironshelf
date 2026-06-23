@@ -614,10 +614,9 @@ class ApiService {
     // Auth interceptor
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) {
-        // The app always talks to the server cross-origin (over its cloud
-        // tunnel URL), where cookies don't apply — so send the session id as a
-        // Bearer token too. The server accepts any non-`irs_` Bearer as a
-        // session id (and `irs_` Bearers as API keys).
+        // The app talks to the server cross-origin, where cookies don't apply
+        // — so send the session id as a Bearer token. The server accepts any
+        // non-`irs_` Bearer as a session id (and `irs_` Bearers as API keys).
         final bearer = config.apiKey ?? config.sessionId;
         if (bearer != null) {
           options.headers['Authorization'] = 'Bearer $bearer';
@@ -878,48 +877,6 @@ class ApiService {
       headers[key] = value;
     });
     return headers;
-  }
-
-  /// Exchange a cloud-issued server access token for a local server session.
-  /// POST {serverUrl}/api/v1/auth/cloud-login -> { session_id, ... }.
-  /// Returns the session id the app then uses as its Bearer token.
-  Future<String> cloudLoginToServer(
-    String serverUrl,
-    String serverAccessToken,
-  ) async {
-    final dio = Dio(BaseOptions(
-      baseUrl: '$serverUrl/api/v1',
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
-    ));
-    try {
-      final response = await dio.post(
-        '/auth/cloud-login',
-        data: {'cloud_token': serverAccessToken},
-      );
-      final data = response.data as Map<String, dynamic>;
-      final sessionId = data['session_id'] as String?;
-      if (sessionId == null || sessionId.isEmpty) {
-        throw const ApiException('Server did not return a session');
-      }
-      return sessionId;
-    } on DioException catch (dioError) {
-      final status = dioError.response?.statusCode;
-      if (status != null) {
-        // Reached the server but it rejected the login (e.g. not on a version
-        // that supports cloud login, or token expired).
-        throw ApiException(
-          'Server responded $status at $serverUrl. It may be on an older '
-          'version — update it and try again.',
-          statusCode: status,
-        );
-      }
-      // Never reached the server at all.
-      throw ApiException(
-        "Couldn't reach $serverUrl. Make sure the server is running and its "
-        'remote-access tunnel is up.',
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------
