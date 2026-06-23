@@ -233,7 +233,8 @@ Please open an issue or discussion before starting work on large features to ens
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+The server is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+The Android/iOS app is licensed under the [GNU General Public License v3.0](app/LICENSE) (GPL-3.0).
 
 ---
 

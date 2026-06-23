@@ -90,8 +90,7 @@ GOTCHA: `cloud_config` DB table is RETAINED — misleading name, it's a general 
 - Server: `cargo test -p ironshelf-server` last known = 14/14 (pre-2FA). CI will re-run. 6 new
   unit tests added in `routes/login_state.rs` (lockout + pending TOTP store logic).
 - Web `node --check` clean post-2FA changes.
-- **Flutter `flutter analyze` NOT run** (no Flutter on machine). Verified by signature matching
-  only. **MUST run `flutter analyze` on Flutter machine before trusting app build.**
+- **Flutter `flutter analyze` CLEAN** (0 issues, Flutter 3.44 via snap, run 2026-06-22).
 
 ## 2FA + core hardening — COMPLETE (7 commits, claude/dev)
 All items shipped:
