@@ -3380,57 +3380,33 @@
         ${currentUser?.is_owner ? `
         <div class="settings-section" data-cat="users" id="auth-providers-section">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('shield', 20)} Login Providers</h3>
-          <p class="description">Let users sign in with Google, GitHub, or any OIDC/OAuth2 provider. In the provider's console, register the callback URL <code id="sso-callback-base">${escapeHtml(location.origin)}</code><code>/api/v1/auth/sso/&lt;id&gt;/callback</code>.</p>
-          <div class="list-group" id="auth-providers-list">
+          <p class="description">Sign in with Google or GitHub. In the provider's console, create an OAuth app, set its callback URL to <code>${escapeHtml(location.origin)}/api/v1/auth/sso/&lt;id&gt;/callback</code> (e.g. <code>.../google/callback</code>), then paste the client ID + secret below and enable it. Credentials are per-server — each install registers its own OAuth app.</p>
+          <div id="auth-providers-builtin">
             <div style="padding:var(--space-6);text-align:center;color:var(--color-muted);font-size:var(--text-sm)">Loading providers...</div>
           </div>
-          <div class="card mt-4">
-            <h4 style="margin-bottom:var(--space-3)" id="sso-form-title">Add provider</h4>
-            <div class="form-group">
-              <label class="form-label" for="sso-preset">Preset</label>
-              <select class="form-input" id="sso-preset">
-                <option value="google">Google (OIDC)</option>
-                <option value="github">GitHub (OAuth2)</option>
-                <option value="custom">Custom…</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="sso-id">Provider ID (slug)</label>
-              <input class="form-input" id="sso-id" placeholder="google" autocomplete="off">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="sso-name">Display name</label>
-              <input class="form-input" id="sso-name" placeholder="Google" autocomplete="off">
-            </div>
-            <div class="form-group" id="sso-kind-group" style="display:none">
-              <label class="form-label" for="sso-kind">Kind</label>
-              <select class="form-input" id="sso-kind">
-                <option value="oidc">oidc</option>
-                <option value="oauth2">oauth2</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="sso-client-id">Client ID</label>
-              <input class="form-input" id="sso-client-id" autocomplete="off">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="sso-client-secret">Client Secret</label>
-              <input class="form-input" id="sso-client-secret" type="password" placeholder="(leave blank to keep existing)" autocomplete="off">
-            </div>
-            <div id="sso-custom-fields" style="display:none">
+          <details class="mt-4">
+            <summary style="cursor:pointer;color:var(--color-muted)">Advanced — add a custom OIDC / OAuth2 provider</summary>
+            <div class="list-group mt-3" id="auth-providers-custom-list"></div>
+            <div class="card mt-3">
+              <h4 style="margin-bottom:var(--space-3)" id="sso-form-title">Custom provider</h4>
+              <div class="form-group"><label class="form-label" for="sso-id">Provider ID (slug)</label><input class="form-input" id="sso-id" placeholder="authentik" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-name">Display name</label><input class="form-input" id="sso-name" placeholder="My SSO" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-kind">Kind</label><select class="form-input" id="sso-kind"><option value="oidc">oidc</option><option value="oauth2">oauth2</option></select></div>
+              <div class="form-group"><label class="form-label" for="sso-client-id">Client ID</label><input class="form-input" id="sso-client-id" autocomplete="off"></div>
+              <div class="form-group"><label class="form-label" for="sso-client-secret">Client Secret</label><input class="form-input" id="sso-client-secret" type="password" placeholder="(leave blank to keep existing)" autocomplete="off"></div>
               <div class="form-group"><label class="form-label" for="sso-issuer">Issuer URL (OIDC)</label><input class="form-input" id="sso-issuer" autocomplete="off"></div>
               <div class="form-group"><label class="form-label" for="sso-authorize">Authorize URL (OAuth2)</label><input class="form-input" id="sso-authorize" autocomplete="off"></div>
               <div class="form-group"><label class="form-label" for="sso-token">Token URL (OAuth2)</label><input class="form-input" id="sso-token" autocomplete="off"></div>
               <div class="form-group"><label class="form-label" for="sso-userinfo">Userinfo URL (OAuth2)</label><input class="form-input" id="sso-userinfo" autocomplete="off"></div>
               <div class="form-group"><label class="form-label" for="sso-scopes">Scopes (space-separated)</label><input class="form-input" id="sso-scopes" autocomplete="off"></div>
+              <label style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)"><input type="checkbox" id="sso-enabled" checked> Enabled</label>
+              <label style="display:flex;gap:var(--space-2);align-items:center"><input type="checkbox" id="sso-auto-register" checked> Auto-register new users on first login</label>
+              <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+                <button class="btn btn-primary" id="sso-save-btn">${icon('plus', 16)} Save Custom Provider</button>
+                <button class="btn btn-secondary" id="sso-reset-btn" style="display:none">Cancel edit</button>
+              </div>
             </div>
-            <label style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)"><input type="checkbox" id="sso-enabled" checked> Enabled</label>
-            <label style="display:flex;gap:var(--space-2);align-items:center"><input type="checkbox" id="sso-auto-register" checked> Auto-register new users on first login</label>
-            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
-              <button class="btn btn-primary" id="sso-save-btn">${icon('plus', 16)} Save Provider</button>
-              <button class="btn btn-secondary" id="sso-reset-btn" style="display:none">Cancel edit</button>
-            </div>
-          </div>
+          </details>
         </div>
         ` : ''}
 
@@ -3994,55 +3970,53 @@
 
   // ---- Login Providers (SSO) ----
 
-  const SSO_PRESETS = {
-    google: { id: 'google', name: 'Google', kind: 'oidc' },
-    github: { id: 'github', name: 'GitHub', kind: 'oauth2' },
-  };
+  // Built-in providers (Google/GitHub) render as fixed cards; the owner only
+  // supplies credentials + toggles. Custom OIDC/OAuth2 use the advanced form.
 
-  function ssoApplyPresetUi() {
-    const preset = document.getElementById('sso-preset')?.value;
-    if (!preset) return;
-    const idInput = document.getElementById('sso-id');
-    const nameInput = document.getElementById('sso-name');
-    const kindGroup = document.getElementById('sso-kind-group');
-    const customFields = document.getElementById('sso-custom-fields');
-    if (preset === 'custom') {
-      idInput.readOnly = false;
-      kindGroup.style.display = '';
-      customFields.style.display = '';
-    } else {
-      const presetConfig = SSO_PRESETS[preset];
-      idInput.value = presetConfig.id;
-      idInput.readOnly = true;
-      if (!nameInput.value) nameInput.value = presetConfig.name;
-      document.getElementById('sso-kind').value = presetConfig.kind;
-      kindGroup.style.display = 'none';
-      customFields.style.display = 'none';
-    }
+  function renderBuiltinCard(provider) {
+    const enabledBadge = provider.enabled
+      ? '<span class="badge badge-teal">enabled</span>'
+      : '<span class="badge badge-muted">disabled</span>';
+    const configured = provider.client_id || provider.has_client_secret;
+    return `
+      <div class="card" style="margin-bottom:var(--space-3)">
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <strong>${escapeHtml(provider.display_name)}</strong>
+          ${enabledBadge}
+          <span class="text-caption">${escapeHtml(provider.id)} · ${escapeHtml(provider.kind)}</span>
+        </div>
+        <div class="form-group mt-3"><label class="form-label">Client ID</label><input class="form-input" id="bi-${provider.id}-client-id" autocomplete="off"></div>
+        <div class="form-group"><label class="form-label">Client Secret</label><input class="form-input" type="password" id="bi-${provider.id}-secret" placeholder="${provider.has_client_secret ? '(secret set — leave blank to keep)' : '(required)'}" autocomplete="off"></div>
+        <label style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)"><input type="checkbox" id="bi-${provider.id}-enabled"> Enabled</label>
+        <label style="display:flex;gap:var(--space-2);align-items:center"><input type="checkbox" id="bi-${provider.id}-auto"> Auto-register new users on first login</label>
+        <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+          <button class="btn btn-primary" data-save-builtin="${provider.id}">${icon('plus', 14)} Save</button>
+          ${configured ? `<button class="btn btn-secondary" data-disconnect-builtin="${provider.id}">Disconnect</button>` : ''}
+        </div>
+      </div>
+    `;
   }
 
   function ssoResetForm() {
-    document.getElementById('sso-form-title').textContent = 'Add provider';
-    document.getElementById('sso-preset').value = 'google';
+    const title = document.getElementById('sso-form-title');
+    if (title) title.textContent = 'Custom provider';
     ['sso-id', 'sso-name', 'sso-client-id', 'sso-client-secret', 'sso-issuer',
      'sso-authorize', 'sso-token', 'sso-userinfo', 'sso-scopes'].forEach(fieldId => {
       const field = document.getElementById(fieldId);
       if (field) field.value = '';
     });
     document.getElementById('sso-id').readOnly = false;
+    document.getElementById('sso-kind').value = 'oidc';
     document.getElementById('sso-enabled').checked = true;
     document.getElementById('sso-auto-register').checked = true;
     document.getElementById('sso-reset-btn').style.display = 'none';
-    ssoApplyPresetUi();
   }
 
-  function ssoFillForm(provider) {
+  function ssoFillCustomForm(provider) {
     document.getElementById('sso-form-title').textContent = `Edit "${provider.display_name}"`;
-    const isPreset = provider.id === 'google' || provider.id === 'github';
-    document.getElementById('sso-preset').value = isPreset ? provider.id : 'custom';
-    ssoApplyPresetUi();
-    document.getElementById('sso-id').value = provider.id;
-    document.getElementById('sso-id').readOnly = true; // id is the key
+    const idInput = document.getElementById('sso-id');
+    idInput.value = provider.id;
+    idInput.readOnly = true; // id is the key
     document.getElementById('sso-name').value = provider.display_name;
     document.getElementById('sso-kind').value = provider.kind;
     document.getElementById('sso-client-id').value = provider.client_id || '';
@@ -4059,53 +4033,111 @@
   }
 
   async function loadAuthProvidersList() {
-    const listElement = document.getElementById('auth-providers-list');
-    if (!listElement) return;
+    const builtinElement = document.getElementById('auth-providers-builtin');
+    const customElement = document.getElementById('auth-providers-custom-list');
+    if (!builtinElement) return;
     try {
       const providers = (await apiGet('/admin/auth-providers')) || [];
-      if (!providers.length) {
-        listElement.innerHTML = `<div style="padding:var(--space-4);color:var(--color-muted);font-size:var(--text-sm)">No providers configured yet.</div>`;
-        return;
-      }
-      listElement.innerHTML = providers.map(provider => `
-        <div class="list-group-item" style="display:flex;align-items:center;gap:var(--space-3)">
-          <div style="flex:1">
-            <strong>${escapeHtml(provider.display_name)}</strong>
-            <span class="badge ${provider.enabled ? 'badge-teal' : 'badge-muted'}">${provider.enabled ? 'enabled' : 'disabled'}</span>
-            <div class="text-caption">${escapeHtml(provider.id)} · ${escapeHtml(provider.kind)}${provider.has_client_secret ? ' · secret set' : ' · no secret'}</div>
-          </div>
-          <button class="btn btn-secondary" data-edit="${escapeHtml(provider.id)}">${icon('settings', 14)} Edit</button>
-          <button class="btn btn-secondary" data-delete="${escapeHtml(provider.id)}">${icon('trash', 14)} Delete</button>
-        </div>
-      `).join('');
-      listElement.querySelectorAll('[data-edit]').forEach(button => {
-        button.addEventListener('click', () => {
-          const provider = providers.find(candidate => candidate.id === button.dataset.edit);
-          if (provider) ssoFillForm(provider);
+      const builtins = providers.filter(provider => provider.is_builtin);
+      const customs = providers.filter(provider => !provider.is_builtin);
+
+      // Built-in cards.
+      builtinElement.innerHTML = builtins.map(renderBuiltinCard).join('');
+      builtins.forEach(provider => {
+        const clientIdField = document.getElementById(`bi-${provider.id}-client-id`);
+        if (clientIdField) clientIdField.value = provider.client_id || '';
+        const enabledField = document.getElementById(`bi-${provider.id}-enabled`);
+        if (enabledField) enabledField.checked = !!provider.enabled;
+        const autoField = document.getElementById(`bi-${provider.id}-auto`);
+        if (autoField) autoField.checked = !!provider.auto_register;
+      });
+      builtinElement.querySelectorAll('[data-save-builtin]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const providerId = button.dataset.saveBuiltin;
+          const clientId = document.getElementById(`bi-${providerId}-client-id`).value.trim();
+          const secret = document.getElementById(`bi-${providerId}-secret`).value;
+          const enabled = document.getElementById(`bi-${providerId}-enabled`).checked;
+          const autoRegister = document.getElementById(`bi-${providerId}-auto`).checked;
+          if (enabled && !clientId) {
+            toast('Client ID is required to enable this provider', 'error');
+            return;
+          }
+          try {
+            // Server overrides kind/display_name/endpoints for built-ins.
+            await apiPut(`/admin/auth-providers/${encodeURIComponent(providerId)}`, {
+              kind: '',
+              display_name: '',
+              client_id: clientId,
+              client_secret: secret || undefined,
+              enabled,
+              auto_register: autoRegister,
+            });
+            toast('Saved', 'success');
+            loadAuthProvidersList();
+          } catch (saveError) {
+            toast(saveError.message, 'error');
+          }
         });
       });
-      listElement.querySelectorAll('[data-delete]').forEach(button => {
+      builtinElement.querySelectorAll('[data-disconnect-builtin]').forEach(button => {
         button.addEventListener('click', async () => {
-          if (!confirm(`Delete login provider "${button.dataset.delete}"?`)) return;
+          const providerId = button.dataset.disconnectBuiltin;
+          if (!confirm(`Disconnect ${providerId}? Users will no longer be able to sign in with it.`)) return;
           try {
-            await apiDelete(`/admin/auth-providers/${encodeURIComponent(button.dataset.delete)}`);
-            toast('Provider deleted', 'success');
+            await apiDelete(`/admin/auth-providers/${encodeURIComponent(providerId)}`);
+            toast('Disconnected', 'success');
             loadAuthProvidersList();
           } catch (deleteError) {
             toast(deleteError.message, 'error');
           }
         });
       });
+
+      // Custom provider list.
+      if (customElement) {
+        if (!customs.length) {
+          customElement.innerHTML = `<div style="padding:var(--space-3);color:var(--color-muted);font-size:var(--text-sm)">No custom providers.</div>`;
+        } else {
+          customElement.innerHTML = customs.map(provider => `
+            <div class="list-group-item" style="display:flex;align-items:center;gap:var(--space-3)">
+              <div style="flex:1">
+                <strong>${escapeHtml(provider.display_name)}</strong>
+                <span class="badge ${provider.enabled ? 'badge-teal' : 'badge-muted'}">${provider.enabled ? 'enabled' : 'disabled'}</span>
+                <div class="text-caption">${escapeHtml(provider.id)} · ${escapeHtml(provider.kind)}</div>
+              </div>
+              <button class="btn btn-secondary" data-edit-custom="${escapeHtml(provider.id)}">${icon('settings', 14)} Edit</button>
+              <button class="btn btn-secondary" data-delete-custom="${escapeHtml(provider.id)}">${icon('trash', 14)} Delete</button>
+            </div>
+          `).join('');
+          customElement.querySelectorAll('[data-edit-custom]').forEach(button => {
+            button.addEventListener('click', () => {
+              const provider = customs.find(candidate => candidate.id === button.dataset.editCustom);
+              if (provider) ssoFillCustomForm(provider);
+            });
+          });
+          customElement.querySelectorAll('[data-delete-custom]').forEach(button => {
+            button.addEventListener('click', async () => {
+              if (!confirm(`Delete provider "${button.dataset.deleteCustom}"?`)) return;
+              try {
+                await apiDelete(`/admin/auth-providers/${encodeURIComponent(button.dataset.deleteCustom)}`);
+                toast('Provider deleted', 'success');
+                loadAuthProvidersList();
+              } catch (deleteError) {
+                toast(deleteError.message, 'error');
+              }
+            });
+          });
+        }
+      }
     } catch (loadError) {
-      listElement.innerHTML = `<div style="padding:var(--space-4);color:var(--color-danger);font-size:var(--text-sm)">${escapeHtml(loadError.message)}</div>`;
+      builtinElement.innerHTML = `<div style="padding:var(--space-4);color:var(--color-danger);font-size:var(--text-sm)">${escapeHtml(loadError.message)}</div>`;
     }
   }
 
   function setupAuthProvidersSection() {
     if (!document.getElementById('auth-providers-section')) return;
-    document.getElementById('sso-preset').addEventListener('change', ssoApplyPresetUi);
-    document.getElementById('sso-reset-btn').addEventListener('click', ssoResetForm);
-    document.getElementById('sso-save-btn').addEventListener('click', async () => {
+    document.getElementById('sso-reset-btn')?.addEventListener('click', ssoResetForm);
+    document.getElementById('sso-save-btn')?.addEventListener('click', async () => {
       const providerId = document.getElementById('sso-id').value.trim();
       if (!providerId) {
         toast('Provider ID is required', 'error');
@@ -4126,14 +4158,13 @@
       };
       try {
         await apiPut(`/admin/auth-providers/${encodeURIComponent(providerId)}`, body);
-        toast('Provider saved', 'success');
+        toast('Custom provider saved', 'success');
         ssoResetForm();
         loadAuthProvidersList();
       } catch (saveError) {
         toast(saveError.message, 'error');
       }
     });
-    ssoApplyPresetUi();
     loadAuthProvidersList();
   }
 
