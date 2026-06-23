@@ -1602,6 +1602,57 @@
           username: document.getElementById('login-username').value,
           password: document.getElementById('login-password').value,
         });
+
+        if (loginResult?.two_factor_required) {
+          // Step 2: show TOTP code prompt in place of the login form.
+          const loginCard = document.querySelector('.login-card');
+          const totpToken = loginResult.two_factor_token;
+          loginCard.innerHTML = `
+            <div class="brand">
+              <h1 class="text-brand">Ironshelf</h1>
+              <p>Two-factor authentication</p>
+            </div>
+            <p style="font-size:var(--text-sm);color:var(--color-muted);margin-bottom:var(--space-4)">
+              Enter the 6-digit code from your authenticator app, or a recovery code.
+            </p>
+            <form id="totp-form" novalidate>
+              <div class="form-group">
+                <label class="form-label" for="totp-code">Authentication code</label>
+                <input type="text" class="form-input" id="totp-code" name="code"
+                  inputmode="numeric" autocomplete="one-time-code" maxlength="32"
+                  placeholder="000000" autofocus required>
+              </div>
+              <button type="submit" class="btn btn-primary btn-lg">Verify</button>
+            </form>
+            <button class="btn btn-ghost mt-4" id="totp-back-btn">Back to sign in</button>
+          `;
+          document.getElementById('totp-back-btn').addEventListener('click', () => navigateTo('/login'));
+          document.getElementById('totp-form').addEventListener('submit', async (totpEvent) => {
+            totpEvent.preventDefault();
+            const totpBtn = totpEvent.target.querySelector('button[type="submit"]');
+            totpBtn.disabled = true;
+            totpBtn.textContent = 'Verifying...';
+            try {
+              const totpResult = await apiPost('/auth/login/2fa', {
+                token: totpToken,
+                code: document.getElementById('totp-code').value.trim(),
+              });
+              if (HOSTED && totpResult?.session_id) {
+                localStorage.setItem('ironshelf_server_token', totpResult.session_id);
+              }
+              await checkAuth();
+              navigateTo('/');
+            } catch (totpErr) {
+              toast(totpErr.message || 'Invalid code', 'error');
+              totpBtn.disabled = false;
+              totpBtn.textContent = 'Verify';
+              document.getElementById('totp-code').value = '';
+              document.getElementById('totp-code').focus();
+            }
+          });
+          return;
+        }
+
         // Hosted UI is cross-origin: keep the session as a Bearer token.
         if (HOSTED && loginResult?.session_id) {
           localStorage.setItem('ironshelf_server_token', loginResult.session_id);
@@ -3324,6 +3375,29 @@
           </form>
         </div>
 
+        <div class="settings-section" data-cat="account" id="two-factor-section">
+          <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('shield', 20)} Two-Factor Authentication</h3>
+          <p class="description">Add an extra layer of security. Once enabled, signing in requires your password plus a code from an authenticator app (Google Authenticator, Authy, etc.).</p>
+          ${currentUser?.two_factor_enabled ? `
+          <div class="card" style="max-width:400px">
+            <p style="display:flex;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4)">
+              <span class="badge badge-teal">${icon('check', 12)} Enabled</span>
+              Two-factor authentication is active on your account.
+            </p>
+            <button class="btn btn-danger" id="2fa-disable-btn">${icon('x', 16)} Disable 2FA</button>
+          </div>
+          ` : `
+          <div class="card" style="max-width:400px">
+            <p style="display:flex;align-items:center;gap:var(--space-2);margin:0 0 var(--space-4)">
+              <span class="badge badge-muted">Disabled</span>
+              Two-factor authentication is not set up.
+            </p>
+            <button class="btn btn-primary" id="2fa-setup-btn">${icon('shield', 16)} Set up 2FA</button>
+          </div>
+          `}
+          <div id="2fa-setup-panel" class="hidden"></div>
+        </div>
+
         ${currentUser?.is_owner ? `
         <div class="settings-section" data-cat="users">
           <h3 style="display:flex;align-items:center;gap:var(--space-2)">${icon('mail', 20)} Pending Invites</h3>
@@ -3765,6 +3839,108 @@
           passwordError.textContent = passwordChangeError.message || 'Failed to change password.';
           passwordError.classList.remove('hidden');
         }
+      });
+
+      // 2FA setup
+      document.getElementById('2fa-setup-btn')?.addEventListener('click', async () => {
+        const panel = document.getElementById('2fa-setup-panel');
+        panel.innerHTML = '<p style="color:var(--color-muted);font-size:var(--text-sm)">Generating secret…</p>';
+        panel.classList.remove('hidden');
+        try {
+          const setupResult = await apiPost('/auth/2fa/setup', {});
+          panel.innerHTML = `
+            <div class="card mt-4" style="max-width:400px;display:flex;flex-direction:column;gap:var(--space-4)">
+              <p style="font-size:var(--text-sm)">Scan this QR code with your authenticator app, or enter the secret manually.</p>
+              <div style="text-align:center;background:#fff;padding:var(--space-3);border-radius:var(--radius-md);display:inline-block">
+                <img src="data:image/png;base64,${setupResult.qr_png_base64}" alt="2FA QR code" style="width:180px;height:180px">
+              </div>
+              <div>
+                <p class="form-hint">Manual entry secret:</p>
+                <code style="word-break:break-all;font-size:var(--text-sm)">${escapeHtml(setupResult.secret)}</code>
+              </div>
+              <form id="2fa-enable-form" novalidate>
+                <div class="form-group" style="margin-bottom:0">
+                  <label class="form-label" for="2fa-verify-code">Enter the 6-digit code to confirm</label>
+                  <input type="text" class="form-input" id="2fa-verify-code" inputmode="numeric"
+                    autocomplete="one-time-code" maxlength="8" placeholder="000000" required>
+                </div>
+                <div id="2fa-enable-error" class="form-error hidden" role="alert"></div>
+                <button type="submit" class="btn btn-primary mt-4">${icon('check', 16)} Enable 2FA</button>
+              </form>
+            </div>
+          `;
+          document.getElementById('2fa-enable-form').addEventListener('submit', async (enableEvent) => {
+            enableEvent.preventDefault();
+            const code = document.getElementById('2fa-verify-code').value.trim();
+            const errorEl = document.getElementById('2fa-enable-error');
+            errorEl.classList.add('hidden');
+            try {
+              const enableResult = await apiPost('/auth/2fa/enable', { code });
+              panel.innerHTML = `
+                <div class="card mt-4" style="max-width:400px">
+                  <p style="display:flex;align-items:center;gap:var(--space-2);margin:0 0 var(--space-3)">
+                    <span class="badge badge-teal">${icon('check', 12)} Enabled</span>
+                    Two-factor authentication is now active.
+                  </p>
+                  <p class="form-hint" style="margin:0 0 var(--space-3)"><strong>Save these recovery codes.</strong> Each can be used once if you lose your authenticator.</p>
+                  <div style="background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-3);font-family:monospace;font-size:var(--text-sm);line-height:2">
+                    ${(enableResult.recovery_codes || []).map(c => escapeHtml(c)).join('<br>')}
+                  </div>
+                  <button class="btn btn-secondary mt-4" id="copy-recovery-codes-btn">${icon('copy', 16)} Copy codes</button>
+                  <button class="btn btn-ghost mt-2" id="2fa-done-btn">Done</button>
+                </div>
+              `;
+              document.getElementById('copy-recovery-codes-btn').addEventListener('click', () => {
+                const codes = (enableResult.recovery_codes || []).join('\n');
+                navigator.clipboard.writeText(codes)
+                  .then(() => toast('Recovery codes copied', 'success'))
+                  .catch(() => toast('Copy failed — select and copy manually', 'warning'));
+              });
+              document.getElementById('2fa-done-btn').addEventListener('click', () => {
+                navigateTo('/settings/account');
+              });
+            } catch (enableError) {
+              errorEl.textContent = enableError.message || 'Invalid code.';
+              errorEl.classList.remove('hidden');
+            }
+          });
+        } catch (setupError) {
+          panel.innerHTML = `<p class="form-error">${escapeHtml(setupError.message || 'Setup failed')}</p>`;
+        }
+      });
+
+      document.getElementById('2fa-disable-btn')?.addEventListener('click', () => {
+        showModal({
+          title: 'Disable Two-Factor Authentication',
+          description: 'Enter your password to confirm.',
+          content: `
+            <div class="form-group" style="margin-bottom:0">
+              <label class="form-label" for="2fa-disable-password">Current password</label>
+              <input type="password" class="form-input" id="2fa-disable-password" autocomplete="current-password">
+            </div>
+            <div id="2fa-disable-error" class="form-error hidden mt-2" role="alert"></div>
+          `,
+          actions: `
+            <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+            <button class="btn btn-danger" data-action="confirm">Disable 2FA</button>
+          `,
+        });
+        const disableModal = document.querySelector('.modal-overlay:last-child');
+        disableModal.querySelector('[data-action="cancel"]').addEventListener('click', () => disableModal.remove());
+        disableModal.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+          const password = document.getElementById('2fa-disable-password').value;
+          const errorEl = document.getElementById('2fa-disable-error');
+          errorEl.classList.add('hidden');
+          try {
+            await apiPost('/auth/2fa/disable', { password });
+            disableModal.remove();
+            toast('Two-factor authentication disabled', 'success');
+            navigateTo('/settings/account');
+          } catch (disableError) {
+            errorEl.textContent = disableError.message || 'Failed to disable 2FA.';
+            errorEl.classList.remove('hidden');
+          }
+        });
       });
 
       // Login providers (owner only)

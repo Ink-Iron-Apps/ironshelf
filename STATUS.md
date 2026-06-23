@@ -7,7 +7,7 @@ Self-contained — paste-and-go for a fresh session. Assumes zero prior chat con
 Read this whole file. Then: global rules at `S:\coding\CLAUDE.md` auto-load (claude/dev branch,
 commit-per-task, caveman internal md, brand = Ink & Iron Apps). Strategy/vision doc:
 `S:\coding\ebook-platform-strategy\STRATEGY.md`. SSO design detail: `docs/AUTH-PROVIDERS-DESIGN.md`.
-Most likely next task = **build 2FA + hardening** (approved, not started — see PENDING below).
+2FA + hardening = **COMPLETE** (see section below). Next: acquisition engine strip or FRBR model.
 
 ## Direction
 Self-hosted "Plex for ebooks". Runs as plain port-bound HTTP server (Sonarr model)
@@ -87,44 +87,29 @@ GOTCHA: `cloud_config` DB table is RETAINED — misleading name, it's a general 
 (author-photo toggle etc.), not cloud-specific. Do not delete it.
 
 ## Build/verify state
-- Server build clean; `cargo test -p ironshelf-server` = 14/14.
-- Web `node --check` clean; grep-verified no dangling cloud/remote refs.
-- **Flutter `flutter analyze` NOT run** (no Flutter on the machine used). Verified only by grep +
-  signature matching. **MUST run `flutter analyze` on a Flutter machine before trusting app build.**
-- `totp-rs` dep already added to `server/crates/ironshelf-server/Cargo.toml`
-  (`features=["qr","gen_secret"]`) for the pending 2FA — currently unused, harmless.
+- Server: `cargo test -p ironshelf-server` last known = 14/14 (pre-2FA). CI will re-run. 6 new
+  unit tests added in `routes/login_state.rs` (lockout + pending TOTP store logic).
+- Web `node --check` clean post-2FA changes.
+- **Flutter `flutter analyze` NOT run** (no Flutter on machine). Verified by signature matching
+  only. **MUST run `flutter analyze` on Flutter machine before trusting app build.**
 
-## PENDING — approved, NOT yet built: 2FA + core hardening
-Locked decisions: full package (2FA + lockout + HSTS); password policy already done; **two-step
-login** flow; TOTP must work with **Google Authenticator** (standard RFC 6238: SHA1, 6 digits,
-30s — totp-rs defaults).
-
-Plan / files to touch:
-- **Migration 022_two_factor.sql** (+ wire into `db/mod.rs::migrate()` include_str list):
-  `user_totp(user_id PK, secret TEXT, enabled INTEGER, created_at)` +
-  `user_totp_recovery(user_id, code_hash, used, PRIMARY KEY(user_id,code_hash))`.
-- **New `routes/two_factor.rs`** (authed): `POST /auth/2fa/setup` → generate secret (totp-rs
-  `Secret::generate_secret()`), store pending (enabled=0), return `{secret, otpauth_uri,
-  qr_png_base64}` (`TOTP::get_qr_base64()`). `POST /auth/2fa/enable` {code} → verify
-  (`TOTP::check_current`) → enabled=1, gen+hash 10 recovery codes, return them once.
-  `POST /auth/2fa/disable` {password} → verify pw, delete rows. Store secret as base32.
-- **Two-step login** (`routes/auth.rs::login`): after password OK, if `user_totp.enabled` →
-  do NOT create session; create short-lived pending token (in-mem store mirroring
-  `sso.rs::SsoStateStore`, TTL 5min, token→user_id, cap attempts) → return
-  `{two_factor_required:true, two_factor_token}`. New `POST /auth/login/2fa` {token, code} →
-  verify TOTP or recovery code → `create_session` (reuse `sso::create_session`) + cookie.
-- **`/auth/me`**: add `two_factor_enabled` bool.
-- **Account lockout**: in-mem per-username failed-login backoff in `AppState` (mirror SsoStateStore
-  pattern); check before verify in `/auth/login`; reset on success; 429 + retry-after when locked.
-  Also cap attempts on the pending-2fa token (6-digit brute-force defense).
-- **HSTS**: `security_headers` middleware → add `Strict-Transport-Security: max-age=63072000;
-  includeSubDomains` when TLS. Middleware is `from_fn` (no state) → convert to `from_fn_with_state`
-  passing `config.tls_enabled`. Document setting `tls_enabled=true` behind an HTTPS proxy.
-- **Web** (`app.js`): 2FA setup card in Settings (show QR + secret + recovery codes), and a code
-  step on the login screen when `two_factor_required`.
-- **Flutter**: add the code-prompt step to `server_login_screen.dart` login flow.
-- Wire new routes in `main.rs`; add `pub mod two_factor;` to `routes/mod.rs`; register store in
-  `state.rs` + `main.rs`. Build + test + commit per task.
+## 2FA + core hardening — COMPLETE (7 commits, claude/dev)
+All items shipped:
+- **Migration 022** `user_totp` + `user_totp_recovery` tables. `db/mod.rs` wired.
+- **`routes/login_state.rs`**: `LoginAttemptStore` (5 fail → 15-min lockout, 10-min window) +
+  `PendingTotpStore` (5-min TTL, max 6 attempts). Both in `AppState`.
+- **`routes/two_factor.rs`**: `POST /auth/2fa/setup` (gen secret → QR base64 + otpauth URI),
+  `POST /auth/2fa/enable` (verify code → enabled=1, return 10 argon2-hashed recovery codes once),
+  `POST /auth/2fa/disable` (verify password → wipe rows).
+- **`routes/auth.rs`**: lockout check at login, two-step login (returns `two_factor_required`
+  token), `POST /auth/login/2fa` handler (TOTP + recovery code verify), `/auth/me` adds
+  `two_factor_enabled`. `AppError::TooManyRequests(u64)` → 429 + `Retry-After`.
+- **HSTS**: `security_headers` middleware now takes `tls_enabled: bool`; emits
+  `Strict-Transport-Security: max-age=63072000; includeSubDomains` only when TLS active.
+- **Web** (`app.js`): 2FA code prompt replaces login form in-place; Settings card shows QR setup
+  or disable flow based on `two_factor_enabled` from `/auth/me`.
+- **Flutter**: `AuthStatus.awaitingTwoFactor`, `AuthNotifier.loginTwoFactor()`,
+  `ApiService.loginTwoFactor()`, `ServerLoginScreen` switches to TOTP prompt widget.
 
 ## Other open items (from STRATEGY.md — NOT started)
 - Acquisition engine STILL present in server (`crates/ironshelf-core/src/acquisition/*`, indexers/

@@ -2,7 +2,7 @@
 //!
 //! Returns JSON bodies with `error` (human message) and `code` (machine-readable tag).
 
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
@@ -22,6 +22,8 @@ pub enum AppError {
     Conflict(String),
     /// 422 — semantically invalid (path doesn't exist, etc).
     UnprocessableEntity(String),
+    /// 429 — rate limit or account lockout; inner value = Retry-After seconds.
+    TooManyRequests(u64),
     /// 500 — unexpected internal failure.
     Internal(String),
 }
@@ -40,6 +42,21 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // TooManyRequests gets a Retry-After header — handle separately.
+        if let Self::TooManyRequests(retry_after_secs) = self {
+            let body = json!({
+                "error": "Too many requests. Please try again later.",
+                "code": "too_many_requests",
+                "retry_after": retry_after_secs,
+            });
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, retry_after_secs.to_string())],
+                Json(body),
+            )
+                .into_response();
+        }
+
         let (status, code, message) = match self {
             Self::NotFound(message) => (StatusCode::NOT_FOUND, "not_found", message),
             Self::Unauthorized(message) => (StatusCode::UNAUTHORIZED, "unauthorized", message),
@@ -49,6 +66,7 @@ impl IntoResponse for AppError {
             Self::UnprocessableEntity(message) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable_entity", message)
             }
+            Self::TooManyRequests(_) => unreachable!("handled above"),
             Self::Internal(message) => {
                 tracing::error!("internal error: {message}");
                 (

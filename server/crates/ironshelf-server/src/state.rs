@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::Config;
+use crate::routes::login_state::{LoginAttemptStore, PendingTotpStore};
 use crate::routes::sso::SsoStateStore;
 use crate::routes::update::SharedUpdateStatus;
 
@@ -187,6 +188,10 @@ pub struct AppState {
     pub config: Config,
     /// In-memory SSO state store for DB-driven multi-provider login (Google/GitHub/custom).
     pub sso_state_store: SsoStateStore,
+    /// Per-username failed-login backoff (brute-force protection).
+    pub login_attempt_store: LoginAttemptStore,
+    /// Short-lived pending tokens bridging password-OK → TOTP code step.
+    pub pending_totp_store: PendingTotpStore,
     /// Shared HTTP client for outbound requests (metadata providers, webhooks).
     /// Created once at startup to reuse connection pools and TLS sessions.
     pub http_client: reqwest::Client,

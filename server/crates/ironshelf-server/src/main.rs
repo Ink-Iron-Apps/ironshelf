@@ -73,6 +73,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let sso_state_store = routes::sso::SsoStateStore::new();
+    let login_attempt_store = routes::login_state::LoginAttemptStore::new();
+    let pending_totp_store = routes::login_state::PendingTotpStore::new();
 
     // Shared HTTP client for all outbound requests (metadata providers, webhooks).
     // Created once to reuse connection pools and TLS sessions across the server lifetime.
@@ -91,6 +93,8 @@ async fn main() -> anyhow::Result<()> {
         thumbnail_cache_path: config.thumbnail_cache_path.clone(),
         config: config.clone(),
         sso_state_store,
+        login_attempt_store,
+        pending_totp_store,
         http_client,
         update_status,
         tasks: Arc::new(tasks::TaskRegistry::new()),
@@ -111,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
     let auth_routes = Router::new()
         .route("/api/v1/auth/register", axum::routing::post(routes::auth::register))
         .route("/api/v1/auth/login", axum::routing::post(routes::auth::login))
+        .route("/api/v1/auth/login/2fa", axum::routing::post(routes::auth::login_two_factor))
         .route("/api/v1/auth/sso/{provider}/login", get(routes::sso::sso_login))
         .route(
             "/api/v1/auth/sso/{provider}/callback",
@@ -145,6 +150,9 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/auth/password",
             axum::routing::put(routes::password::change_password),
         )
+        .route("/api/v1/auth/2fa/setup", axum::routing::post(routes::two_factor::setup_totp))
+        .route("/api/v1/auth/2fa/enable", axum::routing::post(routes::two_factor::enable_totp))
+        .route("/api/v1/auth/2fa/disable", axum::routing::post(routes::two_factor::disable_totp))
         .route(
             "/api/v1/auth/api-keys",
             get(routes::auth::list_api_keys).post(routes::auth::create_api_key),
@@ -604,10 +612,11 @@ async fn main() -> anyhow::Result<()> {
         .layer(axum::middleware::from_fn(
             middleware::request_id::request_id,
         ))
-        // Security headers: CSP, X-Frame-Options, etc. on every response.
-        .layer(axum::middleware::from_fn(
-            middleware::security_headers::security_headers,
-        ))
+        // Security headers: CSP, X-Frame-Options, HSTS (when TLS), etc. on every response.
+        .layer(axum::middleware::from_fn({
+            let tls_enabled = config.tls_enabled;
+            move |req, next| middleware::security_headers::security_headers(tls_enabled, req, next)
+        }))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

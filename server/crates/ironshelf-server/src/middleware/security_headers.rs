@@ -1,7 +1,8 @@
 //! Security response headers middleware.
 //!
 //! Adds defense-in-depth HTTP headers to every response: CSP, framing
-//! protection, MIME-sniffing prevention, referrer policy, permissions policy.
+//! protection, MIME-sniffing prevention, referrer policy, permissions policy,
+//! and HSTS (only when TLS is active).
 
 use axum::body::Body;
 use axum::http::header::HeaderValue;
@@ -15,16 +16,21 @@ use axum::middleware::Next;
 /// - `style-src` — allow self + inline (needed for many UI frameworks) + Google Fonts CSS.
 /// - `font-src` — Google Fonts static files.
 /// - `img-src` — self + data URIs (inline covers) + blob URIs (canvas exports).
-/// - `connect-src` — self + cloud API + external metadata APIs.
+/// - `connect-src` — self only (no cloud endpoints post-refactor).
 const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
     script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; \
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
     font-src https://fonts.gstatic.com; \
     img-src 'self' data: blob: https:; \
-    connect-src 'self' https://cloud.inknironapps.com https://*.workers.dev https://*.trycloudflare.com";
+    connect-src 'self'";
 
 /// Middleware that appends security headers to every response.
-pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Body> {
+/// `tls_enabled` controls whether HSTS is emitted (only meaningful over HTTPS).
+pub async fn security_headers(
+    tls_enabled: bool,
+    request: Request<Body>,
+    next: Next,
+) -> Response<Body> {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
 
@@ -59,13 +65,14 @@ pub async fn security_headers(request: Request<Body>, next: Next) -> Response<Bo
         HeaderValue::from_static(CONTENT_SECURITY_POLICY),
     );
 
-    // HSTS — once a browser sees this over HTTPS it refuses plaintext for a year.
-    // Only meaningful (and only sent) on HTTPS, which is enforced at the edge for
-    // tunnel/cloud access. Harmless on plain-HTTP LAN (browsers ignore it there).
-    headers.insert(
-        "strict-transport-security",
-        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-    );
+    // HSTS — only emit when the server is TLS-terminated (directly or via proxy).
+    // Sending this over plain HTTP is a no-op at best and confusing at worst.
+    if tls_enabled {
+        headers.insert(
+            "strict-transport-security",
+            HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+        );
+    }
 
     response
 }

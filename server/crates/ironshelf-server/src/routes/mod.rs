@@ -3,6 +3,7 @@
 pub mod acquisition;
 pub mod admin_auth;
 pub mod auth;
+pub mod login_state;
 pub mod calibre_writeback;
 pub mod authors;
 pub mod books;
@@ -35,6 +36,7 @@ pub mod series;
 pub mod server_info;
 pub mod sso;
 pub mod stats;
+pub mod two_factor;
 pub mod update;
 pub mod users;
 pub mod webdav;

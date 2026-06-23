@@ -3,19 +3,21 @@ import '../services/api_service.dart';
 import 'server_provider.dart';
 
 /// Authentication state.
-enum AuthStatus { unknown, unauthenticated, authenticated }
+enum AuthStatus { unknown, unauthenticated, authenticated, awaitingTwoFactor }
 
 class AuthState {
   final AuthStatus status;
   final UserInfo? user;
   final bool isLoading;
   final String? errorMessage;
+  final String? twoFactorToken;
 
   const AuthState({
     this.status = AuthStatus.unknown,
     this.user,
     this.isLoading = false,
     this.errorMessage,
+    this.twoFactorToken,
   });
 
   AuthState copyWith({
@@ -23,16 +25,19 @@ class AuthState {
     UserInfo? user,
     bool? isLoading,
     String? errorMessage,
+    String? twoFactorToken,
   }) {
     return AuthState(
       status: status ?? this.status,
       user: user ?? this.user,
       isLoading: isLoading ?? this.isLoading,
       errorMessage: errorMessage,
+      twoFactorToken: twoFactorToken ?? this.twoFactorToken,
     );
   }
 
   bool get isAuthenticated => status == AuthStatus.authenticated;
+  bool get awaitingTwoFactor => status == AuthStatus.awaitingTwoFactor;
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
@@ -81,6 +86,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
       final authResponse = await _api.login(username, password);
+
+      if (authResponse.twoFactorRequired) {
+        state = AuthState(
+          status: AuthStatus.awaitingTwoFactor,
+          twoFactorToken: authResponse.twoFactorToken,
+        );
+        return;
+      }
+
       await _ref.read(serverConfigProvider.notifier).saveAuth(
             sessionId: authResponse.sessionId,
           );
@@ -95,6 +109,37 @@ class AuthNotifier extends StateNotifier<AuthState> {
     } on ApiException catch (apiError) {
       state = AuthState(
         status: AuthStatus.unauthenticated,
+        errorMessage: apiError.message,
+      );
+    }
+  }
+
+  Future<void> loginTwoFactor(String code) async {
+    final token = state.twoFactorToken;
+    if (token == null) {
+      state = const AuthState(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'Session expired. Please sign in again.',
+      );
+      return;
+    }
+    state = state.copyWith(isLoading: true, errorMessage: null);
+    try {
+      final authResponse = await _api.loginTwoFactor(token, code);
+      await _ref.read(serverConfigProvider.notifier).saveAuth(
+            sessionId: authResponse.sessionId,
+          );
+      state = AuthState(
+        status: AuthStatus.authenticated,
+        user: UserInfo(
+          userId: authResponse.userId,
+          username: authResponse.username,
+          isOwner: authResponse.isOwner,
+        ),
+      );
+    } on ApiException catch (apiError) {
+      state = state.copyWith(
+        isLoading: false,
         errorMessage: apiError.message,
       );
     }
@@ -143,5 +188,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   void clearError() {
     state = state.copyWith(errorMessage: null);
+  }
+
+  void resetToUnauthenticated() {
+    state = const AuthState(status: AuthStatus.unauthenticated);
   }
 }
