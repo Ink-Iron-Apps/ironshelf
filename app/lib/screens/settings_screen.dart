@@ -195,35 +195,31 @@ class SettingsScreen extends ConsumerWidget {
                 padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
                 child: Text('Choose theme'),
               ),
-              RadioListTile<ThemeMode>(
-                title: const Text('Dark'),
-                secondary: const Icon(Icons.dark_mode_rounded),
-                value: ThemeMode.dark,
+              RadioGroup<ThemeMode>(
                 groupValue: currentTheme,
                 onChanged: (value) {
                   ref.read(themeModeProvider.notifier).setThemeMode(value!);
                   Navigator.pop(sheetContext);
                 },
-              ),
-              RadioListTile<ThemeMode>(
-                title: const Text('Light'),
-                secondary: const Icon(Icons.light_mode_rounded),
-                value: ThemeMode.light,
-                groupValue: currentTheme,
-                onChanged: (value) {
-                  ref.read(themeModeProvider.notifier).setThemeMode(value!);
-                  Navigator.pop(sheetContext);
-                },
-              ),
-              RadioListTile<ThemeMode>(
-                title: const Text('System'),
-                secondary: const Icon(Icons.brightness_auto_rounded),
-                value: ThemeMode.system,
-                groupValue: currentTheme,
-                onChanged: (value) {
-                  ref.read(themeModeProvider.notifier).setThemeMode(value!);
-                  Navigator.pop(sheetContext);
-                },
+                child: Column(
+                  children: [
+                    RadioListTile<ThemeMode>(
+                      title: const Text('Dark'),
+                      secondary: const Icon(Icons.dark_mode_rounded),
+                      value: ThemeMode.dark,
+                    ),
+                    RadioListTile<ThemeMode>(
+                      title: const Text('Light'),
+                      secondary: const Icon(Icons.light_mode_rounded),
+                      value: ThemeMode.light,
+                    ),
+                    RadioListTile<ThemeMode>(
+                      title: const Text('System'),
+                      secondary: const Icon(Icons.brightness_auto_rounded),
+                      value: ThemeMode.system,
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
             ],

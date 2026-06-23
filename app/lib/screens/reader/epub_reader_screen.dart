@@ -177,7 +177,7 @@ class _EpubReaderScreenState extends ConsumerState<EpubReaderScreen> {
         return EpubTheme.light();
       case 'sepia':
         return EpubTheme.custom(
-          backgroundColor: const Color(0xFFF4ECD8),
+          backgroundDecoration: const BoxDecoration(color: Color(0xFFF4ECD8)),
           foregroundColor: const Color(0xFF5B4636),
         );
       case 'dark':
