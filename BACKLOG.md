@@ -18,9 +18,10 @@ Credible public **v1.0 ≈ Phase 1 + Phase 2 + #12**. Phase 3 = what makes it *b
 - [x] **2. Relicense** MIT → AGPL-3.0 (server) + GPL-3.0 (apps): LICENSE files, Cargo.toml, README.
 - [x] **3. Strip the acquisition engine** — removed indexers/download-clients/wanted-items/
   auto-fulfillment. Migration 023 drops acquisition tables on upgrade. Folder scan kept intact.
-- [ ] **4. Scan-now webhook + filesystem watch + hash-upgrade detection** — `POST
-  /api/v1/libraries/{id}/scan` (+ global), `notify`-crate watcher, content-hash/mtime
-  "update-in-place not duplicate". The acquisition-interop story.
+- [x] **4. Scan-now webhook + filesystem watch + hash-upgrade detection** — `POST
+  /api/v1/libraries/{id}/scan` (+ global `POST /libraries/scan`), `notify` v6 watcher
+  w/ 3s debounce, stable vector-index IDs via merge-scan (mtime + is_missing). No
+  more full-rebuild on rescan — DB reading progress/highlights stay valid.
 - [ ] **5. Test hardening** — real per-endpoint ACL-leak tests (incl. OPDS against the REAL routes,
   not the api_test.rs reimplementation) + auth/2FA/lockout tests.
 
