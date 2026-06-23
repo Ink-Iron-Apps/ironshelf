@@ -85,9 +85,9 @@ impl OidcStateStore {
 
 /// Cached OIDC discovery document endpoints.
 #[derive(Debug, Clone, Deserialize)]
-struct OidcDiscovery {
-    authorization_endpoint: String,
-    token_endpoint: String,
+pub(crate) struct OidcDiscovery {
+    pub(crate) authorization_endpoint: String,
+    pub(crate) token_endpoint: String,
     #[serde(default, rename = "userinfo_endpoint")]
     _userinfo_endpoint: Option<String>,
 }
@@ -104,12 +104,12 @@ struct TokenResponse {
 
 /// Claims extracted from the ID token JWT payload.
 #[derive(Debug, Deserialize)]
-struct IdTokenClaims {
-    sub: String,
+pub(crate) struct IdTokenClaims {
+    pub(crate) sub: String,
     #[serde(default)]
-    email: Option<String>,
+    pub(crate) email: Option<String>,
     #[serde(default)]
-    preferred_username: Option<String>,
+    pub(crate) preferred_username: Option<String>,
     #[serde(default)]
     _name: Option<String>,
 }
@@ -247,7 +247,7 @@ fn get_oidc_config(state: &AppState) -> Result<&OidcConfig, AppError> {
         .ok_or_else(|| AppError::BadRequest("OIDC is not configured on this server".to_string()))
 }
 
-async fn fetch_discovery(http_client: &reqwest::Client, issuer_url: &str) -> Result<OidcDiscovery, AppError> {
+pub(crate) async fn fetch_discovery(http_client: &reqwest::Client, issuer_url: &str) -> Result<OidcDiscovery, AppError> {
     let discovery_url = format!(
         "{}/.well-known/openid-configuration",
         issuer_url.trim_end_matches('/')
@@ -322,7 +322,7 @@ async fn exchange_code(
 /// For self-hosted trust model this is acceptable — the token came directly from
 /// the provider over HTTPS. If signature verification is desired, use `jsonwebtoken`
 /// with the provider's JWKS.
-fn decode_id_token_claims(id_token: &str) -> Result<IdTokenClaims, AppError> {
+pub(crate) fn decode_id_token_claims(id_token: &str) -> Result<IdTokenClaims, AppError> {
     let parts: Vec<&str> = id_token.split('.').collect();
     if parts.len() != 3 {
         return Err(AppError::Internal("Invalid JWT format in id_token".to_string()));
@@ -458,7 +458,7 @@ async fn find_or_create_oidc_user(
     Ok((user_id, final_username))
 }
 
-async fn ensure_unique_username(
+pub(crate) async fn ensure_unique_username(
     pool: &sqlx::SqlitePool,
     base_username: &str,
 ) -> Result<String, AppError> {
@@ -493,7 +493,7 @@ async fn ensure_unique_username(
     ))
 }
 
-async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String, sqlx::Error> {
+pub(crate) async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String, sqlx::Error> {
     let session_id = uuid::Uuid::new_v4().to_string();
     let expires_at = (chrono::Utc::now() + chrono::Duration::days(7)).to_rfc3339();
 
@@ -507,7 +507,7 @@ async fn create_session(pool: &sqlx::SqlitePool, user_id: &str) -> Result<String
     Ok(session_id)
 }
 
-fn generate_random_string(length: usize) -> String {
+pub(crate) fn generate_random_string(length: usize) -> String {
     use argon2::password_hash::rand_core::OsRng;
     use argon2::password_hash::rand_core::RngCore;
 
@@ -522,7 +522,7 @@ fn generate_random_string(length: usize) -> String {
         .collect()
 }
 
-fn compute_pkce_challenge(verifier: &str) -> String {
+pub(crate) fn compute_pkce_challenge(verifier: &str) -> String {
     use sha2::{Digest, Sha256};
 
     let hash = Sha256::digest(verifier.as_bytes());

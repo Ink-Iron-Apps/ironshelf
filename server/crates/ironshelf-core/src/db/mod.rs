@@ -478,6 +478,9 @@ impl IronshelfDb {
         let migration_020 = include_str!("migrations/020_pinned_libraries.sql");
         sqlx::raw_sql(migration_020).execute(&self.pool).await?;
 
+        let migration_021 = include_str!("migrations/021_auth_providers.sql");
+        sqlx::raw_sql(migration_021).execute(&self.pool).await?;
+
         // OIDC columns on users table — ALTER TABLE ADD COLUMN is not idempotent
         // in SQLite (no IF NOT EXISTS support), so we attempt each and ignore
         // "duplicate column" errors to make migrate() safe to call on every startup.
