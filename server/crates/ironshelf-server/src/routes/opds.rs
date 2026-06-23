@@ -6,9 +6,12 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Extension;
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::access::{accessible_library_ids, library_allowed};
+use crate::auth::AuthUser;
 use crate::state::AppState;
 
 const OPDS_CONTENT_TYPE: &str = "application/atom+xml;profile=opds-catalog;charset=utf-8";
@@ -183,11 +186,16 @@ pub async fn root_feed() -> impl IntoResponse {
 /// GET /opds/series — List all series as navigation entries.
 pub async fn series_list_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut all_series: Vec<ironshelf_core::model::Series> = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         // Gather series from all authors in this library
         let authors = library.source.authors().await.unwrap_or_default();
         for author in &authors {
@@ -226,11 +234,16 @@ pub async fn series_list_feed(
 /// GET /opds/authors — List all authors as navigation entries.
 pub async fn authors_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut all_authors = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let authors = library.source.authors().await.unwrap_or_default();
         for author in authors {
             // Avoid duplicates by id
@@ -262,8 +275,10 @@ pub async fn authors_feed(
 /// GET /opds/authors/:id — Series by author + standalone books as acquisition entries.
 pub async fn author_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(author_id): Path<i64>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     let mut author_name = String::from("Unknown Author");
@@ -271,6 +286,9 @@ pub async fn author_feed(
     let mut standalone_books = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let authors = library.source.authors().await.unwrap_or_default();
         if let Some(author) = authors.iter().find(|a| a.id == author_id) {
             author_name = author.name.clone();
@@ -336,14 +354,19 @@ pub async fn author_feed(
 /// GET /opds/series/:id — Books in a series as acquisition entries.
 pub async fn series_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(series_id): Path<i64>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
 
     let mut series_name = String::from("Unknown Series");
     let mut books = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         if let Ok(Some(series)) = library.source.series(series_id).await {
             series_name = series.name.clone();
             books = library
@@ -399,11 +422,16 @@ pub async fn series_feed(
 /// GET /opds/recent — Recently added books (last 50).
 pub async fn recent_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut all_books = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.all_books().await.unwrap_or_default();
         all_books.extend(books);
     }
@@ -449,6 +477,7 @@ pub struct SearchQuery {
 /// GET /opds/search?q= — Search books by title.
 pub async fn search_feed(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Query(query): Query<SearchQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let trimmed_query = query.q.trim();
@@ -460,10 +489,14 @@ pub async fn search_feed(
     }
 
     let search_term = trimmed_query.to_lowercase();
+    let allowed = accessible_library_ids(&state, &auth_user).await;
     let libraries = state.libraries.read().await;
     let mut matching_books = Vec::new();
 
     for library in libraries.iter() {
+        if !library_allowed(&allowed, &library.id) {
+            continue;
+        }
         let books = library.source.all_books().await.unwrap_or_default();
         for book in books {
             if book.title.to_lowercase().contains(&search_term) {
